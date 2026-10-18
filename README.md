@@ -1,36 +1,15 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Family Dashboard
 
-## Getting Started
+What needs you today, for the family. Phone first. Next.js + Supabase, deployed on Vercel.
 
-First, run the development server:
+## v1 (this build)
+- Today: system banner + the ranked queue (reply / do / decide), "and N more", link to the quiet log.
+- Tasks, Health, Sources (source register), Log, Login. Sample data shows when Supabase env is unset.
+- `supabase/migrations/0001_init.sql`: profiles, system_status, source_register, tasks, activity_log, RLS (members read; only own-task status updates from the browser).
+- `scripts/mini-report.sh`: the Mac mini posts heartbeat, mirror result, free space and Time Machine to `system_status` hourly (service key kept in `~/_secrets_local_only`).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Setup
+1. Supabase project `family-dashboard` (us-west-1). Apply the migration. Create the two users in Authentication, then insert their `profiles` rows.
+2. Vercel: import this repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Keep the project private; the app itself requires login.
+3. On the Mac mini: copy `scripts/mini-report.sh` to `~/Organized/_Consolidation Records/scripts/`, create `~/_secrets_local_only/family-dashboard.env`, load `scripts/com.ryan.dashboard-report.plist` into `~/Library/LaunchAgents`.
+4. Verify: anon read of `system_status` must fail; a signed-in read must succeed; the Health page turns red after 26 h without a report.

@@ -1,0 +1,29 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
+export default function Login() {
+  const [email, setEmail] = useState(""); const [pw, setPw] = useState(""); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const router = useRouter();
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setErr(null);
+    const { error } = await createClient().auth.signInWithPassword({ email, password: pw });
+    setBusy(false);
+    if (error) setErr("That didn't work. Check the email and password."); else { router.replace("/"); router.refresh(); }
+  }
+  const input = "w-full min-h-12 rounded-xl border border-line bg-bg px-4 text-base";
+  return (
+    <div className="pt-16">
+      <h1 className="text-3xl mb-1">Family Dashboard</h1>
+      <p className="text-muted mb-6">Sign in to see what needs you.</p>
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <label className="text-sm font-semibold">Email<input className={input} type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
+        <label className="text-sm font-semibold">Password<input className={input} type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required /></label>
+        {err && <div className="text-red text-sm">{err}</div>}
+        <button className="min-h-12 rounded-xl bg-accent text-white font-semibold disabled:opacity-50" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      </form>
+      <p className="text-xs text-muted mt-6">No sign-up. Accounts are created by Ryan.</p>
+    </div>
+  );
+}
