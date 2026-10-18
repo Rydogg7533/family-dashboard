@@ -15,14 +15,14 @@ pct_free() { df -k "$1" 2>/dev/null | awk 'NR==2{printf "%.1f", $4/$2*100}'; }
 human_free() { df -h "$1" 2>/dev/null | awk 'NR==2{print $4" free of "$2}'; }
 
 rows=()
-rows+=("{\"key\":\"heartbeat\",\"state\":\"ok\",\"summary\":\"Mac mini reported $(date '+%-I:%M %p')\",\"updated_at\":\"$now\"}")
+rows+=("{\"key\":\"heartbeat\",\"state\":\"ok\",\"summary\":\"Mac mini reported $(date '+%-I:%M %p')\",\"value_num\":null,\"updated_at\":\"$now\"}")
 
 if [ -f "$STATUS_FILE" ]; then
   line=$(tail -n 1 "$STATUS_FILE")
   state="ok"; echo "$line" | grep -qi "MISMATCH\|FAIL\|ERROR\|exit 1" && state="error"
-  rows+=("{\"key\":\"mirror\",\"state\":\"$state\",\"summary\":$(printf '%s' "$line" | json_escape),\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"mirror\",\"state\":\"$state\",\"summary\":$(printf '%s' "$line" | json_escape),\"value_num\":null,\"updated_at\":\"$now\"}")
 else
-  rows+=("{\"key\":\"mirror\",\"state\":\"unknown\",\"summary\":\"No mirror status file\",\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"mirror\",\"state\":\"unknown\",\"summary\":\"No mirror status file\",\"value_num\":null,\"updated_at\":\"$now\"}")
 fi
 
 mp=$(pct_free /); ms="ok"; [ "${mp%.*}" -lt 15 ] && ms="warn"; [ "${mp%.*}" -lt 8 ] && ms="error"
@@ -32,14 +32,14 @@ if [ -d "$DEST_VOL" ]; then
   ep=$(pct_free "$DEST_VOL"); es="ok"; [ "${ep%.*}" -lt 10 ] && es="warn"
   rows+=("{\"key\":\"free_space_8tb\",\"state\":\"$es\",\"summary\":\"$(human_free "$DEST_VOL")\",\"value_num\":$ep,\"updated_at\":\"$now\"}")
 else
-  rows+=("{\"key\":\"free_space_8tb\",\"state\":\"error\",\"summary\":\"Rossiter 8TB not mounted\",\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"free_space_8tb\",\"state\":\"error\",\"summary\":\"Rossiter 8TB not mounted\",\"value_num\":null,\"updated_at\":\"$now\"}")
 fi
 
 tm=$(tmutil latestbackup 2>/dev/null | tail -n1 || true)
 if [ -n "$tm" ]; then
-  rows+=("{\"key\":\"time_machine\",\"state\":\"ok\",\"summary\":$(printf '%s' "Latest Time Machine backup: $(basename "$tm")" | json_escape),\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"time_machine\",\"state\":\"ok\",\"summary\":$(printf '%s' "Latest Time Machine backup: $(basename "$tm")" | json_escape),\"value_num\":null,\"updated_at\":\"$now\"}")
 else
-  rows+=("{\"key\":\"time_machine\",\"state\":\"warn\",\"summary\":\"Time Machine: no backup found (set to Manual)\",\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"time_machine\",\"state\":\"warn\",\"summary\":\"Time Machine: no backup found (set to Manual)\",\"value_num\":null,\"updated_at\":\"$now\"}")
 fi
 
 body="[$(IFS=,; echo "${rows[*]}")]"
