@@ -100,3 +100,8 @@ insert into public.system_status (key, state, summary) values
   ('time_machine',    'unknown', 'Time Machine status not reported'),
   ('free_space_mini', 'unknown', 'Free space not reported'),
   ('free_space_8tb',  'unknown', 'Free space not reported');
+
+-- Applied 2026-10-18 as separate migrations on the live project:
+create policy "members insert log" on public.activity_log for insert with check (public.is_member());
+revoke execute on function public.is_member() from public, anon;
+grant execute on function public.is_member() to authenticated;
