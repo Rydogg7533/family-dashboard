@@ -12,7 +12,7 @@ STATUS_FILE="$HOME/Organized/_Consolidation Records/mirror-status.txt"
 DEST_VOL="/Volumes/Rossiter 8TB"
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-json_escape() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))'; }
+json_escape() { local t; t=$(cat); t=${t//\\/\\\\}; t=${t//\"/\\\"}; t=${t//$'\n'/ }; t=${t//$'\t'/ }; printf '"%s"' "$t"; }
 pct_free() { df -k "$1" 2>/dev/null | awk 'NR==2{printf "%.1f", $4/$2*100}'; }
 human_free() { df -h "$1" 2>/dev/null | awk 'NR==2{print $4" free of "$2}'; }
 
@@ -50,4 +50,5 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/sys
   -H "Content-Type: application/json" -H "Prefer: resolution=merge-duplicates,return=minimal" \
   --data "$body")
 echo "$(date '+%F %T') report http=$code"
+[ "$code" = "201" ] || [ "$code" = "200" ] || [ "$code" = "204" ] || { echo "body was: $body"; }
 [ "$code" = "201" ] || [ "$code" = "200" ] || [ "$code" = "204" ]
