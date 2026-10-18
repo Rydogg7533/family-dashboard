@@ -1,8 +1,6 @@
 #!/bin/bash
 # Mac mini → dashboard health report. Runs hourly via launchd.
-# Reads the service key from ~/_secrets_local_only/family-dashboard.env (never cloud-synced):
-#   SUPABASE_URL=https://xxxx.supabase.co
-#   SUPABASE_SERVICE_KEY=...
+# Reads the service key from ~/_secrets_local_only/family-dashboard.env (never cloud-synced).
 set -euo pipefail
 ENV="$HOME/_secrets_local_only/family-dashboard.env"
 [ -f "$ENV" ] || { echo "missing $ENV"; exit 1; }
@@ -12,7 +10,7 @@ STATUS_FILE="$HOME/Organized/_Consolidation Records/mirror-status.txt"
 DEST_VOL="/Volumes/Rossiter 8TB"
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-json_escape() { local t; t=$(cat); t=${t//\\/\\\\}; t=${t//\"/\\\"}; t=${t//$'\n'/ }; t=${t//$'\t'/ }; printf '"%s"' "$t"; }
+json_escape() { local t; t=$(cat); t=${t//\\/\\\\}; t=${t//\"/\\\"}; t=${t//$'\n'/ }; t=${t//$'\t'/ }; t=${t//$'\r'/ }; printf '"%s"' "$t"; }
 pct_free() { df -k "$1" 2>/dev/null | awk 'NR==2{printf "%.1f", $4/$2*100}'; }
 human_free() { df -h "$1" 2>/dev/null | awk 'NR==2{print $4" free of "$2}'; }
 
@@ -22,7 +20,7 @@ rows+=("{\"key\":\"heartbeat\",\"state\":\"ok\",\"summary\":\"Mac mini reported 
 if [ -f "$STATUS_FILE" ]; then
   line=$(tail -n 1 "$STATUS_FILE")
   state="ok"; echo "$line" | grep -qi "MISMATCH\|FAIL\|ERROR\|exit 1" && state="error"
-  rows+=("{\"key\":\"mirror\",\"state\":\"$state\",\"summary\":$(echo "$line" | json_escape),\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"mirror\",\"state\":\"$state\",\"summary\":$(printf '%s' "$line" | json_escape),\"updated_at\":\"$now\"}")
 else
   rows+=("{\"key\":\"mirror\",\"state\":\"unknown\",\"summary\":\"No mirror status file\",\"updated_at\":\"$now\"}")
 fi
@@ -39,16 +37,17 @@ fi
 
 tm=$(tmutil latestbackup 2>/dev/null | tail -n1 || true)
 if [ -n "$tm" ]; then
-  rows+=("{\"key\":\"time_machine\",\"state\":\"ok\",\"summary\":$(echo "Latest Time Machine backup: $(basename "$tm")" | json_escape),\"updated_at\":\"$now\"}")
+  rows+=("{\"key\":\"time_machine\",\"state\":\"ok\",\"summary\":$(printf '%s' "Latest Time Machine backup: $(basename "$tm")" | json_escape),\"updated_at\":\"$now\"}")
 else
   rows+=("{\"key\":\"time_machine\",\"state\":\"warn\",\"summary\":\"Time Machine: no backup found (set to Manual)\",\"updated_at\":\"$now\"}")
 fi
 
 body="[$(IFS=,; echo "${rows[*]}")]"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/system_status?on_conflict=key" \
+resp=$(curl -s -w '\n%{http_code}' -X POST "$SUPABASE_URL/rest/v1/system_status?on_conflict=key" \
   -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
   -H "Content-Type: application/json" -H "Prefer: resolution=merge-duplicates,return=minimal" \
   --data "$body")
+code=${resp##*$'\n'}
 echo "$(date '+%F %T') report http=$code"
-[ "$code" = "201" ] || [ "$code" = "200" ] || [ "$code" = "204" ] || { echo "body was: $body"; }
-[ "$code" = "201" ] || [ "$code" = "200" ] || [ "$code" = "204" ]
+case "$code" in 200|201|204) exit 0;; esac
+echo "response: ${resp%$'\n'*}"; echo "body was: $body"; exit 1
