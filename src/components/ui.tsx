@@ -14,7 +14,7 @@ export function Chip({ status }: { status: string }) {
 }
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-2xl border border-line p-3.5 ${className}`}>{children}</div>;
+  return <div className={`card ${className}`}>{children}</div>;
 }
 
 export function H1({ children, right }: { children: ReactNode; right?: ReactNode }) {

@@ -14,7 +14,7 @@ export function TaskRow({ task }: { task: Task }) {
   const due = task.due_at ? new Date(task.due_at) : null;
   const overdue = due ? due.getTime() < Date.now() : false;
   return (
-    <div className="rounded-2xl border border-line p-3.5 flex flex-col gap-2">
+    <div className="card flex flex-col gap-2">
       <div className="flex justify-between gap-2 items-start">
         <div className="min-w-0">
           <div className={`text-[11px] font-bold tracking-wide ${l.cls}`}>{l.text}</div>
