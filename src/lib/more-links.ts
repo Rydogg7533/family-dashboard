@@ -2,7 +2,7 @@ export type MoreLink = { href: string; label: string; note?: string; group: "Dai
 export const MORE_LINKS: MoreLink[] = [
   // core
   { href: "/log", label: "Log", note: "What was handled quietly", group: "Reference" },
-  { href: "/health", label: "System health", group: "Settings and Info" },
+  { href: "/health", label: "System health", note: "Status and your problem reports", group: "Settings and Info" },
   { href: "/register", label: "Source register", group: "Settings and Info" },
   // slice A (settings, people, registers) — append below
   { href: "/family", label: "Family", note: "One page per person", group: "Reference" },
