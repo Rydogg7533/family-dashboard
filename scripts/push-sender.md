@@ -91,3 +91,6 @@ setInterval(() => tick().catch(console.error), 30_000); tick();
 - The household TV never notifies (no subscription is ever created from `/tv`).
 - Quiet hours per person; safety and system-red ignore them.
 - Every send is a row with `sent_at`, so "did you tell me?" is answerable from the Log.
+
+## Retraction (F24)
+Every push carries `tag = <item_kind>:<item_id>`. The sender also polls `notifications where status = 'retracted' and sent_at is not null and retract_pushed_at is null` and sends `{ "close": "<tag>" }` to each of the person's subscriptions; the service worker closes the matching notification. Mark `retract_pushed_at` when done. Messages cannot be unsent: post "✓ handled" under the question in the assistant thread instead.
