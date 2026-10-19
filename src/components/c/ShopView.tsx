@@ -62,8 +62,8 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
 
   return (
     <>
-      <div className="flex justify-between items-center mb-2">
-        <h1 className="text-2xl">Shop</h1>
+      <div className="flex justify-end items-center mb-2">
+        <h1 className="sr-only">Shop</h1>
         <span className="text-xs text-muted">{STORES[store].name} cart · {cartCount(cart, store)} item{cartCount(cart, store) === 1 ? "" : "s"} · $[TOTAL]</span>
       </div>
       <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-3">

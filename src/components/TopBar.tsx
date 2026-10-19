@@ -24,6 +24,12 @@ const subTitles: Record<string, string> = {
 const moneyTitles: Record<string, string> = {
   "/money/receipts": "Receipts", "/money/recurring": "Recurring", "/money/subscriptions": "Subscriptions",
 };
+// Where the page's own heading is longer than the short name used in parent crumbs, the bar uses the heading,
+// so the page does not need to repeat it.
+const pageTitle: Record<string, string> = {
+  "/places": "Schedule and activities", "/meds": "Health and medications", "/register": "Sources",
+  "/devices": "Devices and belongings", "/settings": "Settings and Info",
+};
 // Detail pages: /<root>/<id> → label for the last crumb.
 const detailLabel: Record<string, string> = {
   "/tasks": "Task", "/records": "Record", "/family": "Person", "/messages": "Conversation", "/money/reconcile": "Reconcile",
@@ -50,7 +56,7 @@ export function crumbsFor(path: string): Crumb[] {
     const parent = "/" + p.split("/")[1];
     return [MORE, { label: moreTitles[parent] ?? "More", href: parent }, { label: subTitles[p], href: p }];
   }
-  if (moreTitles[p]) return [MORE, { label: moreTitles[p], href: p }];
+  if (moreTitles[p]) return [MORE, { label: pageTitle[p] ?? moreTitles[p], href: p }];
   const root = "/" + p.split("/")[1];
   if (moreTitles[root]) return [MORE, { label: moreTitles[root], href: root }, { label: detailLabel[root] ?? "Details", href: p }];
   return [MORE, { label: root.slice(1).replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()), href: p }];

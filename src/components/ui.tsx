@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PageTitle } from "@/components/PageTitle";
 
 export function Banner({ level, text }: { level: "ok" | "warn" | "error"; text: string }) {
   const cls = level === "ok" ? "bg-green-bg text-green" : level === "warn" ? "bg-amber-bg text-amber" : "bg-red-bg text-red";
@@ -18,10 +19,5 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
 }
 
 export function H1({ children, right }: { children: ReactNode; right?: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between mb-3">
-      <h1 className="text-2xl">{children}</h1>
-      {right && <div className="text-xs text-muted">{right}</div>}
-    </div>
-  );
+  return <PageTitle right={right}>{children}</PageTitle>;
 }

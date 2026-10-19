@@ -56,8 +56,8 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-140px)]">
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-2xl">Ask</h1>
+      <div className="flex items-center justify-end mb-1">
+        <h1 className="sr-only">Ask</h1>
         <div className="text-xs text-muted">{sample ? "sample mode · no API key" : `~$${spent.toFixed(3)} this session`}</div>
       </div>
       <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>
