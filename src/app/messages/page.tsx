@@ -32,6 +32,7 @@ export default async function Messages() {
             <div className="min-w-0">
               <div className="font-semibold">{t.name}{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold ml-1">· AI, by text</span>}</div>
               <div className="text-xs text-muted truncate">{t.last_line}</div>
+              <div className="text-[10px] text-muted">{t.kind === "assistant" ? "Assistant · AI · for you" : `${t.members.filter((m) => m !== "Ryan").join(", ")} · for ${t.kind === "group" ? "Family" : "you"}`} · from Messages (your Mac)</div>
             </div>
             {t.unread > 0 ? <span className="shrink-0 text-[11px] font-bold text-white bg-accent rounded-full px-2 py-0.5">{t.unread}</span> : <span className="shrink-0 text-[11px] text-muted">{clock(t.last_at)}</span>}
           </Link>

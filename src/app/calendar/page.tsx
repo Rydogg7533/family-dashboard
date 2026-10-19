@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getCalendarEvents, getSyncStatus, fmtDate, fmtTime, weatherGlyph, weatherLine, type CalendarEvent } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
 import { SyncLine } from "@/components/c/SyncLine";
+import { Who } from "@/components/c/Who";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,8 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
           <div className="text-[11px] font-bold tracking-wide text-accent">ADDED TO SCHEDULE</div>
           <div className="font-semibold">{addedEvent.title} · {fmtDate(addedEvent.date)}{addedEvent.start ? ` ${fmtTime(addedEvent.start)}` : ""}</div>
           {addedEvent.from_message && <div className="text-xs text-muted mt-0.5">From a message: “{addedEvent.from_message}”</div>}
-          <div className="text-xs text-muted mt-1">Lives in {addedEvent.source.name}. <a href={addedEvent.source.href} className="font-semibold text-accent">Open in {addedEvent.source.name}</a> · <Link href="/calendar" className="font-semibold text-accent">OK</Link></div>
+          <Who by={addedEvent.requested_by} forPerson={addedEvent.person} source={addedEvent.source.name} href={addedEvent.source.href} className="mt-1" />
+          <div className="text-xs text-muted mt-1">Lives in {addedEvent.source.name}. <Link href="/calendar" className="font-semibold text-accent">OK</Link></div>
         </Card>
       )}
 
@@ -44,7 +46,7 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
               <div className="font-semibold">{t.title}</div>
               <div className="text-sm text-muted">{fmtDate(t.date, { weekday: "long", month: "long", day: "numeric" })} · {t.place} · {t.person}</div>
               {t.weather && <div className="text-sm mt-1"><span className="text-amber">{weatherGlyph(t.weather.icon)}</span> {weatherLine(t.weather)} · packing list the evening before</div>}
-              <div className="text-xs text-muted mt-1"><a href={t.source.href} className="font-semibold text-accent">Open in {t.source.name}</a></div>
+              <Who by={t.requested_by} forPerson={t.person} source={t.source.name} href={t.source.href} className="mt-1" />
             </Card>
           ))}
         </section>
@@ -80,7 +82,7 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
                     {e.weather && <div className="text-right text-sm shrink-0"><span className="text-amber">{weatherGlyph(e.weather.icon)}</span> {e.weather.temp}°{e.weather.precip && e.weather.precip >= 30 ? <div className="text-xs text-muted">{e.weather.precip}% rain</div> : null}</div>}
                   </div>
                   {e.weather && <div className="text-xs text-muted mt-1">{e.weather.note}</div>}
-                  <div className="text-xs text-muted mt-1">{e.from_message && <span>From a message · </span>}<a href={e.source.href} className="font-semibold text-accent">Open in {e.source.name}</a></div>
+                  <Who by={e.requested_by} forPerson={e.person} source={e.source.name} href={e.source.href} className="mt-1" />
                 </Card>
               ))}
             </div>

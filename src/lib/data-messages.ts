@@ -4,14 +4,14 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export type ThreadKind = "assistant" | "group" | "direct";
 export type Thread = { id: string; kind: ThreadKind; name: string; members: string[]; last_line: string; last_at: string; unread: number; pending_yn: number; mirrored: boolean };
-export type MessageAction = { kind: "task_proposed" | "task_created" | "schedule_added"; label: string; status: "waiting" | "done" };
+export type MessageAction = { kind: "task_proposed" | "task_created" | "schedule_added"; label: string; status: "waiting" | "done"; requested_by: string; for_person: string };
 export type Message = {
   id: string; thread_id: string; sender: string; mine: boolean; at: string; text: string;
   attachment?: { kind: "photo" | "link"; label: string } | null;
   action?: MessageAction | null;                   // what the assistant did or proposed from this line
   assistant_kind?: "confirmation" | "command" | "answer" | "notice" | null; // F17 only
 };
-export type Confirmation = { id: string; question: string; asked_at: string; via: "messages" | "dashboard"; status: "waiting" | "yes" | "no" | "stale"; action_kind: string };
+export type Confirmation = { id: string; question: string; asked_at: string; via: "messages" | "dashboard"; status: "waiting" | "yes" | "no" | "stale"; action_kind: string; requested_by: string; for_person: string; source: string };
 
 // ---- sample data ----
 const h = (n: number) => new Date(Date.now() - n * 3600_000).toISOString();
@@ -26,9 +26,9 @@ const sampleThreads: Thread[] = [
 
 const sampleMessages: Message[] = [
   // Family group
-  { id: "m1", thread_id: "family", sender: "Melissa", mine: false, at: t(7, 52), text: "can someone grab [Child 1] at 4 tomorrow? I have the dentist", action: { kind: "task_proposed", label: "Assistant proposed a task from this · waiting for your Y", status: "waiting" } },
+  { id: "m1", thread_id: "family", sender: "Melissa", mine: false, at: t(7, 52), text: "can someone grab [Child 1] at 4 tomorrow? I have the dentist", action: { kind: "task_proposed", label: "Assistant proposed a task from this · waiting for your Y", status: "waiting", requested_by: "Melissa asked", for_person: "Ryan" } },
   { id: "m2", thread_id: "family", sender: "Ryan", mine: true, at: t(7, 55), text: "I've got it" },
-  { id: "m3", thread_id: "family", sender: "[Child 2]", mine: false, at: t(7, 58), text: "we need milk", action: { kind: "task_created", label: "Added to the Smith's list", status: "done" } },
+  { id: "m3", thread_id: "family", sender: "[Child 2]", mine: false, at: t(7, 58), text: "we need milk", action: { kind: "task_created", label: "Added to the Smith's list", status: "done", requested_by: "[Child 2] asked", for_person: "Family" } },
   { id: "m4", thread_id: "family", sender: "Melissa", mine: false, at: t(8, 1), text: "Coach moved Thursday practice to 5:30 at [Field]", attachment: { kind: "link", label: "team calendar link" } },
   // Melissa direct
   { id: "m10", thread_id: "melissa", sender: "Melissa", mine: false, at: h(61), text: "leaving the office now, can you start dinner?" },
@@ -41,14 +41,14 @@ const sampleMessages: Message[] = [
   { id: "a2", thread_id: "assistant", sender: "Ryan", mine: true, at: t(7, 10), text: "when is the Sienna due?", assistant_kind: "command" },
   { id: "a3", thread_id: "assistant", sender: "Assistant", mine: false, at: t(7, 10), text: "Sienna: insurance card expires in 41 days; registration not due until [MONTH]. Nothing to do yet.", assistant_kind: "answer" },
   { id: "a4", thread_id: "assistant", sender: "Ryan", mine: true, at: t(7, 40), text: "mark the Tahoe oil change done at 143,100", assistant_kind: "command" },
-  { id: "a5", thread_id: "assistant", sender: "Assistant", mine: false, at: t(7, 40), text: "Done. Tahoe oil change recorded at 143,100; next at 148,100. Logged.", assistant_kind: "notice", action: { kind: "task_created", label: "Recorded in Vehicles · Undo on the dashboard", status: "done" } },
-  { id: "a6", thread_id: "assistant", sender: "Assistant", mine: false, at: t(7, 56), text: "From Family (Melissa, 7:52): Add task: pick up [Child 1] at 4 tomorrow? Reply Y or N", assistant_kind: "confirmation", action: { kind: "task_proposed", label: "Waiting for Y or N · also answerable here", status: "waiting" } },
+  { id: "a5", thread_id: "assistant", sender: "Assistant", mine: false, at: t(7, 40), text: "Done. Tahoe oil change recorded at 143,100; next at 148,100. Logged.", assistant_kind: "notice", action: { kind: "task_created", label: "Recorded in Vehicles · Undo on the dashboard", status: "done", requested_by: "Ryan asked", for_person: "Ryan" } },
+  { id: "a6", thread_id: "assistant", sender: "Assistant", mine: false, at: t(7, 56), text: "From Family (Melissa, 7:52): Add task: pick up [Child 1] at 4 tomorrow? Reply Y or N", assistant_kind: "confirmation", action: { kind: "task_proposed", label: "Waiting for Y or N · also answerable here", status: "waiting", requested_by: "Melissa asked", for_person: "Ryan" } },
 ];
 
 const sampleConfirmations: Confirmation[] = [
-  { id: "c1", question: "Add task: pick up [Child 1] at 4 tomorrow?", asked_at: t(7, 56), via: "messages", status: "waiting", action_kind: "task" },
-  { id: "c2", question: "Add to schedule: Thursday practice 5:30 at [Field]?", asked_at: t(8, 2), via: "dashboard", status: "waiting", action_kind: "schedule" },
-  { id: "c3", question: "Add milk to the Smith's list?", asked_at: h(30), via: "messages", status: "yes", action_kind: "list" },
+  { id: "c1", question: "Add task: pick up [Child 1] at 4 tomorrow?", asked_at: t(7, 56), via: "messages", status: "waiting", action_kind: "task", requested_by: "Melissa asked", for_person: "Ryan", source: "Family thread" },
+  { id: "c2", question: "Add to schedule: Thursday practice 5:30 at [Field]?", asked_at: t(8, 2), via: "dashboard", status: "waiting", action_kind: "schedule", requested_by: "Melissa asked", for_person: "[Child 1]", source: "Family thread" },
+  { id: "c3", question: "Add milk to the Smith's list?", asked_at: h(30), via: "messages", status: "yes", action_kind: "list", requested_by: "[Child 2] asked", for_person: "Family", source: "Family thread" },
 ];
 
 // ---- readers ----
@@ -82,7 +82,7 @@ export async function getConfirmations(): Promise<Confirmation[]> {
   const sb = await createClient();
   const { data } = await sb.from("assistant_confirmations").select("*").order("asked_at", { ascending: false }).limit(20);
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-    id: String(r.id), question: String(r.question), asked_at: String(r.asked_at), via: r.via as Confirmation["via"], status: r.status as Confirmation["status"], action_kind: String(r.action_kind),
+    id: String(r.id), question: String(r.question), asked_at: String(r.asked_at), via: r.via as Confirmation["via"], status: r.status as Confirmation["status"], action_kind: String(r.action_kind), requested_by: String(r.requested_by ?? "System"), for_person: String(r.asked_for ?? ""), source: String(r.source_name ?? "Messages"),
   }));
 }
 

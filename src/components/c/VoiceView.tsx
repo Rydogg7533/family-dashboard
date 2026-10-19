@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { VoiceCall } from "@/lib/data-voice";
 import { CALL_LABEL, ago } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
+import { Who } from "@/components/c/Who";
 
 const btn = "min-h-11 px-3 rounded-lg border border-line text-sm font-semibold hover:bg-soft";
 
@@ -18,6 +19,7 @@ export function CallCard({ c }: { c: VoiceCall }) {
         <div className={`text-[11px] font-bold tracking-wide ${l.cls}`}>{l.text} · for {c.on_behalf_of}</div>
         <div className="font-semibold">{c.purpose}</div>
         <div className="text-sm text-muted">{c.who} · {c.number_note} · {ago(c.requested_at)}{c.duration_min ? ` · ${c.duration_min} min` : ""}{c.cost_note ? ` · ${c.cost_note}` : ""}</div>
+        <Who by={c.requested_by} forPerson={c.on_behalf_of} className="mt-0.5" />
       </button>
 
       {open && (

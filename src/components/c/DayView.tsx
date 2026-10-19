@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { DayBlock, DayQuestion, DayRecordEntry, ChecklistItem } from "@/lib/data-day";
 import { fmtTime, shortTime, weatherGlyph, weatherLine } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
+import { Who } from "@/components/c/Who";
 
 const btn = "min-h-9 px-3 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
@@ -26,7 +27,8 @@ export function QuestionsList({ questions }: { questions: DayQuestion[] }) {
               <div>
                 <div className="text-[11px] font-bold tracking-wide text-amber">WHAT WAS THIS?</div>
                 <div className="font-semibold">{q.window}</div>
-                <div className="text-sm text-muted">{q.place_label} · from Overland{q.days_waiting > 2 ? ` · waiting ${q.days_waiting} days` : ""}</div>
+                <div className="text-sm text-muted">{q.place_label}{q.days_waiting > 2 ? ` · waiting ${q.days_waiting} days` : ""}</div>
+                <Who by="System" forPerson={q.for_person} source="Overland" className="mt-0.5" />
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {q.suggestions.map((s) => (
@@ -68,6 +70,7 @@ function Checklist({ block }: { block: DayBlock }) {
                 {i.label}
                 {i.weather && <span className="ml-1 text-[11px] text-amber font-semibold">{weatherGlyph(block.weather?.icon ?? "cloud")} weather</span>}
                 {i.learned && <span className="ml-1 text-[11px] text-muted font-semibold">learned from last time</span>}
+                <span className="block text-[10px] text-muted">{i.added_by}</span>
                 {i.layer === "done_before" && <button className="ml-1 text-[11px] text-accent font-semibold" onClick={() => setItems((xs) => xs.map((x) => (x.id === i.id ? { ...x, layer: "today" } : x)))}>include</button>}
               </span>
               {i.layer !== "done_before" && <button aria-label={`Remove ${i.label}`} className="text-muted min-w-9 min-h-9 rounded-lg hover:bg-soft" onClick={() => setAsk(i)}>−</button>}
@@ -84,7 +87,7 @@ function Checklist({ block }: { block: DayBlock }) {
             </div>
           )}
           {adding ? (
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; const it: ChecklistItem = { id: `n${Date.now()}`, label: text.trim(), layer: "today", packed: false }; setItems((xs) => [...xs, it]); setText(""); setAdding(false); show(`Added ${it.label} · added twice becomes Always`, () => setItems((xs) => xs.filter((x) => x.id !== it.id))); }}>
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; const it: ChecklistItem = { id: `n${Date.now()}`, label: text.trim(), layer: "today", packed: false, added_by: "Ryan added just now" }; setItems((xs) => [...xs, it]); setText(""); setAdding(false); show(`Added ${it.label} · added twice becomes Always`, () => setItems((xs) => xs.filter((x) => x.id !== it.id))); }}>
               <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Item to bring" className="flex-1 min-h-10 rounded-lg border border-line bg-bg px-3 text-sm" />
               <button className={`${btn} bg-accent text-white border-accent`}>Add</button>
             </form>
@@ -131,7 +134,7 @@ export function Schedule({ blocks }: { blocks: DayBlock[] }) {
             <div className="text-sm text-muted mt-1">Too unsure to fill in. It's in <a href="#questions" className="font-semibold text-accent">Questions for you</a> below.</div>
           )}
           <Checklist block={b} />
-          <div className="text-xs text-muted mt-2"><a href={b.source.href} className="font-semibold text-accent">Open in {b.source.name}</a></div>
+          <Who by={b.requested_by} forPerson={b.person} source={b.source.name} href={b.source.href} className="mt-2" />
         </div>
       ))}
       {el}
@@ -156,7 +159,7 @@ export function DayRecord({ entries, dateLabel }: { entries: DayRecordEntry[]; d
               <div className="w-24 shrink-0 text-muted">{shortTime(e.start)}–{shortTime(e.end)}</div>
               <div className="min-w-0 flex-1">
                 <div className={e.how === "private" ? "text-muted italic" : "font-semibold"}>{e.title === "?" ? "Waiting for your answer" : e.title}</div>
-                <div className="text-xs text-muted">{e.place ?? ""}{e.place ? " · " : ""}{HOW[e.how]}{e.learned ? ` · learned: ${e.learned}` : ""}</div>
+                <div className="text-xs text-muted">{e.place ?? ""}{e.place ? " · " : ""}<span className="font-semibold text-fg/80">{e.how === "answered" ? "You answered" : e.how === "private" ? "You paused" : "System"}</span> · for you · from {e.how === "calendar" ? "your calendar" : "Overland"}{e.learned ? ` · learned: ${e.learned}` : ""}</div>
               </div>
             </div>
           ))}

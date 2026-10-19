@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useToast } from "@/components/c/Toast";
 
-type Item = { id: string; label: string; done: boolean; weather?: boolean };
+type Item = { id: string; label: string; done: boolean; weather?: boolean; who?: string };
 const row = (hl?: boolean) => `flex items-center gap-3 min-h-12 px-3.5 rounded-xl border ${hl ? "border-amber bg-amber-bg" : "border-line"}`;
 
 export function KidChecklist({ title, items: initial }: { title: string; items: Item[] }) {
@@ -13,7 +13,7 @@ export function KidChecklist({ title, items: initial }: { title: string; items: 
       {items.map((i) => (
         <label key={i.id} className={row(i.weather)}>
           <input type="checkbox" className="w-6 h-6" checked={i.done} onChange={() => setItems((xs) => xs.map((x) => (x.id === i.id ? { ...x, done: !x.done } : x)))} />
-          <span className="text-base">{i.label}{i.weather && <span className="text-xs text-amber font-semibold ml-1">(weather)</span>}</span>
+          <span className="text-base">{i.label}{i.weather && <span className="text-xs text-amber font-semibold ml-1">(weather)</span>}{i.who && <span className="block text-xs text-muted">{i.who}</span>}</span>
         </label>
       ))}
     </section>

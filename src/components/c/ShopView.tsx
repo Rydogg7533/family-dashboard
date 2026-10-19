@@ -26,8 +26,8 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
     // Sample seed (matches the approved mockup) the first time this device opens Shop; cleared when the person empties the cart.
     try {
       if (!localStorage.getItem("famdash.cart.seeded")) {
-        c = addLine(c, { store: "amazon", name: "Coffee, 2 lb", asin: "B00ASIN0101", qty: 1, price_note: "$[PRICE]", note: "regular, due now", added_by: "assistant" });
-        c = addLine(c, { store: "amazon", name: "Dishwasher tabs", asin: "B00ASIN0102", qty: 1, price_note: "$[PRICE]", note: "Melissa added Fri", added_by: "Melissa" });
+        c = addLine(c, { store: "amazon", name: "Coffee, 2 lb", asin: "B00ASIN0101", qty: 1, price_note: "$[PRICE]", note: "regular, due now", added_by: "System" });
+        c = addLine(c, { store: "amazon", name: "Dishwasher tabs", asin: "B00ASIN0102", qty: 1, price_note: "$[PRICE]", note: "Fri", added_by: "Melissa" });
         c = addLine(c, { store: "amazon", name: "Kids' toothpaste", asin: "B00ASIN0103", qty: 2, price_note: "$[PRICE]", added_by: "Ryan" });
         saveCart(c); localStorage.setItem("famdash.cart.seeded", "1");
       }
@@ -56,7 +56,7 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
   }
   function addUsual() {
     const before = cart; let c = cart;
-    for (const r of due) c = addLine(c, { store, name: r.name, asin: r.asin, qty: r.qty, price_note: r.price_note, note: "regular, due now", added_by: "assistant" });
+    for (const r of due) c = addLine(c, { store, name: r.name, asin: r.asin, qty: r.qty, price_note: r.price_note, note: "regular, due now", added_by: "System" });
     update(c); show(`Added ${due.length} regular item${due.length === 1 ? "" : "s"} that are due`, () => update(before));
   }
 
@@ -96,6 +96,7 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
                 <div className="text-xs text-muted">{hit.price_note}{hit.rating ? ` · ★ ${hit.rating} (${hit.reviews})` : ""}{hit.prime ? " · Prime" : ""}{hit.arrival ? `, arrives ${hit.arrival}` : ""}</div>
                 {hit.match_note && <div className="text-xs text-green font-semibold">{hit.match_note}</div>}
                 {hit.compare_note && <div className="text-xs text-muted">{hit.compare_note}</div>}
+                <div className="text-[10px] text-muted"><span className="font-semibold text-fg/80">Ryan asked</span> · for Family · from {STORES[store].name} public page</div>
                 {compare === (hit.asin ?? hit.name) && (
                   <div className="text-xs mt-1 bg-soft rounded-lg p-2 flex flex-col gap-0.5">
                     <div className="font-semibold">Same item elsewhere (public pages)</div>
@@ -125,7 +126,7 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
         </div>
         {!loaded ? null : lines.length === 0 ? <div className="text-sm text-muted py-2">Cart is empty. Add a result above or “Add the usual”.</div> : lines.map((l) => (
           <div key={l.key} className="flex justify-between items-center gap-2 text-sm py-1.5 border-b border-line last:border-0">
-            <span className="min-w-0 flex flex-col"><span className="truncate">{l.name}</span>{l.note ? <span className="text-xs text-muted truncate">{l.note}</span> : null}</span>
+            <span className="min-w-0 flex flex-col"><span className="truncate">{l.name}</span><span className="text-xs text-muted truncate"><span className="font-semibold text-fg/80">{l.added_by ?? "Ryan"} added</span>{l.note ? ` · ${l.note}` : ""} · for Family</span></span>
             <span className="shrink-0 flex items-center gap-0.5 text-xs">
               <button aria-label="Less" className="w-7 h-8 rounded-lg border border-line" onClick={() => update(setQty(cart, store, l.key, l.qty - 1))}>−</button>
               <span className="w-6 text-center">×{l.qty}</span>
@@ -136,7 +137,12 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
           </div>
         ))}
         {lines.length > 0 && <div className="flex justify-between text-sm font-semibold pt-2"><span>Running total</span><span>$[TOTAL] · {cartCount(cart, store)} items</span></div>}
-        {storeRegulars.length > 0 && <div className="text-xs text-muted mt-2">Regular at {STORES[store].name}: {storeRegulars.map((r) => `${r.name}${r.due ? " (due)" : ""}`).join(" · ")}</div>}
+        {storeRegulars.length > 0 && (
+          <div className="text-xs text-muted mt-2">
+            <div className="font-bold text-[11px] tracking-wide">REGULAR AT {STORES[store].name.toUpperCase()}</div>
+            {storeRegulars.map((r) => <div key={r.id} className="flex justify-between gap-2 py-0.5"><span className="truncate">{r.name}{r.due ? <span className="text-amber font-semibold"> · due</span> : null}</span><span className="shrink-0"><span className="font-semibold text-fg/80">{r.added_by}</span> · for Family</span></div>)}
+          </div>
+        )}
       </div>
 
       {/* The one hand-off button: a person always places the order */}
@@ -152,7 +158,7 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
         <button className="w-full min-h-12 rounded-xl bg-accent text-white font-bold text-[15px] disabled:opacity-50 mb-3" disabled={!lines.length} onClick={() => setConfirmSend(true)}>{handoff.label}</button>
       )}
 
-      {watches.length > 0 && <div className="text-xs text-muted">Price watch: {watches.map((w) => `${w.name} under ${w.under} (${w.current_note})`).join("; ")} · <Link href="/shop/orders" className="font-semibold text-accent">Orders and problems</Link></div>}
+      {watches.length > 0 && <div className="text-xs text-muted">Price watch: {watches.map((w) => `${w.name} under ${w.under} (${w.current_note}) · ${w.requested_by}`).join("; ")} · <Link href="/shop/orders" className="font-semibold text-accent">Orders and problems</Link></div>}
       <p className="text-xs text-muted mt-2">The dashboard never buys. {STORES[store].handoff} Orders are then tracked from the store's emails.</p>
       {el}
     </>

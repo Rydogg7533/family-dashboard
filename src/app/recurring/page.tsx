@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getRecurring, fmtDate, daysUntil, type RecurringItem } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
+import { Who } from "@/components/c/Who";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,8 @@ export default async function Recurring({ searchParams }: PageProps<"/recurring"
             <div className="text-sm text-muted">{fmtDate(i.next_due)} · {when} · {i.cycle} · {i.who}{i.amount_note ? ` · ${i.amount_note}` : ""}</div>
           </div>
         </div>
-        <div className="text-xs text-muted mt-1">Reminders: {i.reminders.join(", ")} · <a href={i.source.href} className="font-semibold text-accent">Open in {i.source.name}</a></div>
+        <div className="text-xs text-muted mt-1">Reminders: {i.reminders.join(", ")}</div>
+        <Who by={i.requested_by} forPerson={i.who} source={i.source.name} href={i.source.href} />
       </Card>
     );
   }

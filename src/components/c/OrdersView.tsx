@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Order, ShopCase } from "@/lib/data-shop";
 import { ORDER_LABEL, ORDER_STEPS, STORES, ago } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
+import { Who } from "@/components/c/Who";
 
 const btn = "min-h-10 px-3 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
@@ -41,7 +42,8 @@ export function OrderCard({ o }: { o: Order }) {
         </div>
       )}
       {state === "problem" && o.problem_case && <Link href="/shop/cases" className="text-sm font-semibold text-accent">Case open · see the case flow ›</Link>}
-      <div className="text-xs text-muted"><a href={o.source.href} className="font-semibold text-accent">Open in {o.source.name}</a> · <a href="#" className="font-semibold text-accent">Open in {STORES[o.store].name} app</a></div>
+      <Who by={o.placed_by} forPerson={o.for_person} source={o.source.name} href={o.source.href} />
+      <div className="text-xs text-muted -mt-1"><a href="#" className="font-semibold text-accent">Open in {STORES[o.store].name} app</a></div>
       {el}
     </div>
   );
@@ -63,6 +65,7 @@ export function CaseCard({ c }: { c: ShopCase }) {
         <div className={`text-[11px] font-bold tracking-wide ${l.cls}`}>{l.text} · {STORES[c.store].name}</div>
         <div className="font-semibold">{c.item} · {c.issue.replace("_", " ")} · {c.price_note}</div>
         <div className="text-sm text-muted">Route: {c.route}{c.promised_by ? ` · promised by ${new Date(c.promised_by + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" })}` : ""}</div>
+        <Who by={c.opened_by} forPerson={c.for_person} source={`order ${c.order_id}`} href="/shop/orders" className="mt-0.5" />
       </div>
       <ol className="flex flex-col gap-1 text-sm">
         {c.steps.map((s, i) => (

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import type { Confirmation, Message, Thread } from "@/lib/data-messages";
 import { clock } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
+import { Who } from "@/components/c/Who";
 
 const btn = "min-h-9 px-2.5 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
@@ -18,6 +19,7 @@ export function ConfirmCards({ items }: { items: Confirmation[] }) {
           <div>
             <div className="text-[11px] font-bold tracking-wide text-amber">{c.via === "messages" ? "ASKED BY TEXT" : "ASKED HERE"} · {clock(c.asked_at)}</div>
             <div className="font-semibold">{c.question}</div>
+            <Who by={c.requested_by} forPerson={c.for_person} source={c.source} className="mt-0.5" />
           </div>
           {done[c.id] ? <div className="text-sm text-green font-semibold">{done[c.id] === "yes" ? "Yes · created and logged" : "No · nothing created"}</div> : (
             <div className="flex gap-2">
@@ -56,7 +58,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
       <div className="text-[11px] font-bold text-muted">{thread.name.toUpperCase()} · {thread.members.length} people · today</div>
       {all.map((m) => (
         <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] ${m.mine ? "self-end items-end" : "self-start"}`}>
-          <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender} · {clock(m.at)}</div>
+          <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender}{isAssistant && !m.mine ? " · AI" : ""} · {clock(m.at)}{!m.mine && !isAssistant ? ` · for ${thread.kind === "group" ? "Family" : "you"}` : ""}</div>
           <div className={`px-3.5 py-2.5 text-sm ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
             {m.text}
             {m.attachment && <div className={`text-xs mt-1 ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷 photo" : "🔗"} {m.attachment.label} · opens in Messages</div>}
@@ -78,6 +80,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
           {(m.action || pending[m.id]) && (
             <div className={`self-center text-[11px] rounded-full px-2.5 py-1 ${m.action?.status === "waiting" || pending[m.id] === "task" && !m.action ? "bg-amber-bg text-amber" : "bg-soft text-muted"}`}>
               {m.action?.label ?? "Task created from this · Undo in the toast"}
+              <span className="block text-[10px] opacity-80">{m.action ? `${m.action.requested_by} · for ${m.action.for_person}` : `Ryan asked · for Ryan`} · from {thread.name} thread</span>
             </div>
           )}
           {isAssistant && m.assistant_kind === "confirmation" && m.action?.status === "waiting" && !sent.some((s) => /^(y|yes|n|no)$/i.test(s.text)) && (

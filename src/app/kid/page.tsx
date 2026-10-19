@@ -38,12 +38,12 @@ export default async function Kid() {
 
       {activity?.checklist && (
         <div className="mb-5">
-          <KidChecklist title={`Pack for ${activity.title.toLowerCase()}`} items={activity.checklist.items.filter((i) => i.layer !== "done_before").map((i) => ({ id: i.id, label: i.label, done: i.packed, weather: i.weather }))} />
+          <KidChecklist title={`Pack for ${activity.title.toLowerCase()}`} items={activity.checklist.items.filter((i) => i.layer !== "done_before").map((i) => ({ id: i.id, label: i.label, done: i.packed, weather: i.weather, who: `${i.added_by.replace("System · from the forecast", "Weather").replace("Ryan", "Dad").replace("Melissa", "Mom")} · for you` }))} />
         </div>
       )}
 
       <div className="mb-5">
-        <KidChecklist title="My jobs" items={[{ id: "j1", label: "Feed the dog", done: false }, { id: "j2", label: "Practice piano, 20 min", done: true }]} />
+        <KidChecklist title="My jobs" items={[{ id: "j1", label: "Feed the dog", done: false, who: "Mom asked · for you" }, { id: "j2", label: "Practice piano, 20 min", done: true, who: "Dad asked · for you" }]} />
       </div>
 
       <section className="bg-soft rounded-xl px-3.5 py-3 text-sm mb-5">
