@@ -4,6 +4,7 @@ Purpose: the single place where everything the dashboard should include is colle
 
 ## Design principles (apply to every screen)
 - Clean, and segmented per person (Ryan, 2026-10-18, first principle): every screen shows only what is relevant to the person looking at it, grouped so it is understood at a glance. Nothing shared, system-level or someone else's appears on a person's working pages unless they chose it. Reference material, registers and settings live off the working pages (Settings and Info) and are reached by link, never by scrolling past them. A new section earns a place on a working page only if someone needs it most days; otherwise it is a register under Info with a reminder that surfaces when due. When in doubt, hide it and link to it.
+- Always say who (Ryan, 2026-10-18): every item, everywhere, names the person who asked for it or whom it is for, next to where it came from: "Melissa asked · from Messages · 7:52", "For [Child 1] · from school email". System-generated items say "System · from email (Ryan's Gmail)" so the account is still named. Applies to tasks, Y/N confirmations, questions, records, cart items, checklist edits, settings changes and log lines; never just the source.
 - Usable by anyone, with no training: plain words, one clear thing per screen, big tap targets, works on a phone first.
 - "Needs me" first: the top of every page answers "what needs me right now?" Everything else is secondary. Silence means healthy.
 - One place for actions: every approve/decide/acknowledge happens here, not in Finder, email or chat.
