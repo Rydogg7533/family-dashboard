@@ -8,6 +8,12 @@ export async function proxy(request: NextRequest) {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return NextResponse.next();
 
+  // Slice C: device-token routes bypass the cookie session. They authenticate themselves:
+  // /api/location/overland checks a per-person token in device_tokens; /tv checks a "Family room TV" token
+  // (?token= or cookie) against device_tokens kind='tv' (see src/app/tv/page.tsx).
+  const p = request.nextUrl.pathname;
+  if (p.startsWith("/api/location/") || p === "/tv" || p.startsWith("/tv/")) return NextResponse.next();
+
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
     cookies: {
