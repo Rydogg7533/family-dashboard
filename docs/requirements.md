@@ -88,6 +88,8 @@ How it lays out:
 
 Open questions for F3: which calendars per person; whether to start with Ryan only and add Melissa after she has seen it; the morning delivery time; how many days a question waits before folding into the weekly review; whether mileage and business-trip records should be produced automatically for taxes.
 
+**F3 location source — decision (Ryan, 2026-10-18): Overland.** Each adult's iPhone runs Overland (free, background, continuous, posts automatically) to a dashboard endpoint with a per-person device token; minute-level coverage everywhere, no manual steps; battery cost a few percent per day with default accuracy. Apple Significant Locations and Google Timeline are not readable automatically (policy), so Google Timeline export is only an optional manual backfill. Rules: location belongs to the person; own Day page only; raw points kept 30 days, then learned places only; children opt in with a parent only; Shortcuts place-triggers are no longer needed.
+
 ### F4. Ask: the family assistant window, and a page per family member (Ryan, 2026-10-17)
 In Ryan's words: "I want a window where any document or item relates to any member of the family, whether for schedule or anything else needed. Not sure if this needs an AI API connection or just an LLM connection, but I need a personal assistant window that can answer questions and deliver documents regarding managing family life. If an API isn't available, the asked question should open the chosen LLM, and the system should copy and paste it into the prompt window of the chosen LLM app."
 
