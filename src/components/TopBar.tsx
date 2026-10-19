@@ -19,7 +19,7 @@ const moreTitles: Record<string, string> = {
 };
 const subTitles: Record<string, string> = {
   "/shop/orders": "Orders", "/shop/cases": "Support cases",
-  "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications",
+  "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications",
 };
 const moneyTitles: Record<string, string> = {
   "/money/receipts": "Receipts", "/money/recurring": "Recurring", "/money/subscriptions": "Subscriptions",

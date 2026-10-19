@@ -2,7 +2,7 @@ import { H1 } from "@/components/ui";
 import { Row, RowGroup, SectionTitle } from "@/components/registers";
 
 const settings = [
-  { href: "/settings#people", label: "People and access", sub: "Members, logins, who sees what, sharing between parents" },
+  { href: "/settings/people", label: "People and access", sub: "Change my password, members, who sees what, sharing between parents" },
   { href: "/sources", label: "Connections", sub: "Email, calendars, money sources, location, weather, assistant" },
   { href: "/settings/notifications", label: "Notifications", sub: "Where each kind appears, quiet hours, allow this device" },
   { href: "/money", label: "Money set-up", sub: "Accounts, entities, budget, rules, reconciliation (on Money)" },
