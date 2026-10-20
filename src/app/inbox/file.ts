@@ -30,7 +30,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const wantClaim = answer === FILE_CLAIM;
 
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
-  if (r.vendor && typeof r.amount === "number" && r.date) {
+  if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", r.vendor).eq("amount", r.amount).eq("date", r.date).limit(1);
     if (dup && dup.length) { filed.duplicate_of = dup[0].id; filed.receipt_id = dup[0].id; done.push("already in Receipts (linked, not added twice)"); }
     else {
@@ -59,14 +59,20 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     if (!error) { filed.vehicle_id = vehicle.id; done.push(`${vehicle.short} service history`); }
   } else if (r.for_vehicle_hint) done.push(`(could not tell which vehicle "${r.for_vehicle_hint}" is; not added to a service history)`);
 
-  // 2b. Attach to the claim this upload was added for.
-  if (row.claim_id) {
-    const { data: cl } = await sb.from("claims").select("documents,created_at").eq("id", row.claim_id).maybeSingle();
+  // 2b. Attach to the claim this upload was added for, or to an open claim for the same vehicle that it predates
+  //     (the original purchase behind a warranty claim).
+  let claimId: string | null = row.claim_id ?? null;
+  if (!claimId && vehicle && r.date) {
+    const { data: open } = await sb.from("claims").select("id,created_at").eq("vehicle_id", vehicle.id).in("status", ["open", "submitted"]).order("created_at", { ascending: false }).limit(1);
+    if (open?.[0] && r.date < String(open[0].created_at).slice(0, 10)) claimId = open[0].id as string;
+  }
+  if (claimId) {
+    const { data: cl } = await sb.from("claims").select("documents,created_at").eq("id", claimId).maybeSingle();
     if (cl) {
       const older = r.date && r.date < String(cl.created_at).slice(0, 10);
       const docs = [...((cl.documents as unknown[]) ?? []), { role: older ? "original purchase" : "supporting document", inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name }];
-      const { error } = await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", row.claim_id);
-      if (!error) { filed.claim_id = row.claim_id; done.push(`added to the claim as ${older ? "the original purchase" : "a supporting document"}`); }
+      const { error } = await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", claimId);
+      if (!error) { filed.claim_id = claimId; done.push(`added to the claim as ${older ? "the original purchase" : "a supporting document"}`); }
     }
   }
 

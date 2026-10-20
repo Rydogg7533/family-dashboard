@@ -4,8 +4,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
 import { readCapture } from "@/app/inbox/read";
-import { fileCapture } from "@/app/inbox/file";
-import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 import { resolveInboxItem, recordCapture, addPage, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
@@ -13,6 +11,7 @@ const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "F
 
 export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items: InboxItem[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
   const [open, setOpen] = useState(items);
+  useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
   const healed = useRef(false);
   // Self-heal: any stored file that was never read (a dropped or failed read) is read when the Inbox opens.
@@ -31,15 +30,15 @@ export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
 
   function resolve(item: InboxItem, answer: string) {
-    if (item.file_path && item.read_at && [FILE_YES, FILE_CLAIM, FILE_NO].includes(answer)) {
-      setToast({ text: "Filing…" });
-      void fileCapture(item.id, answer).then((r) => { setToast({ text: r.summary }); if (!r.kept) setOpen((o) => o.filter((x) => x.id !== item.id)); router.refresh(); });
-      return;
-    }
     const before = open;
     setOpen((o) => o.filter((x) => x.id !== item.id));
-    void resolveInboxItem(item.id, answer, true);
-    setToast({ text: `${item.title.slice(0, 32)}${item.title.length > 32 ? "…" : ""}: ${answer}. Filed; rule proposed for the weekly review.`, undo: () => setOpen(before) });
+    setToast(item.file_path ? { text: "Filing…" } : { text: `${item.title.slice(0, 32)}${item.title.length > 32 ? "…" : ""}: ${answer}. Filed; rule proposed for the weekly review.`, undo: () => setOpen(before) });
+    void resolveInboxItem(item.id, answer, true).then((r) => {
+      if (r.kept) setOpen(before);
+      if (r.summary) setToast({ text: r.summary });
+      else if (!r.ok) { setOpen(before); setToast({ text: "That did not save. Try again." }); }
+      router.refresh();
+    });
   }
 
   return (

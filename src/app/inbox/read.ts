@@ -68,7 +68,7 @@ export async function readCapture(inboxId: string) {
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
   const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "grocery_food" ? "Groceries" : parsed.category === "home" ? "Home" : "Receipts"}/`;
   plan.push({ t: "file", text: `${name ?? "this document"} → kept in the app; a copy goes to ${home} when the Mac mini filing agent is running` });
-  if (parsed.vendor && typeof parsed.amount === "number" && parsed.date) {
+  if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
     plan.push({ t: "link", text: dup && dup.length ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
   }
@@ -79,6 +79,8 @@ export async function readCapture(inboxId: string) {
   if (row.claim_id) {
     const { data: cl } = await sb.from("claims").select("title").eq("id", row.claim_id).maybeSingle();
     if (cl) plan.push({ t: "link", text: `Claim "${cl.title}": added as a document` });
+  } else if (vehicle && parsed.warranty_relevant) {
+    plan.push({ t: "link", text: `If a reimbursement claim is open for the ${vehicle.short}, this is added to it as the original purchase` });
   }
   parsed.plan = plan;
   parsed.home = home;

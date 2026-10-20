@@ -1,12 +1,19 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { fileCapture } from "@/app/inbox/file";
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
-export async function resolveInboxItem(id: string, answer: string, makeRule: boolean) {
+export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, sample: true };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false };
+  // A stored, already-read document is filed by the filing step whatever the answer's wording; free text is kept as the note.
+  const { data: row } = await sb.from("inbox_items").select("file_path,read_result,status").eq("id", id).maybeSingle();
+  if (row?.status === "open" && row.file_path && row.read_result && Object.keys(row.read_result as object).length) {
+    const r = await fileCapture(id, answer);
+    return { ok: r.ok, summary: r.summary, kept: r.kept };
+  }
   const { error } = await sb.from("inbox_items").update({ status: "resolved", resolution: answer, resolved_at: new Date().toISOString(), resolved_by: user.id }).eq("id", id);
   if (!error) {
     await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "inbox_resolved", subject: `${id}: ${answer}`, ref: id, undoable: true }).then(() => {}, () => {});
