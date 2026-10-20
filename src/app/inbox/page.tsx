@@ -5,14 +5,14 @@ import { getInboxItems, getInboxCounts } from "@/lib/data-inbox";
 export const dynamic = "force-dynamic";
 
 export default async function Inbox({ searchParams }: PageProps<"/inbox">) {
-  const { capture } = await searchParams;
+  const { capture, claim } = await searchParams;
   const [items, counts] = await Promise.all([getInboxItems(), getInboxCounts()]);
   const cap = typeof capture === "string" && ["photo", "file", "bulk"].includes(capture) ? capture : null;
   return (
     <>
       <H1 right={`${items.length} open`}>Inbox</H1>
       <p className="text-xs text-muted mb-3">Things to identify, file or decide. Each one asks only for what is missing.</p>
-      <InboxList items={items} capture={cap} resolvedThisWeek={counts.resolved_this_week} />
+      <InboxList items={items} capture={cap} claimId={typeof claim === "string" && /^[0-9a-f-]{36}$/.test(claim) ? claim : null} resolvedThisWeek={counts.resolved_this_week} />
     </>
   );
 }

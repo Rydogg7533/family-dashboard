@@ -19,7 +19,7 @@ export type CapturedFile = { name: string; path: string | null; mime: string; si
 
 // Each captured file is already stored (private "captures" bucket) by the browser; this records the Inbox row that points at it.
 // A file whose content fingerprint matches an earlier capture is flagged as a possible duplicate, never merged silently.
-export async function recordCapture(kind: "photo" | "file" | "bulk", files: CapturedFile[]) {
+export async function recordCapture(kind: "photo" | "file" | "bulk", files: CapturedFile[], claimId: string | null = null) {
   if (!hasSupabaseEnv()) return { ok: true, sample: true, ids: [] as string[], created: files.length, stored: 0, duplicates: [] as string[], failed: [] as string[] };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -39,7 +39,7 @@ export async function recordCapture(kind: "photo" | "file" | "bulk", files: Capt
         : stored ? "What is this? A receipt, a bill, a statement, a form, or something else?"
         : "The file did not upload, so only its name is saved. Please upload it again.",
       options: dupOf ? ["Same document (keep one)", "Different, keep both"] : stored ? ["Receipt", "Bill", "Statement", "Form", "Something else"] : ["Upload again"],
-      file_path: f.path, mime: f.mime, size_bytes: f.size, sha256: f.sha256,
+      file_path: f.path, mime: f.mime, size_bytes: f.size, sha256: f.sha256, claim_id: claimId,
     };
   });
   const { data: inserted, error } = await sb.from("inbox_items").insert(rows).select("id,file_path");

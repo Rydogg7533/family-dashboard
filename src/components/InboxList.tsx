@@ -11,7 +11,7 @@ import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
-export function InboxList({ items, capture, resolvedThisWeek }: { items: InboxItem[]; capture: string | null; resolvedThisWeek: number }) {
+export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items: InboxItem[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
   const [open, setOpen] = useState(items);
   const router = useRouter();
   const healed = useRef(false);
@@ -44,7 +44,7 @@ export function InboxList({ items, capture, resolvedThisWeek }: { items: InboxIt
 
   return (
     <>
-      {capture && <CapturePanel kind={capture} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
+      {capture && <CapturePanel kind={capture} claimId={claimId ?? null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
 
       <section className="mb-4">
         <div className="flex items-baseline justify-between mb-2">
@@ -125,7 +125,7 @@ async function storeFile(f: File): Promise<CapturedFile> {
 }
 
 // Photo and Upload file take ONE document (add pages to it afterwards); Bulk drop takes many, each its own item.
-function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => void }) {
+function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string | null; onDone: (n: number) => void }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLInputElement>(null);
@@ -144,7 +144,7 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
     setNames(picked.map((f) => f.name)); setStatus("Saving…"); setDocId(null); setPageCount(0);
     const out: CapturedFile[] = [];
     for (const f of picked) out.push(await storeFile(f));
-    const r = await recordCapture(kind as "photo" | "file" | "bulk", out);
+    const r = await recordCapture(kind as "photo" | "file" | "bulk", out, claimId);
     const bad = r.failed?.length ?? 0;
     setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""} Reading…`);
     onDone(out.length);
@@ -167,6 +167,7 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
   return (
     <div className="card mb-4 flex flex-col gap-2 border-accent">
       <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>
+      {claimId && <p className="text-xs font-semibold text-accent">This will be added to the open claim.</p>}
       <p className="text-xs text-muted">{hint}</p>
       {bulk ? (
         <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}

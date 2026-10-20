@@ -14,7 +14,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, summary: "Not signed in." };
-  const { data: row } = await sb.from("inbox_items").select("id,title,file_path,pages,read_result,suggested_name,status").eq("id", inboxId).maybeSingle();
+  const { data: row } = await sb.from("inbox_items").select("id,title,file_path,pages,read_result,suggested_name,status,claim_id").eq("id", inboxId).maybeSingle();
   if (!row || row.status !== "open") return { ok: false, summary: "That item is no longer open." };
 
   if (answer === FILE_NO) {
@@ -58,6 +58,17 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     const { error } = await sb.from("vehicles").update({ details: d, updated_by: who, updated_at: new Date().toISOString() }).eq("id", vehicle.id);
     if (!error) { filed.vehicle_id = vehicle.id; done.push(`${vehicle.short} service history`); }
   } else if (r.for_vehicle_hint) done.push(`(could not tell which vehicle "${r.for_vehicle_hint}" is; not added to a service history)`);
+
+  // 2b. Attach to the claim this upload was added for.
+  if (row.claim_id) {
+    const { data: cl } = await sb.from("claims").select("documents,created_at").eq("id", row.claim_id).maybeSingle();
+    if (cl) {
+      const older = r.date && r.date < String(cl.created_at).slice(0, 10);
+      const docs = [...((cl.documents as unknown[]) ?? []), { role: older ? "original purchase" : "supporting document", inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name }];
+      const { error } = await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", row.claim_id);
+      if (!error) { filed.claim_id = row.claim_id; done.push(`added to the claim as ${older ? "the original purchase" : "a supporting document"}`); }
+    }
+  }
 
   // 3. Reimbursement claim and its reminder.
   if (wantClaim) {

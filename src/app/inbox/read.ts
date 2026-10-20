@@ -27,7 +27,7 @@ export async function readCapture(inboxId: string) {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, reason: "not signed in" };
-  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages").eq("id", inboxId).maybeSingle();
+  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages,claim_id").eq("id", inboxId).maybeSingle();
   if (!row?.file_path) return { ok: false, reason: "no stored file" };
   if (row.read_at) return { ok: true, already: true };
   // All pages of one document are read together, so the total and vendor come from the whole thing.
@@ -76,6 +76,10 @@ export async function readCapture(inboxId: string) {
     plan.push({ t: "link", text: `${vehicle.short} service history: ${parsed.item ?? "service"}` });
     if (parsed.warranty_note) plan.push({ t: "link", text: `${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)` });
   } else if (needsVehicle || parsed.warranty_relevant) plan.push({ t: "link", text: `No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; not linked to a service history until you say which` });
+  if (row.claim_id) {
+    const { data: cl } = await sb.from("claims").select("title").eq("id", row.claim_id).maybeSingle();
+    if (cl) plan.push({ t: "link", text: `Claim "${cl.title}": added as a document` });
+  }
   parsed.plan = plan;
   parsed.claim_plan = `LINK Reimbursement claim: expect ${typeof parsed.amount === "number" ? "$" + (parsed.amount as number).toFixed(2) : "the amount"}${parsed.vendor ? ` from ${parsed.vendor}` : ""}, check back in 4 weeks, reminder in Tasks`;
 

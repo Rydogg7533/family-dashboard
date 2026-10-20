@@ -21,6 +21,7 @@ export const MORE_LINKS: MoreLink[] = [
   // slice B (email, inbox, money) — append below
   { href: "/inbox", label: "Inbox", note: "Identify, file, decide", group: "Daily" },
   { href: "/money/receipts", label: "Receipts", note: "Camera, upload, matching", group: "Daily" },
+  { href: "/claims", label: "Claims", note: "Reimbursements and warranty claims", group: "Daily" },
   { href: "/records", label: "Records", note: "Confirmations, tickets, claims", group: "Reference" },
   { href: "/money/recurring", label: "Recurring", note: "Bills and subscriptions register", group: "Reference" },
   { href: "/money/subscriptions", label: "Subscriptions", note: "Keep, cancel, acknowledge", group: "Reference" },
