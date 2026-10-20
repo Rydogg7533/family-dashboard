@@ -74,11 +74,11 @@ async function findAddressbooks(user, pass) {
   const p3 = await dav("PROPFIND", homeUrl, user, pass, `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>`, 1);
   const books = [];
   for (const resp of tags(p3.text, "response")) {
-    if (/<(?:[\w-]+:)?addressbook\s*\/?>/i.test(tag(resp, "resourcetype") || "")) {
+    if (/<(?:[\w-]+:)?addressbook(?=[\s\/>])/i.test(tag(resp, "resourcetype") || "")) {
       const h = hrefIn(resp); if (h) books.push({ url: new globalThis.URL(h, p3.url).toString(), name: unesc(tag(resp, "displayname") || "Contacts") });
     }
   }
-  if (!books.length) throw new Error("no addressbooks found");
+  if (!books.length) throw new Error("no addressbooks found at " + homeUrl + ". Apple replied: " + p3.text.replace(/\s+/g, " ").slice(0, 700));
   return books;
 }
 
