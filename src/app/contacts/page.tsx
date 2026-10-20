@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources } from "@/components/registers";
-import { getContacts } from "@/lib/data-registers";
+import { getContacts, getContactCards } from "@/lib/data-registers";
+import ContactsBook from "@/components/c/ContactsBook";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,16 @@ export default async function Contacts({ searchParams }: PageProps<"/contacts">)
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q.trim().toLowerCase() : "";
   const kind = typeof sp.kind === "string" ? sp.kind : "";
+  const cards = await getContactCards();
+  if (cards.length > 0) {
+    return (
+      <>
+        <H1 right={`${cards.length} contacts`}>Contacts</H1>
+        <ContactsBook cards={cards} />
+        <PageSources items={[{ label: "Apple Contacts", href: "#contacts" }]} />
+      </>
+    );
+  }
   const all = await getContacts();
   const kinds = [...new Set(all.map((c) => c.kind))];
   const rows = all.filter((c) => (!kind || c.kind === kind) && (!q || [c.name, c.kind, c.reach, c.notes ?? "", ...c.registers].join(" ").toLowerCase().includes(q)));

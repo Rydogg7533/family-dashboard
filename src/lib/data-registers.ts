@@ -238,3 +238,25 @@ export function deviceDue(d: Device): { label: string; date: string } | null {
   const inWindow = c.filter((x) => { const n = daysUntil(x.date)!; return n <= 30 && n >= -14; }).sort((a, b) => a.date.localeCompare(b.date));
   return d.status === "retired" ? null : inWindow[0] ?? null;
 }
+
+// F25: the person's own Apple Contacts, synced by scripts/contacts-sync.mjs.
+export type ContactCard = {
+  id: string; fullName: string; firstName: string | null; lastName: string | null; nickname: string | null; org: string | null;
+  phones: { label: string; number: string; digits: string }[]; emails: { label: string; address: string }[];
+  addresses: { label: string; street: string; city: string; state: string; zip: string }[];
+  birthday: string | null; notes: string | null;
+};
+export async function getContactCards(): Promise<ContactCard[]> {
+  if (!hasSupabaseEnv()) return [];
+  try {
+    const sb = await createClient();
+    const out: ContactCard[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from("contact_cards").select("id,full_name,first_name,last_name,nickname,org,phones,emails,addresses,birthday,notes").is("deleted_at", null).order("last_name", { nullsFirst: false }).range(from, from + 999);
+      if (error || !data) break;
+      for (const r of data) out.push({ id: r.id, fullName: r.full_name, firstName: r.first_name, lastName: r.last_name, nickname: r.nickname, org: r.org, phones: r.phones ?? [], emails: r.emails ?? [], addresses: r.addresses ?? [], birthday: r.birthday, notes: r.notes });
+      if (data.length < 1000) break;
+    }
+    return out;
+  } catch { return []; }
+}
