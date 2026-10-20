@@ -63,19 +63,21 @@ export async function readCapture(inboxId: string) {
   const vNames = vlist.map((v) => v.name);
   const vehicle = needsVehicle || parsed.warranty_relevant ? matchVehicle(parsed.for_vehicle_hint as string | null, vlist) : null;
 
-  // The plan: every place a "Yes" would file this, shown before the tap.
-  const plan: string[] = [];
+  // The plan: ONE place the file lives (FILE), and every other place that only points at it (LINK).
+  const plan: { t: "file" | "link"; text: string }[] = [];
+  const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
+  const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "grocery_food" ? "Groceries" : parsed.category === "home" ? "Home" : "Receipts"}/`;
+  plan.push({ t: "file", text: `${name ?? "this document"} → ${home} (kept in the app until the Mac mini filing agent moves it)` });
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
-    plan.push(dup && dup.length ? `Money › Receipts: already there; this will be linked, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge`);
+    plan.push({ t: "link", text: dup && dup.length ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
   }
   if (vehicle) {
-    plan.push(`${vehicle.short} service history: ${parsed.item ?? "service"}`);
-    if (parsed.warranty_note) plan.push(`${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)`);
-  } else if (needsVehicle || parsed.warranty_relevant) plan.push(`No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; it will not go in a service history until you say which`);
-  if (name) plan.push(`Renamed: ${name}`);
+    plan.push({ t: "link", text: `${vehicle.short} service history: ${parsed.item ?? "service"}` });
+    if (parsed.warranty_note) plan.push({ t: "link", text: `${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)` });
+  } else if (needsVehicle || parsed.warranty_relevant) plan.push({ t: "link", text: `No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; not linked to a service history until you say which` });
   parsed.plan = plan;
-  parsed.claim_plan = `Reimbursement claim: expect ${typeof parsed.amount === "number" ? "$" + (parsed.amount as number).toFixed(2) : "the amount"}${parsed.vendor ? ` from ${parsed.vendor}` : ""}, check back in 4 weeks, reminder in Tasks`;
+  parsed.claim_plan = `LINK Reimbursement claim: expect ${typeof parsed.amount === "number" ? "$" + (parsed.amount as number).toFixed(2) : "the amount"}${parsed.vendor ? ` from ${parsed.vendor}` : ""}, check back in 4 weeks, reminder in Tasks`;
 
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {

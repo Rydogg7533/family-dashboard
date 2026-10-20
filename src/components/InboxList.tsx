@@ -93,9 +93,9 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
       <div className="text-sm font-semibold text-amber">{item.missing}</div>
       {item.read_result?.plan && item.read_result.plan.length > 0 && (
         <div className="rounded-xl bg-soft px-3 py-2 text-xs">
-          <div className="font-bold tracking-wide text-muted mb-1">YES FILES IT HERE</div>
-          <ul className="flex flex-col gap-0.5">{item.read_result.plan.map((p, i) => <li key={i}>• {p}</li>)}</ul>
-          {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan}</div>}
+          <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>
+          <ul className="flex flex-col gap-1">{item.read_result.plan.map((p, i) => { const o = typeof p === "string" ? { t: "link" as const, text: p } : p; return (<li key={i} className="flex gap-2"><span className={`shrink-0 rounded px-1.5 text-[10px] font-bold leading-5 ${o.t === "file" ? "bg-accent text-white" : "bg-line text-muted"}`}>{o.t === "file" ? "FILED" : "LINK"}</span><span>{o.text}</span></li>); })}</ul>
+          {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan.replace("LINK ", "link: ")}</div>}
         </div>
       )}
       <div className="flex flex-wrap gap-1.5">
