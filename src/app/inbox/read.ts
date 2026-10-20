@@ -22,6 +22,12 @@ suggested_name: "YYYY-MM-DD Vendor what-it-is" in plain words, max 70 chars, no 
 confidence: 0 to 1 for how sure you are of kind, vendor and item
 If something is unreadable use null; do not guess.`;
 
+// A document that cannot be read still has to reach the person: mark it read-with-error so it appears as a plain question.
+async function giveUp(sb: Awaited<ReturnType<typeof createClient>>, id: string, reason: string) {
+  await sb.from("inbox_items").update({ read_at: new Date().toISOString(), read_result: { error: reason }, missing: `I could not read this one automatically (${reason}). What is it?`, options: ["Receipt", "Bill", "Statement", "Form", "Something else"] }).eq("id", id);
+  return { ok: false, reason };
+}
+
 export async function readCapture(inboxId: string) {
   if (!hasSupabaseEnv()) return { ok: true, sample: true };
   const sb = await createClient();
@@ -35,10 +41,10 @@ export async function readCapture(inboxId: string) {
   const files: { mime: string; base64: string }[] = [];
   for (const pg of pages) {
     const mime = pg.mime === "image/jpg" ? "image/jpeg" : pg.mime;
-    if (!READABLE.includes(mime)) return { ok: false, reason: `cannot read ${pg.mime || "this type"}` };
-    if ((pg.size ?? 0) > MAX_BYTES) return { ok: false, reason: "file too large to read" };
+    if (!READABLE.includes(mime)) return giveUp(sb, inboxId, `cannot read ${pg.mime || "this type"}`);
+    if ((pg.size ?? 0) > MAX_BYTES) return giveUp(sb, inboxId, "file too large to read");
     const { data: blob, error } = await sb.storage.from("captures").download(pg.path);
-    if (error || !blob) return { ok: false, reason: "could not open the stored file" };
+    if (error || !blob) return giveUp(sb, inboxId, "could not open the stored file");
     files.push({ mime, base64: Buffer.from(await blob.arrayBuffer()).toString("base64") });
   }
   let parsed: Record<string, unknown> | null = null;
@@ -47,7 +53,7 @@ export async function readCapture(inboxId: string) {
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
-  if (!parsed || !Object.keys(parsed).length) return { ok: false, reason: "nothing readable" };
+  if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
 
   const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;
   const money = typeof parsed.amount === "number" ? ` $${parsed.amount.toFixed(2)}` : "";

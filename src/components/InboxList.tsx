@@ -9,7 +9,7 @@ import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
-export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items: InboxItem[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
+export function InboxList({ items, pendingIds = [], capture, claimId, resolvedThisWeek }: { items: InboxItem[]; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
   const [open, setOpen] = useState(items);
   useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
@@ -17,10 +17,10 @@ export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items
   // Self-heal: any stored file that was never read (a dropped or failed read) is read when the Inbox opens.
   useEffect(() => {
     if (healed.current) return; healed.current = true;
-    const todo = items.filter((i) => i.file_path && !i.read_at).map((i) => i.id);
+    const todo = [...pendingIds, ...items.filter((i) => i.file_path && !i.read_at).map((i) => i.id)];
     if (!todo.length) return;
     void (async () => { for (const id of todo) { await readCapture(id).catch(() => null); } router.refresh(); })();
-  }, [items, router]);
+  }, [items, pendingIds, router]);
   const [showAll, setShowAll] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const total = items.length + resolvedThisWeek;
@@ -51,7 +51,8 @@ export function InboxList({ items, capture, claimId, resolvedThisWeek }: { items
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
-        {open.length === 0 ? (
+        {pendingIds.length > 0 && <div className="card text-sm text-muted mb-2 animate-pulse">Reading {pendingIds.length} new document{pendingIds.length === 1 ? "" : "s"}… it will appear here in a few seconds.</div>}
+        {open.length === 0 && pendingIds.length === 0 ? (
           <div className="card text-muted">Nothing to identify, file or decide. Everything is where it belongs.</div>
         ) : (
           <div className="flex flex-col gap-2">

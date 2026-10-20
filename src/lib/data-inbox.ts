@@ -39,8 +39,20 @@ export const sampleInbox: InboxItem[] = [
 export async function getInboxItems(): Promise<InboxItem[]> {
   if (!hasSupabaseEnv()) return sampleInbox;
   const sb = await createClient();
-  const { data } = await sb.from("inbox_items").select("*").eq("status", "open").order("captured_at", { ascending: true });
+  // A freshly uploaded file is not shown until it has been read (so a tap can never beat the reading);
+  // after FRESH_MS it is shown regardless, so a failed read can never hide a document.
+  const { data } = await sb.from("inbox_items").select("*").eq("status", "open").or(`file_path.is.null,read_at.not.is.null,captured_at.lt.${new Date(Date.now() - FRESH_MS).toISOString()}`).order("captured_at", { ascending: true });
   return (data as InboxItem[]) ?? [];
+}
+
+export const FRESH_MS = 3 * 60_000;
+
+// Uploaded files still being read: not listed yet, but the page reads them and tells the person.
+export async function getPendingReadIds(): Promise<string[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("inbox_items").select("id").eq("status", "open").not("file_path", "is", null).is("read_at", null).gte("captured_at", new Date(Date.now() - FRESH_MS).toISOString());
+  return (data ?? []).map((r) => r.id as string);
 }
 
 export async function getInboxCounts(): Promise<{ open: number; resolved_this_week: number }> {

@@ -17,7 +17,7 @@ export async function resolveInboxItem(id: string, answer: string, makeRule: boo
     await readCapture(id).catch(() => null);
     row = (await sb.from("inbox_items").select("file_path,read_result,status").eq("id", id).maybeSingle()).data;
   }
-  if (row?.status === "open" && row.file_path && row.read_result && Object.keys(row.read_result as object).length) {
+  if (row?.status === "open" && row.file_path && row.read_result && Object.keys(row.read_result as object).length && !(row.read_result as { error?: string }).error) {
     const r = await fileCapture(id, answer);
     return { ok: r.ok, summary: r.summary, kept: r.kept };
   }
