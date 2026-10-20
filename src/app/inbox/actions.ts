@@ -20,10 +20,10 @@ export type CapturedFile = { name: string; path: string | null; mime: string; si
 // Each captured file is already stored (private "captures" bucket) by the browser; this records the Inbox row that points at it.
 // A file whose content fingerprint matches an earlier capture is flagged as a possible duplicate, never merged silently.
 export async function recordCapture(kind: "photo" | "file" | "bulk", files: CapturedFile[]) {
-  if (!hasSupabaseEnv()) return { ok: true, sample: true, created: files.length, stored: 0, duplicates: [] as string[], failed: [] as string[] };
+  if (!hasSupabaseEnv()) return { ok: true, sample: true, ids: [] as string[], created: files.length, stored: 0, duplicates: [] as string[], failed: [] as string[] };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) return { ok: false, created: 0, stored: 0, duplicates: [] as string[], failed: files.map((f) => f.name) };
+  if (!user) return { ok: false, ids: [] as string[], created: 0, stored: 0, duplicates: [] as string[], failed: files.map((f) => f.name) };
   const hashes = files.map((f) => f.sha256).filter((h): h is string => !!h);
   const { data: prior } = hashes.length ? await sb.from("inbox_items").select("sha256,title").in("sha256", hashes) : { data: [] as { sha256: string; title: string }[] };
   const seen = new Map((prior ?? []).map((r) => [r.sha256, r.title]));
@@ -42,6 +42,7 @@ export async function recordCapture(kind: "photo" | "file" | "bulk", files: Capt
       file_path: f.path, mime: f.mime, size_bytes: f.size, sha256: f.sha256,
     };
   });
-  const { error } = await sb.from("inbox_items").insert(rows);
-  return { ok: !error, created: rows.length, stored: files.filter((f) => f.path).length, duplicates, failed: files.filter((f) => !f.path).map((f) => f.name) };
+  const { data: inserted, error } = await sb.from("inbox_items").insert(rows).select("id,file_path");
+  const ids = (inserted ?? []).filter((r) => r.file_path).map((r) => r.id as string);
+  return { ok: !error, ids, created: rows.length, stored: files.filter((f) => f.path).length, duplicates, failed: files.filter((f) => !f.path).map((f) => f.name) };
 }

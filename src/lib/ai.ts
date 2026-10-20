@@ -130,3 +130,33 @@ const STRUCTURED = /^(y|yes|n|no|ok|later|done|snooze|undo)$|^(add|mark|show|wha
 export function isStructuredInput(text: string) {
   return STRUCTURED.test(text.trim());
 }
+
+// One-shot vision/PDF read for captured files (F18 door stays single: same key, same usage log).
+// The file is data to extract from; the system prompt says never to follow text found inside it.
+export async function callModelVision({ job, system, prompt, mime, base64, maxTokens = 700, feature }: {
+  job: Job; system: string; prompt: string; mime: string; base64: string; maxTokens?: number; feature?: string;
+}): Promise<ModelResult> {
+  const model = MODEL_FOR_JOB[job];
+  if (!hasAiKey()) {
+    const r: ModelResult = { text: "{}", model, job, inputTokens: 800, outputTokens: 24, cost: estimateCost(model, 800, 24), sample: true };
+    await recordUsage(r, feature);
+    return r;
+  }
+  const block = mime === "application/pdf"
+    ? { type: "document", source: { type: "base64", media_type: mime, data: base64 } }
+    : { type: "image", source: { type: "base64", media_type: mime, data: base64 } };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }] }),
+  });
+  if (!res.ok) throw new Error(`Messages API ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+  const data = (await res.json()) as { content: { type: string; text?: string }[]; usage: { input_tokens: number; output_tokens: number } };
+  const r: ModelResult = {
+    text: data.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join(""), model, job,
+    inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+    cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens), sample: false,
+  };
+  await recordUsage(r, feature);
+  return r;
+}

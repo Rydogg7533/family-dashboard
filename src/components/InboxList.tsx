@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
+import { readCapture } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
@@ -85,6 +87,7 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
 }
 
 function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => void }) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [names, setNames] = useState<string[]>([]);
   const [over, setOver] = useState(false);
@@ -116,6 +119,8 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
     const bad = r.failed?.length ?? 0;
     setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""}`);
     onDone(out.length);
+    // Read each stored file in the background; the Inbox question is rewritten when done.
+    for (const id of r.ids ?? []) void readCapture(id).then(() => router.refresh());
   }
 
   return (
