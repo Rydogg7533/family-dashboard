@@ -65,7 +65,7 @@ cp scripts/com.ryan.location-agent.plist ~/Library/LaunchAgents/
 launchctl bootout gui/$(id -u)/com.ryan.location-agent 2>/dev/null; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ryan.location-agent.plist
 tail -n 3 ~/Organized/"_Consolidation Records"/mirror-logs/location-agent.log
 ```
-The plist assumes the repo at `~/family-dashboard` and node at `/usr/local/bin/node` (`which node` to check; edit the
+The plist assumes the repo at `~/family-dashboard` and node at `/opt/homebrew/bin/node` (`which node` to check; edit the
 plist if it differs). Secrets come from `~/_secrets_local_only/family-dashboard.env` like the hourly reporter.
 Time zone: `STEWARD_TZ` (default America/Denver) decides which local day a stop belongs to; a trip shifts day
 boundaries by the offset difference, which is acceptable for v1.

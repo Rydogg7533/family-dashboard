@@ -109,7 +109,13 @@ async function reverseGeocode(lat, lon) {
 // ---------- per-person run ----------
 async function processPerson(person, places, calendar, log) {
   const name = person.display_name;
-  const raw = await get(`locations?person=eq.${person.id}&status=eq.raw&order=recorded_at.asc&limit=${MAX_POINTS_PER_RUN}&select=id,recorded_at,lat,lon,accuracy_m`);
+  // PostgREST returns at most 1000 rows per request, so page with Range headers until the run cap or the end.
+  const raw = [];
+  for (let from = 0; from < MAX_POINTS_PER_RUN; from += 1000) {
+    const page = await rest("GET", `locations?person=eq.${person.id}&status=eq.raw&order=recorded_at.asc&select=id,recorded_at,lat,lon,accuracy_m`, undefined, { Range: `${from}-${from + 999}` });
+    raw.push(...page);
+    if (page.length < 1000) break;
+  }
   const usable = raw.filter((p) => p.accuracy_m == null || p.accuracy_m <= 100);
   const [openStop] = await get(`location_stops?person=eq.${person.id}&status=eq.open&order=started_at.desc&limit=1`);
   if (!raw.length && !openStop) return;
@@ -117,7 +123,7 @@ async function processPerson(person, places, calendar, log) {
   const { closed, open } = cluster(usable, openStop ? { id: openStop.id, started_at: openStop.started_at, ended_at: openStop.ended_at, lat: openStop.lat, lon: openStop.lon, points: openStop.points } : null);
 
   // Mark points consumed before writing stops, so a crash never double-counts.
-  if (raw.length) await patch(`locations?id=in.(${raw.map((p) => p.id).join(",")})`, { status: "stop" });
+  for (let i = 0; i < raw.length; i += 500) await patch(`locations?id=in.(${raw.slice(i, i + 500).map((p) => p.id).join(",")})`, { status: "stop" });
 
   // Persist: closed clusters become rows (the former open row, if it closed, is updated in place).
   const stops = [];
