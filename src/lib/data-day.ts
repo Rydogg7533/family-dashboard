@@ -113,7 +113,7 @@ const sampleRecurring: RecurringItem[] = [
 export async function getDayBlocks(date = d(0)): Promise<DayBlock[]> {
   if (!hasSupabaseEnv()) return sampleBlocks;
   const sb = await createClient();
-  const { data } = await sb.from("day_blocks").select("*").eq("date", date).order("start");
+  const { data } = await sb.from("day_blocks").select("*").eq("date", date).order("start_time");
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id), start: String(r.start_time).slice(0, 5), end: String(r.end_time).slice(0, 5), title: String(r.title), place: (r.place as string) ?? null,
     person: String(r.person_name ?? ""), kind: r.kind as BlockKind, confidence: (r.confidence as number) ?? null, travel_min: (r.travel_min as number) ?? null,
@@ -124,7 +124,7 @@ export async function getDayBlocks(date = d(0)): Promise<DayBlock[]> {
 export async function getDayQuestions(): Promise<DayQuestion[]> {
   if (!hasSupabaseEnv()) return sampleQuestions;
   const sb = await createClient();
-  const { data } = await sb.from("locations").select("id, started_at, ended_at, address, suggestions").eq("status", "question").order("started_at", { ascending: false }).limit(10);
+  const { data } = await sb.from("location_stops").select("id, started_at, ended_at, address, suggestions").eq("status", "question").order("started_at", { ascending: false }).limit(10);
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id), window: `${new Date(String(r.started_at)).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}–${new Date(String(r.ended_at)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
     place_label: String(r.address ?? "unknown place"), suggestions: ((r.suggestions as string[]) ?? []).concat(["Personal", "Skip"]), days_waiting: Math.floor((Date.now() - new Date(String(r.started_at)).getTime()) / 86_400_000), for_person: "you",

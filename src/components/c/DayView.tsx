@@ -5,6 +5,7 @@ import type { DayBlock, DayQuestion, DayRecordEntry, ChecklistItem } from "@/lib
 import { fmtTime, shortTime, weatherGlyph, weatherLine } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
 import { Who } from "@/components/c/Who";
+import { answerStop } from "@/app/day/actions";
 
 const btn = "min-h-9 px-3 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
@@ -32,7 +33,7 @@ export function QuestionsList({ questions }: { questions: DayQuestion[] }) {
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {q.suggestions.map((s) => (
-                  <button key={s} className={btn} onClick={() => { setAnswered((a) => ({ ...a, [q.id]: s })); show(s === "Skip" ? "Skipped · no rule made" : `Saved: ${s} · will fill this next time`, () => setAnswered((a) => { const n = { ...a }; delete n[q.id]; return n; })); }}>{s}</button>
+                  <button key={s} className={btn} onClick={async () => { let ans = s; if (s === "New place") { const typed = window.prompt("What is this place called?"); if (!typed?.trim()) return; ans = typed.trim(); } setAnswered((a) => ({ ...a, [q.id]: ans })); const r = await answerStop(q.id, ans); if (!r.ok) { setAnswered((a) => { const n = { ...a }; delete n[q.id]; return n; }); show(r.error ?? "Could not save"); return; } show(ans === "Skip" ? "Skipped · no rule made" : `Saved: ${ans} · will fill this next time`); }}>{s}</button>
                 ))}
               </div>
             </div>

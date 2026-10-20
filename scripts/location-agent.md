@@ -36,21 +36,41 @@ job on the Mac mini turns points into stops, Places and day blocks. Nothing leav
 - Sample mode (no Supabase env): any token is accepted, the batch is logged to the server console, nothing is stored.
 - RLS: `locations` is readable only where `person = auth.uid()`; the browser never sees another person's points.
 
-## The Mac mini job (`location-agent`, every 10 minutes, service key, no model)
-1. Read new `status='raw'` points for each person.
-2. **Stops**: cluster consecutive points within ~75 m for ≥ 8 minutes (or an iOS Visit) → one stop with start, end,
-   centre. Movement between stops → travel (mode from `motion`: automotive / walking / cycling).
-3. **Match**: a stop within 150 m of a known Place → that Place. A calendar event at that time and place names the
-   Place if new. Receipts/charges at that merchant and time (F2) strengthen the match.
-4. **Fill or ask** (confidence rules from F3): fill the day block automatically only when the Place is known **and**
-   the usual activity fits (time of day, duration, day of week) → `day_blocks.kind='inferred'` with `confidence`;
-   the Day page shows "FILLED FROM OVERLAND · 92% sure" with a one-tap "Not this?". Anything else → `status='question'`
-   with a reverse-geocoded `address` and 2–3 `suggestions` (nearest Place, recent similar visits) → "Questions for you".
-5. **Learn**: every answer updates the Place (name, meaning, usual activity/duration/days, indoor/outdoor for F5) and
-   becomes a rule; the same Place-and-pattern is never asked twice. Unanswered questions wait a few days, then fold into
-   the weekly review; they are never deleted.
-6. **Retention**: `delete from locations where recorded_at < now() - interval '30 days'` every night. The day record
-   keeps only Places and times, never the raw track.
+## The Mac mini job (`scripts/location-agent.mjs`, every 10 minutes, service key, no model) — built 2026-10-20
+Tables: `locations` (raw points) → `location_stops` (migration 0007) → `places` (now with lat/lon/radius and the usual
+pattern) → `day_blocks`. The Day page's "Questions for you" reads `location_stops` where `status='question'`; a tap
+calls the `answerStop` server action (owner-only under RLS), and the agent applies the answer on its next run.
+
+What one run does, in order:
+1. **Answers first**: stops with `status='answered'` become a confirmed Place (new, or renamed) and a real block
+   (`kind='inferred'`, confidence 1). "Personal" / "Private" → `kind='private'`, no Place. "Skip" → nothing learned.
+2. **Stops**: for each person, read `status='raw'` points (accuracy ≤ 100 m), cluster consecutive points within 75 m
+   for ≥ 8 minutes. The trailing cluster stays `open` and is extended next run; consumed points are marked `stop`.
+3. **Match**: a closed stop within max(150 m, the Place's radius) of a known Place → that Place. If none, a calendar
+   event overlapping the stop (own or shared) creates a Place named after the event's place or title.
+4. **Fill or ask**: Place known and confirmed (or calendar-matched) → `day_blocks.kind='inferred'`, confidence 0.6
+   rising with visits (0.85 from a calendar match). Anything else → reverse-geocode (Nominatim, 1 request/s) and
+   `status='question'` with up to three suggestions: "Home" (only for an overnight stop when no Home exists yet; Home is
+   never guessed, because an overnight stop can be a hotel), an unconfirmed Place match, the nearest Places, "New place".
+5. **Learn**: every filled or answered visit updates the Place's visits, usual days, usual duration and last visit.
+6. **Retention**: raw and consumed points older than 30 days are deleted every run. Stops, Places, blocks remain.
+7. `system_status.sync_location` gets a one-line summary; errors per person are logged, never fatal for the others.
+
+Install on the mini (one-time, Terminal, zsh):
+```
+cd ~/family-dashboard && git pull
+mkdir -p ~/Organized/"_Consolidation Records"/mirror-logs
+node scripts/location-agent.mjs            # first run by hand; prints the summary line
+cp scripts/com.ryan.location-agent.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u)/com.ryan.location-agent 2>/dev/null; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ryan.location-agent.plist
+tail -n 3 ~/Organized/"_Consolidation Records"/mirror-logs/location-agent.log
+```
+The plist assumes the repo at `~/family-dashboard` and node at `/usr/local/bin/node` (`which node` to check; edit the
+plist if it differs). Secrets come from `~/_secrets_local_only/family-dashboard.env` like the hourly reporter.
+Time zone: `STEWARD_TZ` (default America/Denver) decides which local day a stop belongs to; a trip shifts day
+boundaries by the offset difference, which is acceptable for v1.
+
+Not yet: travel mode from `motion`, receipts strengthening a match (needs F2), the "private time" switch, iOS Visits.
 
 ## Rules (privacy and control)
 - **Own Day page only.** A person's location shows on their own Day page and nowhere else — not on Family pages, the
