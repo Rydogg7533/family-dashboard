@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
-import { resolveInboxItem, recordCapture } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, type CapturedFile } from "@/app/inbox/actions";
+import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
@@ -25,7 +26,7 @@ export function InboxList({ items, capture, resolvedThisWeek }: { items: InboxIt
 
   return (
     <>
-      {capture && <CapturePanel kind={capture} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Reading and routing now; anything unclear will appear below.` })} />}
+      {capture && <CapturePanel kind={capture} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
 
       <section className="mb-4">
         <div className="flex items-baseline justify-between mb-2">
@@ -87,14 +88,34 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
   const inputRef = useRef<HTMLInputElement>(null);
   const [names, setNames] = useState<string[]>([]);
   const [over, setOver] = useState(false);
+  const [status, setStatus] = useState("");
   const title = kind === "photo" ? "Take a photo" : kind === "file" ? "Upload a file" : "Bulk drop";
-  const hint = kind === "photo" ? "A receipt, a label, a serial plate, a form. It is read and routed automatically (receipt → Money, label → Health, plate → Devices, form → here)." : kind === "file" ? "A scan, a PDF, a statement. Anything unclear becomes one question below." : "Drop a shoebox of scans, statements, photos. Each one is read, matched and filed; what cannot be handled asks one question below, until every item is resolved.";
+  const hint = kind === "photo" ? "A receipt, a label, a serial plate, a form. It is saved, then you tell it what it is; automatic reading and routing comes next." : kind === "file" ? "A scan, a PDF, a statement. Anything unclear becomes one question below." : "Drop a shoebox of scans, statements, photos. Each one is read, matched and filed; what cannot be handled asks one question below, until every item is resolved.";
 
-  function take(list: FileList | null) {
+  async function take(list: FileList | null) {
     if (!list || !list.length) return;
-    const n = Array.from(list).map((f) => f.name);
-    setNames(n);
-    void recordCapture(kind as "photo" | "file" | "bulk", n).then(() => onDone(n.length));
+    const picked = Array.from(list);
+    setNames(picked.map((f) => f.name)); setStatus("Saving…");
+    const sb = createBrowserSb();
+    const { data: { user } } = await sb.auth.getUser();
+    const day = new Date().toISOString().slice(0, 10);
+    const out: CapturedFile[] = [];
+    for (const f of picked) {
+      let sha: string | null = null, path: string | null = null, failed: string | undefined;
+      try {
+        const buf = await f.arrayBuffer();
+        sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf))).map((b) => b.toString(16).padStart(2, "0")).join("");
+        const safe = f.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+        const key = `${user?.id ?? "member"}/${day}/${crypto.randomUUID().slice(0, 8)}-${safe}`;
+        const { error } = await sb.storage.from("captures").upload(key, f, { contentType: f.type || undefined, upsert: false });
+        if (error) failed = error.message; else path = key;
+      } catch (e) { failed = String(e); }
+      out.push({ name: f.name, path, mime: f.type, size: f.size, sha256: sha, failed });
+    }
+    const r = await recordCapture(kind as "photo" | "file" | "bulk", out);
+    const bad = r.failed?.length ?? 0;
+    setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""}`);
+    onDone(out.length);
   }
 
   return (
@@ -102,15 +123,15 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
       <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>
       <p className="text-xs text-muted">{hint}</p>
       {kind === "bulk" ? (
-        <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}
+        <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}
           className={`min-h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
           Drop files here, or tap to choose
         </div>
       ) : (
         <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">{kind === "photo" ? "Open camera" : "Choose file"}</button>
       )}
-      <input ref={inputRef} type="file" className="hidden" multiple={kind !== "photo"} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => take(e.target.files)} />
-      {names.length > 0 && <div className="text-xs text-green font-semibold">Received: {names.join(", ")}. Files go to the Mac mini drop folder; only names and a thumbnail stay here.</div>}
+      <input ref={inputRef} type="file" className="hidden" multiple={kind !== "photo"} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => void take(e.target.files)} />
+      {names.length > 0 && <div className="text-xs text-green font-semibold">{status || "Saving…"} ({names.join(", ")})</div>}
     </div>
   );
 }
