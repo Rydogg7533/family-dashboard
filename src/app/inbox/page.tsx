@@ -3,6 +3,7 @@ import { InboxList } from "@/components/InboxList";
 import { getInboxItems, getInboxCounts } from "@/lib/data-inbox";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // reading a document can take several seconds
 
 export default async function Inbox({ searchParams }: PageProps<"/inbox">) {
   const { capture, claim } = await searchParams;

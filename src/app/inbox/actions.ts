@@ -1,6 +1,8 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { fileCapture } from "@/app/inbox/file";
+import { readCapture } from "@/app/inbox/read";
+import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
 export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
@@ -9,7 +11,12 @@ export async function resolveInboxItem(id: string, answer: string, makeRule: boo
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false };
   // A stored, already-read document is filed by the filing step whatever the answer's wording; free text is kept as the note.
-  const { data: row } = await sb.from("inbox_items").select("file_path,read_result,status").eq("id", id).maybeSingle();
+  let { data: row } = await sb.from("inbox_items").select("file_path,read_result,status").eq("id", id).maybeSingle();
+  // A filing answer on a stored file that has not finished being read: read it first, then file it, so a fast tap is never lost.
+  if (row?.status === "open" && row.file_path && !row.read_result && [FILE_YES, FILE_CLAIM, FILE_NO].includes(answer)) {
+    await readCapture(id).catch(() => null);
+    row = (await sb.from("inbox_items").select("file_path,read_result,status").eq("id", id).maybeSingle()).data;
+  }
   if (row?.status === "open" && row.file_path && row.read_result && Object.keys(row.read_result as object).length) {
     const r = await fileCapture(id, answer);
     return { ok: r.ok, summary: r.summary, kept: r.kept };
