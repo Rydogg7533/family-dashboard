@@ -14,7 +14,7 @@
 // 5. Retention: delete raw/stop points older than RETENTION_DAYS. Stops, Places and blocks stay.
 // 6. system_status.sync_location gets a one-line summary.
 //
-// Secrets: ~/_secrets_local_only/family-dashboard.env with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+// Secrets: ~/_secrets_local_only/family-dashboard.env with SUPABASE_URL and SUPABASE_SERVICE_KEY (mini-report.sh names).
 // No coordinates ever go to a model; the only outside call is Nominatim for an address, and only for questions.
 
 import { readFileSync } from "node:fs";
@@ -38,8 +38,9 @@ try {
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 } catch { /* reported in main() */ }
-const URL = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+// The mini's env file uses SUPABASE_URL / SUPABASE_SERVICE_KEY (same as mini-report.sh); the app's names also work.
+const URL = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const KEY = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 
 // ---------- PostgREST helpers ----------
@@ -228,7 +229,7 @@ async function applyAnswers(places, log) {
 
 // ---------- main ----------
 async function main() {
-  if (!URL || !KEY) { console.error(`NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set (looked in ${envPath})`); process.exit(1); }
+  if (!URL || !KEY) { console.error(`SUPABASE_URL / SUPABASE_SERVICE_KEY not set (looked in ${envPath})`); process.exit(1); }
   const log = [];
   const people = await get("profiles?select=id,display_name");
   const places = await get("places?select=*");
