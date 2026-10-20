@@ -67,7 +67,7 @@ export async function readCapture(inboxId: string) {
   const plan: { t: "file" | "link"; text: string }[] = [];
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
   const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "grocery_food" ? "Groceries" : parsed.category === "home" ? "Home" : "Receipts"}/`;
-  plan.push({ t: "file", text: `${name ?? "this document"} → ${home} (kept in the app until the Mac mini filing agent moves it)` });
+  plan.push({ t: "file", text: `${name ?? "this document"} → kept in the app; a copy goes to ${home} when the Mac mini filing agent is running` });
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
     plan.push({ t: "link", text: dup && dup.length ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
