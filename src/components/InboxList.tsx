@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
 import { readCapture } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, type CapturedFile } from "@/app/inbox/actions";
+import { fileCapture } from "@/app/inbox/file";
+import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { resolveInboxItem, recordCapture, addPage, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
@@ -29,6 +31,11 @@ export function InboxList({ items, capture, resolvedThisWeek }: { items: InboxIt
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
 
   function resolve(item: InboxItem, answer: string) {
+    if (item.file_path && item.read_at && [FILE_YES, FILE_CLAIM, FILE_NO].includes(answer)) {
+      setToast({ text: "Filing…" });
+      void fileCapture(item.id, answer).then((r) => { setToast({ text: r.summary }); if (!r.kept) setOpen((o) => o.filter((x) => x.id !== item.id)); router.refresh(); });
+      return;
+    }
     const before = open;
     setOpen((o) => o.filter((x) => x.id !== item.id));
     void resolveInboxItem(item.id, answer, true);
@@ -75,7 +82,7 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
       <div>
         <div className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</div>
         <div className="font-semibold">{item.title}</div>
-        <div className="text-xs text-muted mt-0.5">{item.requested_by === "System" ? "System" : `${item.requested_by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a></div>
+        <div className="text-xs text-muted mt-0.5">{item.requested_by === "System" ? "System" : `${item.requested_by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
       </div>
       {item.thread && (
         <div>
@@ -95,49 +102,66 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
   );
 }
 
+async function storeFile(f: File): Promise<CapturedFile> {
+  const sb = createBrowserSb();
+  let sha: string | null = null, path: string | null = null, failed: string | undefined;
+  try {
+    const { data: { user } } = await sb.auth.getUser();
+    const buf = await f.arrayBuffer();
+    sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf))).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const safe = f.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+    const key = `${user?.id ?? "member"}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID().slice(0, 8)}-${safe}`;
+    const { error } = await sb.storage.from("captures").upload(key, f, { contentType: f.type || undefined, upsert: false });
+    if (error) failed = error.message; else path = key;
+  } catch (e) { failed = String(e); }
+  return { name: f.name, path, mime: f.type, size: f.size, sha256: sha, failed };
+}
+
+// Photo and Upload file take ONE document (add pages to it afterwards); Bulk drop takes many, each its own item.
 function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => void }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const pageRef = useRef<HTMLInputElement>(null);
   const [names, setNames] = useState<string[]>([]);
   const [over, setOver] = useState(false);
   const [status, setStatus] = useState("");
+  const [docId, setDocId] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const bulk = kind === "bulk";
   const title = kind === "photo" ? "Take a photo" : kind === "file" ? "Upload a file" : "Bulk drop";
-  const hint = kind === "photo" ? "A receipt, a label, a serial plate, a form. It is saved, then you tell it what it is; automatic reading and routing comes next." : kind === "file" ? "A scan, a PDF, a statement. Anything unclear becomes one question below." : "Drop a shoebox of scans, statements, photos. Each one is read, matched and filed; what cannot be handled asks one question below, until every item is resolved.";
+  const hint = kind === "photo" ? "One document per photo: a receipt, a label, a serial plate, a form. If it has more pages, add them after. You will get one question; most are a single tap." : kind === "file" ? "One document: a PDF or an image. A multi-page PDF is already one file; for photos of a longer receipt, add the other pages after." : "Drop a shoebox of scans, statements, photos. Each file is its own item and nothing is filed without your tap; pages that look like one document are offered as a set.";
 
   async function take(list: FileList | null) {
     if (!list || !list.length) return;
-    const picked = Array.from(list);
-    setNames(picked.map((f) => f.name)); setStatus("Saving…");
-    const sb = createBrowserSb();
-    const { data: { user } } = await sb.auth.getUser();
-    const day = new Date().toISOString().slice(0, 10);
+    const picked = bulk ? Array.from(list) : [list[0]];
+    setNames(picked.map((f) => f.name)); setStatus("Saving…"); setDocId(null); setPageCount(0);
     const out: CapturedFile[] = [];
-    for (const f of picked) {
-      let sha: string | null = null, path: string | null = null, failed: string | undefined;
-      try {
-        const buf = await f.arrayBuffer();
-        sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf))).map((b) => b.toString(16).padStart(2, "0")).join("");
-        const safe = f.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
-        const key = `${user?.id ?? "member"}/${day}/${crypto.randomUUID().slice(0, 8)}-${safe}`;
-        const { error } = await sb.storage.from("captures").upload(key, f, { contentType: f.type || undefined, upsert: false });
-        if (error) failed = error.message; else path = key;
-      } catch (e) { failed = String(e); }
-      out.push({ name: f.name, path, mime: f.type, size: f.size, sha256: sha, failed });
-    }
+    for (const f of picked) out.push(await storeFile(f));
     const r = await recordCapture(kind as "photo" | "file" | "bulk", out);
     const bad = r.failed?.length ?? 0;
-    setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""}`);
+    setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""} Reading…`);
     onDone(out.length);
-    // Read each stored file in the background; the Inbox question is rewritten when done.
+    if (!bulk && r.ids?.[0]) { setDocId(r.ids[0]); setPageCount(1); }
     // One at a time: concurrent server actions can be dropped by the refresh that follows the first.
-    void (async () => { for (const id of r.ids ?? []) { await readCapture(id).catch(() => null); } router.refresh(); })();
+    void (async () => { for (const id of r.ids ?? []) { await readCapture(id).catch(() => null); } setStatus((s) => s.replace(" Reading…", " Read.")); router.refresh(); })();
+  }
+
+  async function more(list: FileList | null) {
+    if (!list?.[0] || !docId) return;
+    setStatus("Adding the page…");
+    const f = await storeFile(list[0]);
+    if (!f.path) { setStatus("That page did not upload. Try again."); return; }
+    const r = await addPage(docId, { path: f.path, mime: f.mime, size: f.size, sha256: f.sha256 });
+    if (!r.ok) { setStatus("Could not add the page."); return; }
+    setPageCount(r.pages ?? pageCount + 1); setStatus(`Page added (${r.pages} pages). Reading all of them…`);
+    await readCapture(docId).catch(() => null); setStatus(`${r.pages} pages saved and read together.`); router.refresh();
   }
 
   return (
     <div className="card mb-4 flex flex-col gap-2 border-accent">
       <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>
       <p className="text-xs text-muted">{hint}</p>
-      {kind === "bulk" ? (
+      {bulk ? (
         <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}
           className={`min-h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
           Drop files here, or tap to choose
@@ -145,8 +169,10 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
       ) : (
         <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">{kind === "photo" ? "Open camera" : "Choose file"}</button>
       )}
-      <input ref={inputRef} type="file" className="hidden" multiple={kind !== "photo"} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => void take(e.target.files)} />
+      <input ref={inputRef} type="file" className="hidden" multiple={bulk} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void take(e.target.files); e.target.value = ""; }} />
+      <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
       {names.length > 0 && <div className="text-xs text-green font-semibold">{status || "Saving…"} ({names.join(", ")})</div>}
+      {docId && <button onClick={() => pageRef.current?.click()} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add another page to this document{pageCount > 1 ? ` (${pageCount} so far)` : ""}</button>}
     </div>
   );
 }

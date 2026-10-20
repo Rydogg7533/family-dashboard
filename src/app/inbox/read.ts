@@ -26,18 +26,23 @@ export async function readCapture(inboxId: string) {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, reason: "not signed in" };
-  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at").eq("id", inboxId).maybeSingle();
+  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages").eq("id", inboxId).maybeSingle();
   if (!row?.file_path) return { ok: false, reason: "no stored file" };
   if (row.read_at) return { ok: true, already: true };
-  const mime = row.mime === "image/jpg" ? "image/jpeg" : row.mime;
-  if (!READABLE.includes(mime ?? "")) return { ok: false, reason: `cannot read ${row.mime || "this type"}` };
-  if ((row.size_bytes ?? 0) > MAX_BYTES) return { ok: false, reason: "file too large to read" };
-  const { data: blob, error } = await sb.storage.from("captures").download(row.file_path);
-  if (error || !blob) return { ok: false, reason: "could not open the stored file" };
-  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
+  // All pages of one document are read together, so the total and vendor come from the whole thing.
+  const pages = (row.pages as { path: string; mime: string; size: number }[] | null) ?? [{ path: row.file_path, mime: row.mime ?? "", size: row.size_bytes ?? 0 }];
+  const files: { mime: string; base64: string }[] = [];
+  for (const pg of pages) {
+    const mime = pg.mime === "image/jpg" ? "image/jpeg" : pg.mime;
+    if (!READABLE.includes(mime)) return { ok: false, reason: `cannot read ${pg.mime || "this type"}` };
+    if ((pg.size ?? 0) > MAX_BYTES) return { ok: false, reason: "file too large to read" };
+    const { data: blob, error } = await sb.storage.from("captures").download(pg.path);
+    if (error || !blob) return { ok: false, reason: "could not open the stored file" };
+    files.push({ mime, base64: Buffer.from(await blob.arrayBuffer()).toString("base64") });
+  }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: "Read this document and return the JSON.", mime: mime!, base64, feature: "capture-read" });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.", files, feature: "capture-read" });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
@@ -58,7 +63,7 @@ export async function readCapture(inboxId: string) {
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
     if (needsVehicle && !parsed.for_vehicle_hint) { update.missing = `${summary} Which vehicle is it for?`; update.options = vNames.length ? [...vNames, "Something else"] : ["Something else"]; }
-    else update.missing = `${summary} Is that right?`, update.options = ["Yes, file it", "Not quite"];
+    else { update.missing = `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }
   await sb.from("inbox_items").update(update).eq("id", inboxId);
   return { ok: true, name, confidence: conf };

@@ -133,8 +133,8 @@ export function isStructuredInput(text: string) {
 
 // One-shot vision/PDF read for captured files (F18 door stays single: same key, same usage log).
 // The file is data to extract from; the system prompt says never to follow text found inside it.
-export async function callModelVision({ job, system, prompt, mime, base64, maxTokens = 700, feature }: {
-  job: Job; system: string; prompt: string; mime: string; base64: string; maxTokens?: number; feature?: string;
+export async function callModelVision({ job, system, prompt, files, maxTokens = 700, feature }: {
+  job: Job; system: string; prompt: string; files: { mime: string; base64: string }[]; maxTokens?: number; feature?: string;
 }): Promise<ModelResult> {
   const model = MODEL_FOR_JOB[job];
   if (!hasAiKey()) {
@@ -142,13 +142,13 @@ export async function callModelVision({ job, system, prompt, mime, base64, maxTo
     await recordUsage(r, feature);
     return r;
   }
-  const block = mime === "application/pdf"
+  const blocks = files.map(({ mime, base64 }) => mime === "application/pdf"
     ? { type: "document", source: { type: "base64", media_type: mime, data: base64 } }
-    : { type: "image", source: { type: "base64", media_type: mime, data: base64 } };
+    : { type: "image", source: { type: "base64", media_type: mime, data: base64 } });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }] }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: [...blocks, { type: "text", text: prompt }] }] }),
   });
   if (!res.ok) throw new Error(`Messages API ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
   const data = (await res.json()) as { content: { type: string; text?: string }[]; usage: { input_tokens: number; output_tokens: number } };

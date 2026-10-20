@@ -46,3 +46,19 @@ export async function recordCapture(kind: "photo" | "file" | "bulk", files: Capt
   const ids = (inserted ?? []).filter((r) => r.file_path).map((r) => r.id as string);
   return { ok: !error, ids, created: rows.length, stored: files.filter((f) => f.path).length, duplicates, failed: files.filter((f) => !f.path).map((f) => f.name) };
 }
+
+// Another page of the same document: appended to the item, which is then read again as a whole.
+export async function addPage(inboxId: string, page: { path: string; mime: string; size: number; sha256: string | null }) {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false };
+  const { data: row } = await sb.from("inbox_items").select("file_path,mime,size_bytes,sha256,pages,status").eq("id", inboxId).maybeSingle();
+  if (!row?.file_path || row.status !== "open") return { ok: false };
+  const pages = (row.pages as unknown[] | null) ?? [{ path: row.file_path, mime: row.mime, size: row.size_bytes, sha256: row.sha256 }];
+  const { error } = await sb.from("inbox_items").update({
+    pages: [...pages, page], read_at: null, read_result: null, suggested_name: null,
+    missing: "Reading all pages…", options: ["Receipt", "Bill", "Statement", "Form", "Something else"],
+  }).eq("id", inboxId);
+  return { ok: !error, pages: pages.length + 1 };
+}
