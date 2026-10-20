@@ -91,6 +91,13 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
         </div>
       )}
       <div className="text-sm font-semibold text-amber">{item.missing}</div>
+      {item.read_result?.plan && item.read_result.plan.length > 0 && (
+        <div className="rounded-xl bg-soft px-3 py-2 text-xs">
+          <div className="font-bold tracking-wide text-muted mb-1">YES FILES IT HERE</div>
+          <ul className="flex flex-col gap-0.5">{item.read_result.plan.map((p, i) => <li key={i}>• {p}</li>)}</ul>
+          {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan}</div>}
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
       </div>

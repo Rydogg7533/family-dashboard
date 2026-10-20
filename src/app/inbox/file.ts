@@ -6,17 +6,9 @@ import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean };
-type VRow = { id: string; name: string; short: string; make: string | null; model: string | null; year: number | null; details: Record<string, unknown> | null };
-
-function matchVehicle(hint: string | null | undefined, vs: VRow[]): VRow | null {
-  const h = (hint ?? "").toLowerCase();
-  if (!h) return null;
-  const hits = vs.filter((v) => [v.short, v.model, v.name].some((t) => t && h.includes(t.toLowerCase())));
-  return hits.length === 1 ? hits[0] : null;
-}
-
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();

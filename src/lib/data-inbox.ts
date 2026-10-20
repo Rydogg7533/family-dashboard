@@ -20,6 +20,7 @@ export type InboxItem = {
   file_path?: string | null;   // stored capture (private bucket)
   read_at?: string | null;     // set once the file has been read
   suggested_name?: string | null;
+  read_result?: { plan?: string[]; claim_plan?: string } | null;
 };
 
 const now = Date.now();

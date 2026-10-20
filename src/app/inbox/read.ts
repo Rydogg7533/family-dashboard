@@ -3,6 +3,7 @@
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { callModelVision } from "@/lib/ai";
+import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
 const READABLE = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -56,9 +57,25 @@ export async function readCapture(inboxId: string) {
   const summary = what ? `Looks like a ${kindLabel}: ${what}${veh}${money}${parsed.date ? `, ${parsed.date}` : ""}.` : null;
   const name = typeof parsed.suggested_name === "string" ? parsed.suggested_name.replace(/[\\/:*?"<>|]/g, "").slice(0, 70) : null;
 
-  const { data: vehicles } = await sb.from("vehicles").select("name").limit(8);
+  const { data: vehicles } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
+  const vlist = (vehicles ?? []) as VRow[];
   const needsVehicle = parsed.category === "vehicle";
-  const vNames = (vehicles ?? []).map((v: { name?: string }) => v.name).filter((n): n is string => !!n);
+  const vNames = vlist.map((v) => v.name);
+  const vehicle = needsVehicle || parsed.warranty_relevant ? matchVehicle(parsed.for_vehicle_hint as string | null, vlist) : null;
+
+  // The plan: every place a "Yes" would file this, shown before the tap.
+  const plan: string[] = [];
+  if (parsed.vendor && typeof parsed.amount === "number" && parsed.date) {
+    const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
+    plan.push(dup && dup.length ? `Money › Receipts: already there; this will be linked, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge`);
+  }
+  if (vehicle) {
+    plan.push(`${vehicle.short} service history: ${parsed.item ?? "service"}`);
+    if (parsed.warranty_note) plan.push(`${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)`);
+  } else if (needsVehicle || parsed.warranty_relevant) plan.push(`No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; it will not go in a service history until you say which`);
+  if (name) plan.push(`Renamed: ${name}`);
+  parsed.plan = plan;
+  parsed.claim_plan = `Reimbursement claim: expect ${typeof parsed.amount === "number" ? "$" + (parsed.amount as number).toFixed(2) : "the amount"}${parsed.vendor ? ` from ${parsed.vendor}` : ""}, check back in 4 weeks, reminder in Tasks`;
 
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
