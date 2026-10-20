@@ -20,6 +20,7 @@ export default async function Health() {
     <>
       <H1>System health</H1>
       <div className="mb-4"><Banner level={o.level} text={o.text} /></div>
+      <div className="text-xs text-muted mb-4">Server region: <span className="font-semibold text-fg">{process.env.VERCEL_REGION ?? "local"}</span> (the database is in us-west-1; sfo1 is next to it) · version {(process.env.VERCEL_GIT_COMMIT_SHA ?? "dev").slice(0, 7)}</div>
       <div className="flex flex-col gap-2">
         {rows.map((s) => (
           <Card key={s.key}>
