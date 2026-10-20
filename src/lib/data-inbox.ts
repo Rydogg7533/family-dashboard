@@ -17,6 +17,9 @@ export type InboxItem = {
   thread: { at: string; who: "you" | "assistant"; text: string }[] | null; // for ask_thread items
   status: "open" | "resolved";
   resolution: string | null;
+  file_path?: string | null;   // stored capture (private bucket)
+  read_at?: string | null;     // set once the file has been read
+  suggested_name?: string | null;
 };
 
 const now = Date.now();

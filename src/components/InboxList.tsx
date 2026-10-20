@@ -11,6 +11,15 @@ const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "F
 
 export function InboxList({ items, capture, resolvedThisWeek }: { items: InboxItem[]; capture: string | null; resolvedThisWeek: number }) {
   const [open, setOpen] = useState(items);
+  const router = useRouter();
+  const healed = useRef(false);
+  // Self-heal: any stored file that was never read (a dropped or failed read) is read when the Inbox opens.
+  useEffect(() => {
+    if (healed.current) return; healed.current = true;
+    const todo = items.filter((i) => i.file_path && !i.read_at).map((i) => i.id);
+    if (!todo.length) return;
+    void (async () => { for (const id of todo) { await readCapture(id).catch(() => null); } router.refresh(); })();
+  }, [items, router]);
   const [showAll, setShowAll] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const total = items.length + resolvedThisWeek;
@@ -120,7 +129,8 @@ function CapturePanel({ kind, onDone }: { kind: string; onDone: (n: number) => v
     setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""}`);
     onDone(out.length);
     // Read each stored file in the background; the Inbox question is rewritten when done.
-    for (const id of r.ids ?? []) void readCapture(id).then(() => router.refresh());
+    // One at a time: concurrent server actions can be dropped by the refresh that follows the first.
+    void (async () => { for (const id of r.ids ?? []) { await readCapture(id).catch(() => null); } router.refresh(); })();
   }
 
   return (
