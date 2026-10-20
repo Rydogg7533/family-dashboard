@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources, SectionTitle } from "@/components/registers";
 import { PEOPLE, getActivities, getPlaces, getViewer, type PersonId } from "@/lib/data-registers";
+import { PlacesList } from "@/components/c/PlacesList";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +15,7 @@ export default async function Places() {
       <div className="rounded-xl px-4 py-3 bg-soft text-xs text-muted mb-4">Places are learned from your own location records and belong to you; they are never shown to anyone else unless you turn sharing on. Activities and their Always lists are per person.</div>
 
       <SectionTitle right={`${places.length} learned`}>Places</SectionTitle>
-      <Card className="!py-1">
-        {[...places].sort((a, b) => b.visits - a.visits).map((pl) => (
-          <div key={pl.id} className="py-2 border-b border-line last:border-b-0">
-            <div className="font-semibold text-sm">{pl.name} <span className="text-muted font-normal">· {pl.meaning}</span></div>
-            <div className="text-xs text-muted">{pl.indoors ? "Indoors" : "Outdoors"} · {pl.usualActivity} · {pl.visits >= 999 ? "home" : `${pl.visits} visits`}</div>
-            <div className="flex justify-between items-center gap-2 mt-0.5"><span className="text-xs text-muted truncate">{pl.addedBy}</span><span className="flex gap-3 text-xs font-semibold shrink-0"><a href="#rename" className="text-accent">Rename</a><a href="#merge" className="text-muted">Merge</a><a href="#forget" className="text-muted">Forget</a></span></div>
-          </div>
-        ))}
-      </Card>
+      <PlacesList places={places} />
       <div className="mt-1.5"><OpenIn label="Maps" href="#maps" /></div>
 
       {activities.map(({ p, acts }) => acts.length > 0 && (

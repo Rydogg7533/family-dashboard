@@ -206,7 +206,19 @@ export const getDevices = () => table<Device>("devices", sampleDevices);
 export const getMedications = (person?: PersonId) => table<Medication>("medications", person ? sampleMeds.filter((m) => m.person === person) : sampleMeds, person ? (q) => q.eq("person", person) : undefined);
 export const getContacts = () => table<Contact>("contacts", sampleContacts);
 export const getHomeItems = () => table<HomeItem>("home_items", sampleHome);
-export const getPlaces = (person?: PersonId) => table<Place>("places", person ? samplePlaces.filter((p) => p.person === person) : samplePlaces, person ? (q) => q.eq("person", person) : undefined);
+// Real rows come back under RLS (own + shared), so no person filter is needed; `person` only narrows the sample.
+// Column names are mapped here because the page reads camelCase; an empty table is empty, not the sample.
+export async function getPlaces(person?: PersonId): Promise<Place[]> {
+  if (!hasSupabaseEnv()) return person ? samplePlaces.filter((p) => p.person === person) : samplePlaces;
+  try {
+    const sb = await createClient();
+    const { data } = await sb.from("places").select("id, person, name, meaning, indoors, usual_activity, visits, added_by, confirmed").order("visits", { ascending: false });
+    return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      id: String(r.id), person: (person ?? "ryan") as PersonId, name: String(r.name), meaning: String(r.meaning ?? ""), indoors: r.indoors as boolean,
+      usualActivity: String(r.usual_activity ?? ""), visits: Number(r.visits ?? 0), addedBy: r.added_by === "answer" ? "You · from a question" : r.added_by === "calendar" ? "System · from Calendar" : `System · ${String(r.added_by ?? "learned")}`,
+    }));
+  } catch { return []; }
+}
 export const getSources = () => table<Source>("sources", sampleSources);
 export const getSchedule = async (person: PersonId) => sampleSchedule[person];
 export const getActivities = async (person: PersonId) => sampleActivities[person];
