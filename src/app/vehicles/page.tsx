@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { DueChip, KV, OpenIn, PageSources, SectionTitle } from "@/components/registers";
+import { Fold } from "@/components/Fold";
+import { VehicleDetails } from "@/components/VehicleDetails";
 import { daysUntil, fmtDate, getVehicles, getViewer, personName, vehicleStatus } from "@/lib/data-registers";
 
 export const dynamic = "force-dynamic";
@@ -44,13 +46,17 @@ export default async function Vehicles() {
               <div className={`text-sm font-bold ${s.state === "ok" ? "text-green" : s.state === "warn" ? "text-amber" : "text-red"}`}>{s.text}</div>
               <div className="text-xs text-muted mt-1">Driver: {personName(v.driver)}{mine ? " (you)" : ""} · Plate {v.plate} · Added by {v.addedBy}</div>
               <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-soft px-3 py-2">
-                <div><div className="font-semibold tabular-nums">{v.mileage.toLocaleString()} mi{v.mileageEstimated ? <span className="text-xs text-muted font-normal"> (estimate)</span> : null}</div><div className="text-xs text-muted">as of {fmtDate(v.mileageAt)}</div></div>
+                <div>{v.mileageKnown === false ? <div className="font-semibold">Mileage not recorded</div> : <><div className="font-semibold tabular-nums">{v.mileage.toLocaleString()} mi{v.mileageEstimated ? <span className="text-xs text-muted font-normal"> (estimate)</span> : null}</div><div className="text-xs text-muted">as of {fmtDate(v.mileageAt)}</div></>}</div>
                 {mine ? <a href="#update-mileage" className="min-h-10 px-3 rounded-xl border border-line text-xs font-semibold inline-flex items-center">Update mileage</a> : <a href="#take-over" className="min-h-10 px-3 rounded-xl border border-line text-xs font-semibold inline-flex items-center">I&apos;ll handle this</a>}
               </div>
             </Card>
 
-            <SectionTitle>Dates and expiries</SectionTitle>
+            {/^[0-9a-f-]{36}$/.test(v.id) && <div className="mt-2 flex gap-2"><Link href={`/vehicles/${v.id}/edit`} className="min-h-10 px-3 rounded-xl border border-line text-xs font-semibold inline-flex items-center">Edit details</Link></div>}
+            <VehicleDetails v={v} />
+
+            <Fold id="veh-dates" title="Dates and expiries" summary={`${v.expiries.length}`} defaultOpen>
             <Card className="!py-1">
+              {v.expiries.length === 0 && <div className="text-sm text-muted py-2">None recorded. Add registration, inspection and insurance dates in Edit details.</div>}
               {v.expiries.map((e) => (
                 <div key={e.label} className="flex justify-between items-center gap-2 py-2 border-b border-line last:border-b-0">
                   <div className="min-w-0"><div className="font-semibold text-sm">{e.label}</div><div className="text-xs text-muted">{fmtDate(e.date)} · <a href={e.href} className="text-accent font-semibold">{e.action} in {e.source} ›</a></div></div>
@@ -58,9 +64,11 @@ export default async function Vehicles() {
                 </div>
               ))}
             </Card>
+            </Fold>
 
-            <SectionTitle right={<OpenIn label="shop booking" href="#shop" />}>Maintenance</SectionTitle>
+            <Fold id="veh-maint" title="Maintenance" summary={`${v.maintenance.length}`} defaultOpen>
             <Card className="!py-1">
+              {v.maintenance.length === 0 && <div className="text-sm text-muted py-2">No maintenance schedule yet.</div>}
               {v.maintenance.map((m) => (
                 <div key={m.item} className="flex justify-between items-center gap-2 py-2 border-b border-line last:border-b-0">
                   <div className="min-w-0"><div className="font-semibold text-sm">{m.item}</div><div className="text-xs text-muted">{m.dueDate ? `by ${fmtDate(m.dueDate)}` : ""}{m.dueDate && m.dueMiles ? " or " : ""}{m.dueMiles ? `at ${m.dueMiles.toLocaleString()} mi` : ""}{m.lastDone ? ` · last ${fmtDate(m.lastDone)}` : " · never recorded"}</div></div>
@@ -68,8 +76,9 @@ export default async function Vehicles() {
                 </div>
               ))}
             </Card>
+            </Fold>
 
-            <SectionTitle>Documents</SectionTitle>
+            <Fold id="veh-docs" title="Documents" summary={`${v.documents.length}`}>
             <Card className="!py-1">
               {v.documents.map((d) => (
                 <a key={d.name} href={d.href} className="flex justify-between items-center min-h-11 py-1 border-b border-line last:border-b-0">
@@ -79,12 +88,14 @@ export default async function Vehicles() {
               ))}
               <div className="text-xs text-muted py-2">Links only; nothing is stored here. Items open behind {personName(v.driver)}&apos;s unlock.</div>
             </Card>
+            </Fold>
 
-            <SectionTitle>Reminders</SectionTitle>
+            <Fold id="veh-rem" title="Reminders" summary={`${v.reminders.length}`}>
             <Card>
               <KV rows={v.reminders.map((r) => [r.item, r.lead] as [string, string])} />
               <div className="text-xs text-muted mt-2">Reminders go to {personName(v.driver)}; the other parent can take one over with one tap. A reminder repeats only if the date passes unrecorded, then weekly.</div>
             </Card>
+            </Fold>
 
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {v.links.map((l) => <OpenIn key={l.label} label={l.label} href={l.href} />)}
@@ -94,7 +105,8 @@ export default async function Vehicles() {
         );
       })}
 
-      <p className="text-xs text-muted mt-6">Add a vehicle, change the driver or mark one sold in <Link href="/settings" className="text-accent font-semibold">Settings</Link> (history kept, never deleted). Costs appear on Money; expiry dates on Calendar.</p>
+      <div className="mt-6"><Link href="/vehicles/new" className="min-h-11 px-4 rounded-xl bg-accent text-white font-semibold text-sm inline-flex items-center">Add a vehicle</Link></div>
+      <p className="text-xs text-muted mt-3">Change the driver or mark a vehicle sold from Edit details (history kept, never deleted). Costs appear on Money; expiry dates on Calendar.</p>
       <PageSources items={[{ label: "Utah DMV", href: "#utah-dmv" }, { label: "Insurer", href: "#insurer" }, { label: "1Password", href: "#1password" }, { label: "Organized", href: "#finder-vehicles" }, { label: "NHTSA recalls", href: "#nhtsa" }]} />
     </>
   );

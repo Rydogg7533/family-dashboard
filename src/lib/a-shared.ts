@@ -10,6 +10,7 @@ export type Vehicle = {
   driver: PersonId; mileage: number; mileageAt: string; mileageEstimated: boolean;
   expiries: Expiry[]; maintenance: Maintenance[]; documents: DocLink[];
   reminders: { item: string; lead: string }[]; links: { label: string; href: string }[]; addedBy: string;
+  driverId?: string | null; details?: Record<string, unknown>; vinPointer?: string | null; mileageKnown?: boolean;
 };
 
 export type Device = {

@@ -201,7 +201,29 @@ export async function getViewer(): Promise<Person> {
     return match ?? PEOPLE[0];
   } catch { return PEOPLE[0]; }
 }
-export const getVehicles = () => table<Vehicle>("vehicles", sampleVehicles);
+// Real rows are snake_case with a profile uuid as driver; the pages read the camelCase Vehicle shape.
+// An empty table shows the sample (preview/demo); a table with rows never does.
+export async function getVehicles(): Promise<Vehicle[]> {
+  if (!hasSupabaseEnv()) return sampleVehicles;
+  try {
+    const sb = await createClient();
+    const [{ data }, { data: profs }] = await Promise.all([sb.from("vehicles").select("*").order("created_at"), sb.from("profiles").select("id, display_name")]);
+    if (!data || !data.length) return sampleVehicles;
+    const who = new Map((profs ?? []).map((p) => [p.id as string, String(p.display_name ?? "").toLowerCase()]));
+    return (data as Array<Record<string, unknown>>).map((r) => {
+      const dn = who.get(String(r.driver ?? ""));
+      const driver = (PEOPLE.find((p) => p.name.toLowerCase() === dn)?.id ?? "ryan") as PersonId;
+      return {
+        id: String(r.id), name: String(r.name), short: String(r.short), year: Number(r.year ?? 0), make: String(r.make ?? ""), model: String(r.model ?? ""),
+        plate: r.plate ? String(r.plate) : "not recorded", driver, driverId: (r.driver as string | null) ?? null, mileage: Number(r.mileage ?? 0), mileageKnown: r.mileage != null, mileageAt: r.mileage_at ? String(r.mileage_at) : "",
+        mileageEstimated: Boolean(r.mileage_estimated),
+        expiries: (r.expiries as Vehicle["expiries"]) ?? [], maintenance: (r.maintenance as Vehicle["maintenance"]) ?? [], documents: (r.documents as Vehicle["documents"]) ?? [],
+        reminders: (r.reminders as Vehicle["reminders"]) ?? [], links: (r.links as Vehicle["links"]) ?? [],
+        addedBy: String(r.added_by ?? ""), details: (r.details as Record<string, unknown>) ?? {}, vinPointer: (r.vin_pointer as string | null) ?? null,
+      } satisfies Vehicle;
+    });
+  } catch { return sampleVehicles; }
+}
 export const getDevices = () => table<Device>("devices", sampleDevices);
 export const getMedications = (person?: PersonId) => table<Medication>("medications", person ? sampleMeds.filter((m) => m.person === person) : sampleMeds, person ? (q) => q.eq("person", person) : undefined);
 export const getContacts = () => table<Contact>("contacts", sampleContacts);

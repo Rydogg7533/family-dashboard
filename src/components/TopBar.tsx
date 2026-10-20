@@ -19,7 +19,7 @@ const moreTitles: Record<string, string> = {
 };
 const subTitles: Record<string, string> = {
   "/shop/orders": "Orders", "/shop/cases": "Support cases",
-  "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications",
+  "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications", "/vehicles/new": "Add a vehicle",
 };
 const moneyTitles: Record<string, string> = {
   "/money/receipts": "Receipts", "/money/recurring": "Recurring", "/money/subscriptions": "Subscriptions",
@@ -32,7 +32,7 @@ const pageTitle: Record<string, string> = {
 };
 // Detail pages: /<root>/<id> → label for the last crumb.
 const detailLabel: Record<string, string> = {
-  "/tasks": "Task", "/records": "Record", "/family": "Person", "/messages": "Conversation", "/money/reconcile": "Reconcile",
+  "/tasks": "Task", "/records": "Record", "/family": "Person", "/messages": "Conversation", "/money/reconcile": "Reconcile", "/vehicles": "Edit details",
 };
 
 export function crumbsFor(path: string): Crumb[] {
