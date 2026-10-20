@@ -1,14 +1,14 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
-// Per-item capture: metadata only; the file lands on the Mac mini and is filed to Finance/<year>/<category>.
-export async function attachProof(transactionId: string, kind: "photo" | "digital_receipt" | "statement_line", fileName: string | null) {
+// Per-item capture: the browser stores the file in the private captures bucket; this records the proof pointing at it.
+export async function attachProof(transactionId: string, kind: "photo" | "digital_receipt" | "statement_line", fileName: string | null, storedPath: string | null = null) {
   if (!hasSupabaseEnv()) return { ok: true, sample: true };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false };
-  const { error } = await sb.from("proofs").insert({ transaction_id: transactionId, kind, source_href: fileName ? `drop:${fileName}` : "#", captured_by: user.id });
-  if (!error && kind !== "statement_line") await sb.from("receipts").insert({ merchant: "[from capture]", amount: 0, date: new Date().toISOString().slice(0, 10), source: kind === "photo" ? "camera" : "upload", file_path: fileName, transaction_id: transactionId, status: "matched", uploaded_by: user.id }).then(() => {}, () => {});
+  const { error } = await sb.from("proofs").insert({ transaction_id: transactionId, kind, source_href: storedPath ? `captures:${storedPath}` : fileName ? `drop:${fileName}` : "#", captured_by: user.id });
+  if (!error && kind !== "statement_line") await sb.from("receipts").insert({ merchant: "[from capture]", amount: 0, date: new Date().toISOString().slice(0, 10), source: kind === "photo" ? "camera" : "upload", file_path: storedPath ?? fileName, transaction_id: transactionId, status: "matched", uploaded_by: user.id }).then(() => {}, () => {});
   return { ok: !error };
 }
 

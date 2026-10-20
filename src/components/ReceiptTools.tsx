@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Transaction, Receipt } from "@/lib/data-money";
+import { createClient as createBrowserSb } from "@/lib/supabase/client";
 import { attachProof, explainCharge, answerReceiptQuestion } from "@/app/money/actions";
 
 const money = (n: number) => "$" + n.toFixed(2);
@@ -9,6 +10,7 @@ const money = (n: number) => "$" + n.toFixed(2);
 // The per-charge resolve panel: Camera / Upload / Find in email / Explain. Any one resolves the item once recorded.
 export function ChargeResolver({ tx, mode }: { tx: Transaction; mode: string | null }) {
   const [done, setDone] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [rule, setRule] = useState(true);
   const [searching, setSearching] = useState(mode === "email");
@@ -20,8 +22,17 @@ export function ChargeResolver({ tx, mode }: { tx: Transaction; mode: string | n
 
   async function file(kind: "photo" | "digital_receipt", f: File | undefined) {
     if (!f) return;
-    await attachProof(tx.id, kind, f.name);
-    setDone(`${kind === "photo" ? "Photo" : "File"} "${f.name}" attached to ${tx.merchant} ${money(tx.amount)}. Filed to Finance/2026/${tx.category ?? "[category]"}; a thumbnail and link stay here.`);
+    setErr(null);
+    let key: string;
+    try {
+      const sb = createBrowserSb();
+      const { data: { user } } = await sb.auth.getUser();
+      key = `${user?.id ?? "member"}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID().slice(0, 8)}-${f.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120)}`;
+      const { error } = await sb.storage.from("captures").upload(key, f, { contentType: f.type || undefined, upsert: false });
+      if (error) throw new Error(error.message);
+    } catch (e) { setErr(`The file did not upload (${e instanceof Error ? e.message : "unknown error"}). Nothing was attached; please try again.`); return; }
+    await attachProof(tx.id, kind, f.name, key);
+    setDone(`${kind === "photo" ? "Photo" : "File"} "${f.name}" saved and attached to ${tx.merchant} ${money(tx.amount)}.`);
   }
 
   if (done) return <div className="card border-green text-sm"><span className="text-green font-semibold">Resolved.</span> {done} <Link href="/money" className="font-semibold text-accent">Back to Money</Link></div>;
@@ -32,6 +43,7 @@ export function ChargeResolver({ tx, mode }: { tx: Transaction; mode: string | n
       <div className="font-semibold">{tx.merchant} {money(tx.amount)}</div>
       <div className="text-[11px] text-muted">{tx.for_person === "Joint" ? "Joint card" : `${tx.for_person}'s card`} · {tx.captured_by}</div>
       <div className="text-xs text-muted">Searched: {tx.searched.length ? tx.searched.join(", ") : "nothing yet"} · no match by amount, merchant and date ±3 days.</div>
+      {err && <div className="text-xs text-red font-semibold">{err}</div>}
       {searching && <div className="text-xs text-accent font-semibold">Searching email (3 accounts), the financial inbox and Organized for {money(tx.amount)} near this date…</div>}
       {!searching && mode === "email" && <div className="text-xs text-amber font-semibold">Nothing found in email within ±3 days. Snap the paper receipt, upload a scan, or explain.</div>}
       <div className="grid grid-cols-2 gap-2">
