@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 export function hasSupabaseEnv() {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -26,3 +27,13 @@ export async function createClient() {
     },
   );
 }
+
+// The signed-in person for READ paths, once per request. getClaims() checks the signed token locally when the project
+// uses asymmetric keys (no network round trip); otherwise it falls back to asking the Auth server, as before.
+// Writes (server actions) keep calling getUser() so they always verify with the Auth server.
+export const getRequestUser = cache(async (): Promise<{ id: string; email: string | null } | null> => {
+  const sb = await createClient();
+  const { data } = await sb.auth.getClaims();
+  const c = data?.claims;
+  return c?.sub ? { id: String(c.sub), email: typeof c.email === "string" ? c.email : null } : null;
+});

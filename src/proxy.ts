@@ -26,7 +26,9 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Signed-in check without a network call when the project uses asymmetric keys; also refreshes the cookie when due.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims ?? null;
   const isLogin = request.nextUrl.pathname.startsWith("/login");
   if (!user && !isLogin) {
     const to = request.nextUrl.clone();

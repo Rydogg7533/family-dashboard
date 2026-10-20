@@ -1,6 +1,6 @@
 // Slice A data: people, vehicles, devices, medications, contacts, home items,
 // places, sources, emergency plan. Sample fallbacks when Supabase is unset.
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createClient, getRequestUser, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export * from "@/lib/a-shared";
 import { PEOPLE, dIso, daysUntil, dueText, type Device, type Vehicle, type Person, type PersonId, type Medication, type Contact, type HomeItem, type Place, type Source, type EmergencySection, type ScheduleBlock, type Activity, type OpenItem } from "@/lib/a-shared";
@@ -194,7 +194,7 @@ export async function getViewer(): Promise<Person> {
   if (!hasSupabaseEnv()) return PEOPLE[0];
   try {
     const sb = await createClient();
-    const { data: { user } } = await sb.auth.getUser();
+    const user = await getRequestUser();
     if (!user) return PEOPLE[0];
     const { data } = await sb.from("profiles").select("display_name, role").eq("id", user.id).single();
     const match = PEOPLE.find((p) => p.name.toLowerCase() === (data?.display_name ?? "").toLowerCase());
