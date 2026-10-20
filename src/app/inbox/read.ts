@@ -81,6 +81,7 @@ export async function readCapture(inboxId: string) {
     if (cl) plan.push({ t: "link", text: `Claim "${cl.title}": added as a document` });
   }
   parsed.plan = plan;
+  parsed.home = home;
   parsed.claim_plan = `LINK Reimbursement claim: expect ${typeof parsed.amount === "number" ? "$" + (parsed.amount as number).toFixed(2) : "the amount"}${parsed.vendor ? ` from ${parsed.vendor}` : ""}, check back in 4 weeks, reminder in Tasks`;
 
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
