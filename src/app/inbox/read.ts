@@ -49,7 +49,7 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.", files, feature: "capture-read" });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read" });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
