@@ -54,6 +54,7 @@ export default async function Health() {
                 <span className={`shrink-0 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold ${ISSUE_CLS[i.status] ?? "bg-soft"}`}>{ISSUE_LABEL[i.status] ?? i.status}</span>
               </div>
               <div className="text-xs text-muted mt-1">{i.reporter_name ?? "someone"} · {SEV_LABEL[i.severity] ?? i.severity} · {i.page}{i.item_kind ? ` · ${i.item_kind}` : ""} · {ago(i.created_at)}{i.app_version ? ` · v${i.app_version}` : ""}</div>
+              {i.screenshots && i.screenshots.length > 0 && <div className="text-xs mt-1.5 flex gap-3">{i.screenshots.map((_, n) => <a key={n} href={`/api/issue-shot/${i.id}/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">Screenshot {n + 1}</a>)}</div>}
               {i.status_note && <div className="text-sm mt-1.5">{i.status_note}{i.fixed_in ? <span className="text-muted"> · fixed in {i.fixed_in}</span> : null}</div>}
             </Card>
           ))}

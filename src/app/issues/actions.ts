@@ -9,6 +9,7 @@ export type IssueInput = {
   item_id?: string | null;
   user_agent?: string | null;
   viewport?: string | null;
+  screenshots?: string[];
 };
 
 function appVersion() {
@@ -35,6 +36,7 @@ export async function reportIssue(input: IssueInput): Promise<{ ok: boolean; id?
     app_version: appVersion(),
     user_agent: input.user_agent?.slice(0, 300) ?? null,
     viewport: input.viewport ?? null,
+    screenshots: (input.screenshots ?? []).filter((x) => typeof x === "string" && x.startsWith(`${user.id}/`)).slice(0, 3),
   }).select("id").single();
   if (error) return { ok: false, error: error.message };
   await sb.from("activity_log").insert({ actor: profile?.display_name ?? "member", action: "issue_reported", subject: text.slice(0, 80), ref: data.id, undoable: false }).then(() => {}, () => {});
@@ -43,7 +45,7 @@ export async function reportIssue(input: IssueInput): Promise<{ ok: boolean; id?
 
 export type IssueRow = {
   id: string; reporter_name: string | null; text: string; severity: string; page: string; item_kind: string | null;
-  status: string; status_note: string | null; fixed_in: string | null; app_version: string | null; created_at: string; updated_at: string;
+  status: string; status_note: string | null; fixed_in: string | null; app_version: string | null; created_at: string; updated_at: string; screenshots?: string[] | null;
 };
 
 export async function listIssues(limit = 50): Promise<IssueRow[]> {
@@ -55,6 +57,6 @@ export async function listIssues(limit = 50): Promise<IssueRow[]> {
     ];
   }
   const sb = await createClient();
-  const { data } = await sb.from("issues").select("id, reporter_name, text, severity, page, item_kind, status, status_note, fixed_in, app_version, created_at, updated_at").order("created_at", { ascending: false }).limit(limit);
+  const { data } = await sb.from("issues").select("id, reporter_name, text, severity, page, item_kind, status, status_note, fixed_in, app_version, created_at, updated_at, screenshots").order("created_at", { ascending: false }).limit(limit);
   return (data as IssueRow[]) ?? [];
 }
