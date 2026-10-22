@@ -12,7 +12,7 @@
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { dir, die, option, openGmail, readMessages } from "./email-lib.mjs";
+import { dir, die, option, openGmail, readMessages, pattern } from "./email-lib.mjs";
 
 const args = process.argv.slice(2);
 const query = option(args, "--q") || "in:inbox";
@@ -20,12 +20,6 @@ const MAX = parseInt(option(args, "--max") || "10000", 10);
 const MIN = parseInt(option(args, "--min") || "3", 10);
 const SHOW = args.includes("--show-subjects");
 const { account, api } = openGmail(args, { allowWrite: false });
-
-const pattern = (s) => s.toLowerCase()
-  .replace(/\$?\s?\d[\d,]*(\.\d+)?%?/g, "#")
-  .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/g, "<mon>")
-  .replace(/\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b/g, "<day>")
-  .replace(/[^a-z#<>' ]+/g, " ").replace(/\s+/g, " ").trim();
 
 async function main() {
   console.log(`READ-ONLY CLUSTERS — ${account} — search: ${query}`);

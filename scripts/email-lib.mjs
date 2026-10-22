@@ -65,6 +65,13 @@ export function decide(e) {
   return { stage: "none", action: "needs-model", reason: "no free rule matched (a person or a new company)" };
 }
 
+// Subject pattern: numbers, amounts, dates and weekdays stripped, so "the same issue" repeats compare equal.
+export const pattern = (s) => s.toLowerCase()
+  .replace(/\$?\s?\d[\d,]*(\.\d+)?%?/g, "#")
+  .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/g, "<mon>")
+  .replace(/\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b/g, "<day>")
+  .replace(/[^a-z#<>' ]+/g, " ").replace(/\s+/g, " ").trim();
+
 export function parse(msg) {
   const h = Object.fromEntries((msg.payload?.headers || []).map((x) => [x.name.toLowerCase(), x.value]));
   const from = h["from"] || "";
@@ -76,6 +83,7 @@ export function parse(msg) {
     id: msg.id, name: (m ? m[1] : "").trim(), address, domain: address.split("@")[1] || "", labels,
     subject: h["subject"] || "", snippet: msg.snippet || "", folder,
     listUnsubscribe: !!h["list-unsubscribe"], precedenceBulk: /bulk|list|junk/i.test(h["precedence"] || ""), autoSubmitted: !!h["auto-submitted"] && !/^no$/i.test(h["auto-submitted"]),
+    ts: Number(msg.internalDate || 0),
     date: msg.internalDate ? new Date(Number(msg.internalDate)).toISOString().slice(0, 10) : "",
   };
 }

@@ -4,6 +4,7 @@
 //   node scripts/email-apply.mjs --account admin@shvr.co --keep tiller.com,kalshi.com            # DRY RUN (default)
 //   node scripts/email-apply.mjs --account admin@shvr.co --keep tiller.com,kalshi.com --limit 20 --apply   # try 20 first
 //   node scripts/email-apply.mjs --account admin@shvr.co --keep tiller.com,kalshi.com --apply            # the real run
+//   node scripts/email-apply.mjs --account admin@shvr.co --cluster "tiller.com::hello <day>::0"        # archive one named cluster (see email-clusters.mjs), keeping the N newest
 //   node scripts/email-apply.mjs --account admin@shvr.co --undo <undo file printed by the run>           # put them back
 //
 // What it changes, and only this: for inbox mail the free rules call marketing, one-time codes, no-reply notices
@@ -23,7 +24,7 @@
 
 import { writeFileSync, appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { dir, die, option, openGmail, readMessages } from "./email-lib.mjs";
+import { dir, die, option, openGmail, readMessages, pattern } from "./email-lib.mjs";
 
 const args = process.argv.slice(2);
 const days = parseInt(option(args, "--days") || "90", 10);
@@ -33,6 +34,9 @@ const LIMIT = option(args, "--limit") ? parseInt(option(args, "--limit"), 10) : 
 const APPLY = args.includes("--apply");
 const UNDO = option(args, "--undo");
 const keep = (option(args, "--keep") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+// --cluster "sender-domain::subject pattern::N" (repeatable): archive that exact cluster, keeping the N newest (default 1).
+// Patterns are the ones printed by scripts/email-clusters.mjs --show-subjects.
+const clusterSpecs = args.flatMap((a, i) => (a === "--cluster" ? [args[i + 1]] : [])).filter(Boolean).map((x) => { const [domain, pat, n] = x.split("::"); return { domain: (domain || "").toLowerCase(), pat: (pat || "").toLowerCase(), keepNewest: n === undefined || n === "" ? 1 : parseInt(n, 10) }; });
 const LABEL = "Dashboard/Handled";
 const { account, api } = openGmail(args, { allowWrite: true });
 const undoDir = join(dir, "undo");
@@ -78,6 +82,15 @@ async function main() {
   const starred = rows.filter((r) => r.labels.includes("STARRED"));
   const kept = rows.filter((r) => isKept(r) && !r.labels.includes("STARRED"));
   let todo = rows.filter((r) => (r.action === "archive" || r.action === "skip") && !r.labels.includes("STARRED") && !isKept(r));
+  if (clusterSpecs.length) {   // cluster mode: ONLY the named clusters, never the general rules
+    const picked = [];
+    for (const c of clusterSpecs) {
+      const members = rows.filter((r) => (r.domain === c.domain || r.domain.endsWith("." + c.domain)) && pattern(r.subject) === c.pat && !r.labels.includes("STARRED") && !isKept(r)).sort((a, b) => b.ts - a.ts);
+      console.log(`  cluster ${c.domain} "${c.pat.slice(0, 60)}": ${members.length} found, keeping the ${Math.min(c.keepNewest, members.length)} newest`);
+      picked.push(...members.slice(c.keepNewest));
+    }
+    todo = [...new Map(picked.map((r) => [r.id, r])).values()].map((r) => ({ ...r, reason: `cluster: ${r.domain}` }));
+  }
   const eligible = todo.length;
   todo = todo.slice(0, LIMIT);
   const stay = rows.length - todo.length;
