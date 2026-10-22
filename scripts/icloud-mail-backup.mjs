@@ -5,7 +5,7 @@
 // folder, plus a manifest (size, SHA-256, flags, internal date) so a later restore or undo is possible.
 //
 //   node scripts/icloud-mail-backup.mjs --dest "/Volumes/<drive>/Mail Backup" --dry   # counts + sizes only
-//   node scripts/icloud-mail-backup.mjs --dest "/Volumes/<drive>/Mail Backup"         # the real copy
+//   node scripts/icloud-mail-backup.mjs --dest "/Volumes/<drive>/Mail Backup"         # the real copy (4 connections; --workers 1-6)
 //
 // Safety rules (same as the other agents):
 //   - READ-ONLY on the mailbox: folders are opened with EXAMINE, bodies fetched with BODY.PEEK, so nothing is
@@ -19,7 +19,7 @@
 // Layout:  <dest>/icloud-mail-ryan/<folder path>/<uidvalidity>-<uid>.eml, manifest.jsonl, _folder.json
 //          <dest>/icloud-mail-ryan/REPORT.txt  (per-folder server count vs files on disk)
 
-import { readFileSync, existsSync, mkdirSync, statfsSync, createWriteStream, linkSync, unlinkSync, statSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, statfsSync, linkSync, unlinkSync, statSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -33,6 +33,7 @@ const DRY = flag("--dry");
 const DEST_PARENT = opt("--dest");
 const ENV_PATH = opt("--env") || join(homedir(), "_secrets_local_only", "email-agent", "icloud-ryan.env");
 const LABEL = opt("--label") || "icloud-mail-ryan";
+const WORKERS = Math.min(6, Math.max(1, parseInt(opt("--workers") || "4", 10) || 4));
 const GIB = 1024 ** 3;
 
 function die(msg) { console.error(`STOP: ${msg}`); process.exit(2); }
@@ -83,26 +84,17 @@ async function folderMeta(client, path) {
   } finally { lock.release(); }
 }
 
-async function saveMessage(client, dir, uidValidity, m) {
+// Writes one message that was already fetched into memory. Never overwrites: the file is built under a .part name,
+// then link()ed to its final name, which fails if that name exists. Returns null when it already existed.
+function saveBuffer(dir, uidValidity, m, buf) {
   const final = join(dir, `${uidValidity}-${m.uid}.eml`);
-  if (existsSync(final) && statSync(final).size > 0) return { file: final, skipped: true };
+  if (existsSync(final) && statSync(final).size > 0) return null;
+  if (!buf || buf.length === 0) throw new Error(`uid ${m.uid}: empty message`);
   const part = final + ".part";
-  const dl = await client.download(String(m.uid), undefined, { uid: true });
-  if (!dl || !dl.content) throw new Error(`uid ${m.uid}: no content returned`);
-  const hash = createHash("sha256");
-  let bytes = 0;
-  const out = createWriteStream(part, { flags: "w" });
-  await new Promise((resolve, reject) => {
-    out.on("error", reject);
-    out.on("finish", resolve);
-    dl.content.on("error", reject);
-    dl.content.on("data", (chunk) => { hash.update(chunk); bytes += chunk.length; });
-    dl.content.pipe(out);
-  });
-  if (bytes === 0) { unlinkSync(part); throw new Error(`uid ${m.uid}: empty download`); }
-  linkSync(part, final); // fails with EEXIST rather than overwrite
+  writeFileSync(part, buf); // our own temp file; overwriting a leftover .part from a stopped run is fine
+  linkSync(part, final);
   unlinkSync(part);
-  return { file: final, bytes, sha256: hash.digest("hex"), sizeMismatch: m.size && Math.abs(bytes - m.size) > 0 ? { server: m.size, got: bytes } : null };
+  return { bytes: buf.length, sha256: createHash("sha256").update(buf).digest("hex"), sizeMismatch: m.size && buf.length !== m.size ? { server: m.size, got: buf.length } : null };
 }
 
 // ---------- main ----------
@@ -133,10 +125,15 @@ async function main() {
   if (free < totalBytes + 5 * GIB) die("not enough free space at the destination. Nothing was downloaded.");
   if (DRY) { console.log("Dry run finished. Re-run without --dry to copy."); await client.logout(); return; }
 
-  // pass 2: copy
+  // pass 2: copy. Messages are fetched in batches (one FETCH per batch, not one per message) by several
+  // connections at once, because iCloud's per-request delay, not bandwidth, is what makes this slow.
   if (!existsSync(DEST)) mkdirSync(DEST); // leaf only; parent must exist
   const report = [`iCloud mail backup — ${new Date().toISOString()}`, `account: ${USER}`, ""];
   let problems = 0, warnings = 0, newFiles = 0;
+  const failedBy = new Map(); // folder path -> count of messages that could not be saved
+  const tasks = [];
+  let alreadyHave = 0, toGet = 0;
+  const prepared = [];
   for (const item of inv) {
     const { folder, uidValidity, messages } = item;
     const dir = join(DEST, ...folder.path.split(folder.delimiter || "/").map(segment));
@@ -146,30 +143,62 @@ async function main() {
       const prev = JSON.parse(readFileSync(marker, "utf8"));
       if (prev.path !== folder.path) { console.error(`  CLASH: ${dir} already holds "${prev.path}", skipping "${folder.path}"`); report.push(`CLASH  ${folder.path}`); problems++; continue; }
     } else writeFileSync(marker, JSON.stringify({ path: folder.path, uidValidity, startedAt: new Date().toISOString() }, null, 2), { flag: "wx" });
+    prepared.push({ folder, uidValidity, messages, dir, manifest: join(dir, "manifest.jsonl") });
+    const todo = messages.filter((m) => { const f = join(dir, `${uidValidity}-${m.uid}.eml`); return !(existsSync(f) && statSync(f).size > 0); });
+    alreadyHave += messages.length - todo.length; toGet += todo.length;
+    let batch = [], size = 0;
+    const flush = () => { if (batch.length) tasks.push({ folder, uidValidity, dir, manifest: join(dir, "manifest.jsonl"), msgs: batch }); batch = []; size = 0; };
+    for (const m of todo) { batch.push(m); size += m.size || 0; if (batch.length >= 100 || size >= 25 * 1024 * 1024) flush(); }
+    flush();
+  }
+  console.log(`Already saved from earlier runs: ${alreadyHave}. To download now: ${toGet} in ${tasks.length} batches, ${WORKERS} connections.`);
 
-    let saved = 0, failed = 0;
-    const manifest = join(dir, "manifest.jsonl");
-    const lock = messages.length ? await (async () => { for (let a = 1; a <= 3; a++) { try { return await client.getMailboxLock(folder.path, { readOnly: true }); } catch (e) { console.error(`  ${folder.path}: open attempt ${a} failed: ${e.message}`); try { await client.logout(); } catch {} await sleep(2000); client = await connect(); } } throw new Error("cannot open " + folder.path); })() : null;
-    try {
-      for (let i = 0; i < messages.length; i++) {
-        const m = messages[i];
-        let r, err;
-        for (let a = 1; a <= 3 && !r; a++) {
-          try { r = await saveMessage(client, dir, uidValidity, m); }
-          catch (e) { err = e; if (a < 3) await sleep(1500 * a); }
-        }
-        if (!r) { failed++; console.error(`  ${folder.path} uid ${m.uid}: ${err?.message}`); continue; }
-        if (!r.skipped) {
-          newFiles++;
-          appendFileSync(manifest, JSON.stringify({ uid: m.uid, uidValidity, size: m.size, bytes: r.bytes, sha256: r.sha256, internalDate: m.internalDate, flags: m.flags, file: `${uidValidity}-${m.uid}.eml` }) + "\n");
-          if (r.sizeMismatch) warnings++;
-        }
-        saved++;
-        if ((i + 1) % 250 === 0) console.log(`  ${folder.path}: ${i + 1}/${messages.length}`);
+  let done = 0; const started = Date.now(); let lastPrint = 0;
+  const progress = (force) => {
+    if (!force && done - lastPrint < 500) return; lastPrint = done;
+    const mins = (Date.now() - started) / 60000, rate = done / Math.max(mins, 0.01);
+    const eta = rate > 0 ? Math.round((toGet - done) / rate) : "?";
+    console.log(`  ${done}/${toGet} downloaded · ${Math.round(rate)}/min · about ${eta} min left`);
+  };
+
+  async function worker(first) {
+    let c = first || await connect();
+    for (;;) {
+      const t = tasks.shift(); if (!t) break;
+      const byUid = new Map(t.msgs.map((m) => [m.uid, m]));
+      let remaining = new Set(t.msgs.map((m) => m.uid));
+      for (let attempt = 1; attempt <= 3 && remaining.size; attempt++) {
+        let lock;
+        try {
+          lock = await c.getMailboxLock(t.folder.path, { readOnly: true });
+          for await (const msg of c.fetch([...remaining].join(","), { uid: true, source: true }, { uid: true })) {
+            const m = byUid.get(msg.uid); if (!m || !remaining.has(msg.uid)) continue;
+            const r = saveBuffer(t.dir, t.uidValidity, m, msg.source);
+            if (r) {
+              newFiles++; done++;
+              appendFileSync(t.manifest, JSON.stringify({ uid: m.uid, uidValidity: t.uidValidity, size: m.size, bytes: r.bytes, sha256: r.sha256, internalDate: m.internalDate, flags: m.flags, file: `${t.uidValidity}-${m.uid}.eml` }) + "\n");
+              if (r.sizeMismatch) warnings++;
+            }
+            remaining.delete(msg.uid);
+          }
+        } catch (e) {
+          console.error(`  ${t.folder.path}: batch attempt ${attempt} failed: ${e.message}`);
+          try { await c.logout(); } catch {}
+          await sleep(2000 * attempt);
+          try { c = await connect(); } catch (e2) { console.error(`  reconnect failed: ${e2.message}`); }
+        } finally { try { lock?.release(); } catch {} }
       }
-    } finally { lock?.release(); }
+      if (remaining.size) { failedBy.set(t.folder.path, (failedBy.get(t.folder.path) || 0) + remaining.size); console.error(`  ${t.folder.path}: ${remaining.size} messages could not be saved`); }
+      progress(false);
+    }
+    try { await c.logout(); } catch {}
+  }
+  await Promise.all(Array.from({ length: WORKERS }, (_, i) => worker(i === 0 ? client : null)));
+  progress(true);
 
+  for (const { folder, uidValidity, messages, dir } of prepared) {
     const onDisk = readdirSync(dir).filter((n) => n.startsWith(uidValidity + "-") && n.endsWith(".eml")).length;
+    const failed = failedBy.get(folder.path) || 0;
     const ok = failed === 0 && onDisk >= messages.length;
     if (!ok) problems++;
     const line = `${ok ? "OK  " : "FAIL"}  server ${messages.length}  on disk ${onDisk}  failed ${failed}  ${folder.path}`;
@@ -177,7 +206,6 @@ async function main() {
   }
   report.push("", `new files this run: ${newFiles}`, `size differences (informational): ${warnings}`, `folders with problems: ${problems}`);
   writeFileSync(join(DEST, "REPORT.txt"), report.join("\n") + "\n");
-  try { await client.logout(); } catch {}
   console.log(`\n${problems === 0 ? "PASS" : "FAIL"} — ${newFiles} new files, ${warnings} size differences, ${problems} folders with problems. Report: ${join(DEST, "REPORT.txt")}`);
   process.exit(problems === 0 ? 0 : 1);
 }
