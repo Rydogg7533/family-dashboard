@@ -89,41 +89,63 @@ async function main() {
       summary = `${n} similar emails from ${g.address} between ${oldest.date} and ${newest.date}. Archive them all, make a rule, or keep this as a task. The newest is linked.`;
     } else { if (g.action === "money") singleReceipts += n; else { single += n; singleRows.push(...g.msgs); } continue; }
     tasks.push({ merge_key: `email:${account}:${g.domain}:${g.pat}`, kind: "decide", tier: 2, origin_kind: "email", origin_ref: gmailUrl(newest.id), title, summary,
-      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id) })), count: n, sub: g.action === "money" });
+      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id) })), count: n, sub: g.action === "money", rep: g.action === "needs-model" ? newest : null });
   }
 
-  // ---------- optional: model triage of single messages ----------
+  // ---------- optional: model triage ----------
+  // The model judges every single message AND the newest message of each repeat group (so a group of failed-payment
+  // notices gets a real urgency, and a group of test bookings can be dropped). Same-topic answers merge into one task.
   let modelNote = "";
   if (TRIAGE) {
     const key = loadKey(option(args, "--env-file"));
     if (!key) die("--model-triage needs ANTHROPIC_API_KEY in ~/_secrets_local_only/family-dashboard.env");
     const today = new Date().toISOString().slice(0, 10);
     const cache = loadCache(account);
-    const fresh = singleRows.filter((r) => !cache[r.id]).sort((a, b) => b.ts - a.ts).slice(0, MODEL_LIMIT);
+    const fresh0 = (id) => !cache[id] || cache[id].topic === undefined;                // answers saved before "topic" existed are asked again
+    const candidates = [...singleRows, ...tasks.filter((t) => t.rep).map((t) => t.rep)];
+    const fresh = candidates.filter((r) => fresh0(r.id)).sort((a, b) => b.ts - a.ts).slice(0, MODEL_LIMIT);
     let inTok = 0, outTok = 0, unreadable = 0, next = 0;
-    console.log(`\nModel triage: ${singleRows.length} single messages, ${singleRows.length - singleRows.filter((r) => !cache[r.id]).length} already decided (cached), asking about ${fresh.length} now.`);
+    console.log(`\nModel triage: ${candidates.length} messages (${singleRows.length} single, ${candidates.length - singleRows.length} group representatives), ${candidates.length - candidates.filter((r) => fresh0(r.id)).length} already decided (cached), asking about ${fresh.length} now.`);
     await Promise.all(Array.from({ length: 3 }, async () => {
       for (;;) {
         const i = next++; if (i >= fresh.length) return;
-        try { const a = await ask(fresh[i], { key, api: API, model: MODEL, today }); inTok += a.inTok; outTok += a.outTok; if (a.out) cache[fresh[i].id] = { ...a.out, at: today }; else unreadable++; }
+        try { const a = await ask(fresh[i], { key, api: API, model: MODEL, today }); inTok += a.inTok; outTok += a.outTok; if (a.out) cache[fresh[i].id] = { ...a.out, topic: String(a.out.topic || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40), at: today }; else unreadable++; }
         catch (e) { unreadable++; }
       }
     }));
     saveCache(account, cache);
     const cost = (inTok * PRICE_IN + outTok * PRICE_OUT) / 1e6;
-    let noAction = 0, quiet = 0;
-    for (const r of singleRows) {
-      const d = cache[r.id]; if (!d) continue;
-      const wanted = d.needs_action && ["reply", "do", "decide"].includes(d.kind) && (INCLUDE_WHENEVER || d.urgency !== "whenever");
-      if (!wanted) { if (d.needs_action) quiet++; else noAction++; continue; }
-      const due = d.urgency === "now" ? new Date().toISOString() : d.urgency === "soon" ? new Date(Date.now() + 3 * 86400000).toISOString() : null;
-      tasks.push({ merge_key: `email:${account}:msg:${r.id}`, kind: d.kind, tier: 2, origin_kind: "email", origin_ref: gmailUrl(r.id), due_at: due,
-        title: short(String(d.title || r.subject || "(no subject)"), 70), summary: short(`${d.why || ""} (${r.name || r.domain}, ${r.date})`, 240),
-        origins: [{ kind: "email", account, id: r.id, date: r.date, url: gmailUrl(r.id) }], count: 1, sub: false });
+    const wants = (d) => d && d.needs_action && ["reply", "do", "decide"].includes(d.kind) && (INCLUDE_WHENEVER || d.urgency !== "whenever");
+    const dueOf = (u) => (u === "now" ? new Date().toISOString() : u === "soon" ? new Date(Date.now() + 3 * 86400000).toISOString() : null);
+    const rank = { now: 0, soon: 1, whenever: 2 };
+
+    // repeat groups: the newest message's verdict sets kind, title and urgency; "needs nothing" drops the task
+    const dropped = [];
+    for (let i = tasks.length - 1; i >= 0; i--) {
+      const t = tasks[i]; if (!t.rep) continue;
+      const d = cache[t.rep.id]; if (!d) continue;                                     // unjudged: keep the generic task
+      if (!wants(d)) { dropped.push(`${t.title}`); tasks.splice(i, 1); continue; }
+      t.kind = d.kind; t.due_at = dueOf(d.urgency); t.title = short(`${d.title || t.title} (×${t.count})`, 90); t.summary = short(`${d.why || ""} ${t.summary}`, 300);
     }
-    modelNote = ` Model: ${fresh.length - unreadable} answered, ${unreadable} unreadable, ${noAction} need nothing, ${quiet} lower-urgency left out; ${inTok} tokens in, ${outTok} out, about $${cost.toFixed(4)}.`;
+    // single messages: same topic = one task
+    const byTopic = new Map(); let noAction = 0, quiet = 0;
+    for (const r of singleRows) {
+      const d = cache[r.id]; if (!d || d.topic === undefined) continue;
+      if (!wants(d)) { if (d.needs_action) quiet++; else noAction++; continue; }
+      const k = d.topic ? `topic:${d.topic}` : `msg:${r.id}`;
+      (byTopic.get(k) || byTopic.set(k, []).get(k)).push({ r, d });
+    }
+    for (const [k, list] of byTopic) {
+      list.sort((a, b) => rank[a.d.urgency] - rank[b.d.urgency] || b.r.ts - a.r.ts);
+      const { r, d } = list[0], n = list.length;
+      tasks.push({ merge_key: `email:${account}:${k}`, kind: d.kind, tier: 2, origin_kind: "email", origin_ref: gmailUrl(r.id), due_at: dueOf(d.urgency),
+        title: short(`${String(d.title || r.subject || "(no subject)")}${n > 1 ? ` (×${n})` : ""}`, 90), summary: short(`${d.why || ""} (${r.name || r.domain}, ${r.date}${n > 1 ? `; ${n} emails about this` : ""})`, 300),
+        origins: list.slice(0, 100).map((x) => ({ kind: "email", account, id: x.r.id, date: x.r.date, url: gmailUrl(x.r.id) })), count: n, sub: false, rep: null });
+    }
+    modelNote = ` Model: ${fresh.length - unreadable} answered, ${unreadable} unreadable, ${noAction} single messages need nothing, ${quiet} lower-urgency left out, ${dropped.length} repeat groups judged "needs nothing" and dropped; ${inTok} tokens in, ${outTok} out, about $${cost.toFixed(4)}.`;
+    if (dropped.length) { console.log("\nGroups the model says need nothing (no task made):"); for (const x of dropped) console.log(`   - ${x}`); }
   }
-  tasks.sort((a, b) => b.count - a.count || String(a.due_at || "z").localeCompare(String(b.due_at || "z")));
+  tasks.sort((a, b) => String(a.due_at || "z").localeCompare(String(b.due_at || "z")) || b.count - a.count);   // urgent first, then biggest group
 
   console.log(`\nScanned ${rows.length}.${modelNote} ${tasks.length} suggestions (${tasks.filter((t) => t.sub).length} subscription candidates). Left alone: ${TRIAGE ? "(see model line)" : `${single} single messages that need the model to judge`}, ${singleReceipts} one-off receipts, ${rows.filter((r) => !["needs-model", "money"].includes(r.action)).length} others the rules already handle.`);
   for (const t of tasks.slice(0, 40)) console.log(`  ${String(t.count).padStart(4)}  ${t.due_at ? (Date.parse(t.due_at) - Date.now() < 86400000 ? "NOW  " : "soon ") : "     "}${t.kind.padEnd(6)} ${t.title}`);
@@ -137,7 +159,7 @@ async function main() {
 
   let created = 0, updated = 0, skipped = 0;
   for (const t of tasks) {
-    const { count, sub, ...row } = t;
+    const { count, sub, rep, ...row } = t;
     const ex = await rest("GET", `tasks?merge_key=eq.${encodeURIComponent(t.merge_key)}&select=id,status`);
     if (!ex.length) {
       const made = await rest("POST", "tasks", { ...row, person }, { Prefer: "return=representation" });
