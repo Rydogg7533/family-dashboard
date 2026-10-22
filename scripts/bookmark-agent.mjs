@@ -91,6 +91,14 @@ console.log(`\nMaster list: ${all.length} bookmarks, ${uniqueUrls.size} differen
 const dupSites = [...sites].filter((s) => new Set(all.filter((b) => b.site === s).map((b) => `${b.browser}/${b.profile}`)).size > 1).length;
 console.log(`${dupSites} sites are bookmarked in more than one browser or profile.`);
 
+// ---- --folders: how the bookmarks are organised today (folder names and counts only, never the bookmarks themselves)
+if (process.argv.includes("--folders")) {
+  const by = new Map();
+  for (const b of all) { const k = `${b.browser} / ${b.profile}`; if (!by.has(k)) by.set(k, new Map()); const parts = b.folder ? b.folder.split(" › ") : ["(no folder)"]; for (const depth of [1, 2]) { if (depth > parts.length) break; const f = parts.slice(0, depth).join(" › "); by.get(k).set(f, (by.get(k).get(f) || 0) + (depth === parts.length || depth === 2 ? 1 : 0)); } }
+  console.log("\nFolders today (top 2 levels; count = bookmarks sitting directly under that path):");
+  for (const [k, m] of by) { console.log(`\n${k}`); for (const [f, n] of [...m].sort((a, b) => b[1] - a[1]).slice(0, 30)) console.log(`  ${String(n).padStart(5)}  ${f}`); }
+}
+
 // ---- preview: which email-list senders already have a bookmark? (reads the dashboard database; writes nothing)
 async function preview() {
   const envPath = join(HOME, "_secrets_local_only", "family-dashboard.env"); const env = {};
