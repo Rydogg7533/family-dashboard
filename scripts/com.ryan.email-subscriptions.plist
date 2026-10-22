@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.ryan.email-subscriptions</string>
+  <key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>/Users/ryanrossiter/family-dashboard/scripts/email-subscriptions.mjs</string><string>--account</string><string>rross15253@gmail.com</string><string>--days</string><string>3</string></array>
+  <key>StartInterval</key><integer>10800</integer>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>/Users/ryanrossiter/Organized/_Consolidation Records/mirror-logs/email-subscriptions.log</string>
+  <key>StandardErrorPath</key><string>/Users/ryanrossiter/Organized/_Consolidation Records/mirror-logs/email-subscriptions.log</string>
+</dict></plist>
