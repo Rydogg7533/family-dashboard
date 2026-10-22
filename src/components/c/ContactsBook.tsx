@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ContactCard } from "@/lib/data-registers";
 import { groupLetter, matches, sortKey } from "@/lib/contact-search";
 import ContactForm from "@/components/c/ContactForm";
@@ -9,7 +9,7 @@ const tel = (n: string) => `tel:${n.replace(/[^\d+]/g, "")}`;
 
 const ALPHA = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
 // Apple-style index: run a finger up and down the letters and the list follows; letters with no contacts jump to the next one.
-function IndexRail({ present }: { present: string[] }) {
+function IndexRail({ present, stickTop }: { present: string[]; stickTop: number }) {
   const ref = useRef<HTMLElement>(null);
   const [bubble, setBubble] = useState<string | null>(null);
   const last = useRef<string | null>(null);
@@ -19,7 +19,8 @@ function IndexRail({ present }: { present: string[] }) {
     const hit = ALPHA.slice(i).find((l) => present.includes(l)) ?? [...present].reverse().find((l) => ALPHA.indexOf(l) <= i) ?? present[present.length - 1];
     if (hit === last.current) return;
     last.current = hit; setBubble(hit);
-    document.getElementById(`g-${hit}`)?.scrollIntoView({ block: "start" });
+    const sec = document.getElementById(`g-${hit}`);
+    if (sec) window.scrollTo(0, Math.max(0, sec.getBoundingClientRect().top + window.scrollY - (stickTop - 1)));   // measured, not assumed: the letter lands flush under the pinned bar
     try { navigator.vibrate?.(5); } catch { /* not supported on iPhone */ }
   };
   const end = () => { last.current = null; setBubble(null); };
@@ -40,6 +41,19 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);   // card id being edited, or "new"
   const [msg, setMsg] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  // Real heights, measured on this device: the fixed top bar (with its border and the notch area) and the pinned search bar.
+  const [offs, setOffs] = useState({ bar: 44, head: 104 });
+  useEffect(() => {
+    const measure = () => {
+      const hb = document.querySelector("header")?.getBoundingClientRect().bottom ?? 45;
+      const bar = Math.max(0, hb - 1), h = barRef.current?.offsetHeight ?? 60;
+      setOffs((o) => (o.bar === bar && o.head === bar + h ? o : { bar, head: bar + h }));
+    };
+    measure(); window.addEventListener("resize", measure); window.addEventListener("orientationchange", measure);
+    const t = setTimeout(measure, 300);
+    return () => { window.removeEventListener("resize", measure); window.removeEventListener("orientationchange", measure); clearTimeout(t); };
+  }, []);
   const done = (saved: boolean, message?: string) => { setEditing(null); if (saved && message) { setMsg(message); setTimeout(() => setMsg(null), 6000); } };
   const groups = useMemo(() => {
     const rows = cards.filter((c) => matches(c, q)).sort((a, b) => sortKey(a).localeCompare(sortKey(b)) || a.fullName.localeCompare(b.fullName));
@@ -50,7 +64,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
   const total = groups.reduce((n, [, r]) => n + r.length, 0);
   return (
     <div>
-      <div className="flex gap-2 sticky z-10 bg-bg -mx-5 px-5 pt-2 pb-2" style={{ top: "calc(44px + env(safe-area-inset-top))" }}>
+      <div ref={barRef} className="flex gap-2 sticky z-10 bg-bg -mx-5 px-5 pt-2 pb-2" style={{ top: `${offs.bar}px` }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search contacts" autoComplete="off" className="flex-1 min-w-0 min-h-11 px-3 rounded-xl border border-line bg-bg text-sm" />
         <button onClick={() => { setEditing("new"); setMsg(null); }} className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-semibold whitespace-nowrap">+ Add</button>
       </div>
@@ -61,8 +75,8 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
       <div className="flex gap-2">
         <div className="flex-1 min-w-0 pr-7">
           {groups.map(([letter, rows]) => (
-            <section key={letter} id={`g-${letter}`} className="mb-2" style={{ scrollMarginTop: "calc(44px + env(safe-area-inset-top) + 59px)" }}>
-              <div className="text-xs font-bold text-muted px-1 py-1 sticky bg-bg z-[5]" style={{ top: "calc(44px + env(safe-area-inset-top) + 60px)" }}>{letter}</div>
+            <section key={letter} id={`g-${letter}`} className="mb-2">
+              <div className="text-xs font-bold text-muted px-1 py-1 sticky bg-bg z-[5]" style={{ top: `${offs.head}px` }}>{letter}</div>
               <div className="rounded-xl border border-line divide-y divide-line overflow-hidden">
                 {rows.map((c) => {
                   const isOpen = open === c.id;
@@ -102,7 +116,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
           ))}
           {!q && groups.length > 3 && <div aria-hidden style={{ height: "calc(100vh - 230px)" }} />}   {/* lets the last letters scroll to the top, like the others */}
         </div>
-        {!q && groups.length > 3 && <IndexRail present={groups.map(([l]) => l)} />}
+        {!q && groups.length > 3 && <IndexRail present={groups.map(([l]) => l)} stickTop={offs.head} />}
       </div>
     </div>
   );
