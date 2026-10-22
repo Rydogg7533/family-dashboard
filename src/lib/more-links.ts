@@ -35,5 +35,6 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/kid", label: "Child's page", note: "What a child sees", group: "Settings and Info" },
   { href: "/tv", label: "Household screen", note: "Family room TV view", group: "Settings and Info" },
   // email subscriptions (mailing lists found in the mailbox) — append below
+  { href: "/mail", label: "Mail", note: "Inbox and drafts", group: "Daily" },
   { href: "/email-subscriptions", label: "Email subscriptions", note: "Tick lists to unsubscribe", group: "Daily" },
 ];
