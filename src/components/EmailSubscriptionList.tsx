@@ -1,9 +1,12 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestUnsubscribe, cancelUnsubscribeRequest } from "@/app/email-subscriptions/actions";
 import type { EmailSub } from "@/lib/data-email-subs";
 import { CATEGORY_LABEL, CATEGORY_ORDER, frequencyLabel, type EmailSubCategory } from "@/lib/email-sub-format";
+
+const Spin = () => <span aria-hidden className="inline-block w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin align-[-3px] mr-2" />;
+const withTimeout = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 
 const day = (iso: string | null) => {
   if (!iso) return "";
@@ -21,12 +24,17 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const confirmRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (confirming) confirmRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [confirming]);
   const n = picked.size;
   const toggle = (id: string) => { setConfirming(false); setMsg(null); setPicked((p) => { const q = new Set(p); if (q.has(id)) q.delete(id); else q.add(id); return q; }); };
   const send = () => start(async () => {
-    const r = await requestUnsubscribe([...picked]);
-    if (r.ok) { setMsg(`Requested ${r.count}. Each one shows its result here once your Mac mini has sent it.`); setPicked(new Set()); setConfirming(false); router.refresh(); }
-    else { setMsg(r.error); setConfirming(false); }
+    setMsg(null);
+    try {
+      const r = await withTimeout(requestUnsubscribe([...picked]), 25000);
+      if (r.ok) { setMsg(`Requested ${r.count}. Each one shows its result here once your Mac mini has sent it.`); setPicked(new Set()); setConfirming(false); router.refresh(); }
+      else { setMsg(r.error); setConfirming(false); }
+    } catch { setMsg("That took too long and may not have gone through. Nothing is shown as requested until it is saved; reload the page and try again."); setConfirming(false); }
   });
   const groups = CATEGORY_ORDER.map((c) => ({ c, rows: subs.filter((s) => (s.category ?? "unclear") === c) })).filter((g) => g.rows.length > 0);
   const tickedAccount = subs.filter((s) => picked.has(s.id) && s.category === "account");
@@ -37,7 +45,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       <span className="text-sm font-semibold" aria-live="polite">{n === 0 ? "Nothing ticked" : `${n} ticked`}</span>
       <div className="flex gap-2">
         {n > 0 && <button className="min-h-11 px-3 rounded-xl border border-line text-sm font-semibold" onClick={() => { setPicked(new Set()); setConfirming(false); }}>Clear</button>}
-        <button className="min-h-11 px-4 rounded-xl border border-accent bg-accent text-white text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending || !ready} onClick={() => setConfirming(true)}>Unsubscribe{n > 0 ? ` (${n})` : ""}</button>
+        <button className="min-h-11 px-4 rounded-xl border border-accent bg-accent text-white text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending || !ready} onClick={() => setConfirming(true)}>{pending ? <><Spin />Working…</> : <>Unsubscribe{n > 0 ? ` (${n})` : ""}</>}</button>
       </div>
     </div>
   );
@@ -52,12 +60,12 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       )}
       <div className="card">{bar}</div>
       {confirming && (
-        <div role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber">
+        <div ref={confirmRef} role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber">
           <div className="text-sm font-semibold">Unsubscribe from {n} sender{n === 1 ? "" : "s"}?</div>
           {tickedAccount.length > 0 && <div className="text-xs text-amber font-semibold">{tickedAccount.length === 1 ? "One of these is an account notice" : `${tickedAccount.length} of these are account notices`} ({tickedAccount.slice(0, 3).map((s) => s.sender_name || s.address).join(", ")}{tickedAccount.length > 3 ? ", and more" : ""}). Those are often receipts, security alerts or bills. Make sure you want them gone.</div>}
           <div className="text-xs text-muted">Each sender is asked to stop. Your Mac mini sends the requests, and you can cancel until it starts. Once a sender has been told, it can&apos;t be undone from here.</div>
           <div className="flex gap-2">
-            <button className="min-h-11 px-3 rounded-xl border border-accent bg-accent text-white font-semibold text-sm flex-1 disabled:opacity-50" disabled={pending} onClick={send}>Yes, unsubscribe</button>
+            <button className="min-h-11 px-3 rounded-xl border border-accent bg-accent text-white font-semibold text-sm flex-1 disabled:opacity-50" disabled={pending} onClick={send}>{pending ? <><Spin />Working…</> : "Yes, unsubscribe"}</button>
             <button className="min-h-11 px-3 rounded-xl border border-line font-semibold text-sm flex-1" disabled={pending} onClick={() => setConfirming(false)}>Not now</button>
           </div>
         </div>
