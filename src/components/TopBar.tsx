@@ -1,4 +1,5 @@
 "use client";
+import { RefreshButton } from "@/components/RefreshControls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -83,6 +84,7 @@ export function TopBar() {
             </span>
           );
         })}
+        <RefreshButton />
       </nav>
     </header>
   );

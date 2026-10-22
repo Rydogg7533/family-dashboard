@@ -20,7 +20,7 @@ export function Nav() {
         {items.map((it) => {
           const active = it.href === "/" ? path === "/" : it.href === "/more" ? moreRoots.some((r) => path.startsWith(r)) : path.startsWith(it.href);
           return (
-            <Link key={it.href} href={it.href} className={`min-w-[60px] min-h-11 flex flex-col items-center justify-center gap-1 ${active ? "text-accent" : "text-muted"}`}>
+            <Link key={it.href} href={it.href} prefetch={it.href === "/ask" ? undefined : true} className={`min-w-[60px] min-h-11 flex flex-col items-center justify-center gap-1 ${active ? "text-accent" : "text-muted"}`}>
               <span className={`block w-[22px] h-[22px] rounded-md ${active ? "bg-accent" : "border-2 border-muted"}`} />
               {it.label}
             </Link>

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { PullToRefresh } from "@/components/RefreshControls";
 import { Nav } from "@/components/Nav";
 import { AppearanceProvider } from "@/components/AppearanceProvider";
 import { QuickBar } from "@/components/QuickBar";
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <AppearanceProvider>
           <TopBar />
+          <PullToRefresh />
           <main className="flex-1 w-full max-w-md mx-auto px-5 pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-28">{children}</main>
           <QuickBar />
           <Nav />
