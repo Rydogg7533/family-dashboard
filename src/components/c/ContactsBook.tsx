@@ -6,7 +6,7 @@ import ContactForm from "@/components/c/ContactForm";
 
 const tel = (n: string) => `tel:${n.replace(/[^\d+]/g, "")}`;
 
-export default function ContactsBook({ cards }: { cards: ContactCard[] }) {
+export default function ContactsBook({ cards, waitingNew = [] }: { cards: ContactCard[]; waitingNew?: string[] }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);   // card id being edited, or "new"
@@ -26,6 +26,7 @@ export default function ContactsBook({ cards }: { cards: ContactCard[] }) {
         <button onClick={() => { setEditing("new"); setMsg(null); }} className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-semibold whitespace-nowrap">+ Add</button>
       </div>
       {msg && <div role="status" className="rounded-xl bg-green-bg text-green px-3 py-2 text-sm font-semibold mb-3">{msg}</div>}
+      {waitingNew.length > 0 && <div role="status" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold mb-3">Being added to Apple Contacts (about 2 minutes, no need to add again): {waitingNew.join(", ")}</div>}
       {editing === "new" && <div className="rounded-xl border border-line mb-3 bg-bg"><ContactForm onDone={done} /></div>}
       {total === 0 && <div className="text-muted text-sm">No results{q ? ` for “${q}”` : ""}.</div>}
       <div className="flex gap-2">

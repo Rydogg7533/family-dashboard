@@ -279,6 +279,14 @@ export async function getContactEditNotes(): Promise<ContactEditNote[]> {
     return (data ?? []).map((r) => ({ id: r.id, status: r.status, note: r.note ?? "", summary: r.summary, at: r.created_at }));
   } catch { return []; }
 }
+export async function getPendingNewContacts(): Promise<string[]> {
+  if (!hasSupabaseEnv()) return [];
+  try {
+    const sb = await createClient();
+    const { data } = await sb.from("contact_edits").select("summary").eq("status", "pending").eq("op", "create").order("created_at");
+    return (data ?? []).map((r) => String(r.summary ?? "new contact").replace(/^new contact /, ""));
+  } catch { return []; }
+}
 export async function getContactCards(): Promise<ContactCard[]> {
   if (!hasSupabaseEnv()) return [];
   try {
