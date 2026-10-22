@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestUnsubscribe, cancelUnsubscribeRequest } from "@/app/email-subscriptions/actions";
 import type { EmailSub } from "@/lib/data-email-subs";
@@ -20,6 +20,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
   const boxes = [...new Set(allSubs.map((s) => s.mailbox))].sort();
   const subs = box === "all" ? allSubs : allSubs.filter((s) => s.mailbox === box);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -80,22 +81,33 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
               <div className="text-[11px] font-bold tracking-wide text-muted uppercase">{CATEGORY_LABEL[c as EmailSubCategory]} · {rows.length}</div>
               {c !== "account" && <button className="text-xs font-semibold text-accent min-h-8" onClick={() => setGroup(rows, !all)}>{all ? "Untick all" : "Tick all"}</button>}
             </div>
-            {rows.map((s) => (
-              <label key={s.id} className="flex items-start gap-3 py-3 min-h-12 cursor-pointer border-b border-line last:border-0">
-                <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-accent" checked={picked.has(s.id)} onChange={() => toggle(s.id)} aria-label={`Unsubscribe from ${s.sender_name || s.address}`} />
-                <span className="flex flex-col min-w-0">
-                  <span className="font-semibold text-sm truncate">{s.sender_name || s.address}</span>
-                  <span className="text-xs text-muted truncate">{s.address}</span>
-                  <span className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</span>
-                  {s.recent_subjects.slice(0, 3).map((t, i) => <span key={i} className="text-xs truncate">&ldquo;{t}&rdquo;</span>)}
-                  <span className="text-xs text-muted">{frequencyLabel(s.message_count, s.first_seen, s.last_seen)} · last {day(s.last_seen)}{(s.last_seen ?? "") < quietBefore ? " · quiet for 3+ months" : ""}{s.method !== "one_click" ? " · may need a tap from you" : ""}</span>
-                </span>
-              </label>
-            ))}
+            {rows.map((s) => {
+              const open = expanded.has(s.id);
+              return (
+                <div key={s.id} className="border-b border-line last:border-0">
+                  <div className="flex items-center min-h-12">
+                    <label className="w-11 h-11 shrink-0 flex items-center justify-center cursor-pointer">
+                      <input type="checkbox" className="h-5 w-5 accent-accent" checked={picked.has(s.id)} onChange={() => toggle(s.id)} aria-label={`Unsubscribe from ${s.sender_name || s.address}`} />
+                    </label>
+                    <button type="button" className="flex-1 min-w-0 min-h-11 flex items-center gap-2 text-left" aria-expanded={open} onClick={() => setExpanded((e) => { const q = new Set(e); if (q.has(s.id)) q.delete(s.id); else q.add(s.id); return q; })}>
+                      <span className="font-semibold text-sm truncate flex-1">{s.sender_name || s.address}</span>
+                      <span aria-hidden className={`text-muted text-xs transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+                    </button>
+                  </div>
+                  {open && (
+                    <div className="flex flex-col pl-11 pb-3 min-w-0">
+                      <span className="text-xs text-muted truncate">{s.address}</span>
+                      <span className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</span>
+                      {s.recent_subjects.slice(0, 3).map((t, i) => <span key={i} className="text-xs truncate">&ldquo;{t}&rdquo;</span>)}
+                      <span className="text-xs text-muted">{frequencyLabel(s.message_count, s.first_seen, s.last_seen)} · last {day(s.last_seen)}{(s.last_seen ?? "") < quietBefore ? " · quiet for 3+ months" : ""}{s.method !== "one_click" ? " · may need a tap from you" : ""}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })}
-      {subs.length > 8 && <div className="card">{bar}</div>}
     </div>
   );
 }
@@ -111,4 +123,15 @@ export function CancelRequest({ ids }: { ids: string[] }) {
       {msg && <span className="text-[11px] text-amber font-semibold" role="status">{msg}</span>}
     </span>
   );
+}
+
+// While any request is still waiting for the Mac mini, re-read the page every 10 seconds so a finished one moves to "Unsubscribed" on its own.
+export function AutoRefresh({ active }: { active: boolean }) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 10000);
+    return () => clearInterval(t);
+  }, [active, router]);
+  return null;
 }

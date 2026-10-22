@@ -2,7 +2,7 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section } from "@/components/money";
 import { getEmailSubs, getEmailSubsScan, getFinishLinks, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
-import { EmailSubscriptionList, CancelRequest } from "@/components/EmailSubscriptionList";
+import { EmailSubscriptionList, CancelRequest, AutoRefresh } from "@/components/EmailSubscriptionList";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,7 @@ export default async function EmailSubscriptions() {
 
   return (
     <>
+      <AutoRefresh active={waiting.length > 0} />
       <Link href="/more" className="text-xs font-semibold text-accent">‹ More</Link>
       <H1>Email subscriptions</H1>
       <p className="text-xs text-muted mb-3">
@@ -54,7 +55,7 @@ export default async function EmailSubscriptions() {
           <div className="card flex flex-col">
             {waiting.map((s) => (
               <div key={s.id} className="py-2.5 border-b border-line last:border-0 flex items-start justify-between gap-3">
-                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><Box s={s} /><div className="text-xs text-muted">Asked {day(s.requested_at)} · {s.status_note || "waiting for your Mac mini"}</div></div>
+                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><Box s={s} /><div className="text-xs text-muted">Asked {day(s.requested_at)} · {s.status_note || "waiting for your Mac mini (it checks every 10 minutes)"}</div></div>
                 <CancelRequest ids={[s.id]} />
               </div>
             ))}
