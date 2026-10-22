@@ -81,6 +81,9 @@ if (appInstalled("Firefox")) {
   }
 }
 
+// ---- copies we imported ourselves (folder "StewardOS (new)", or the finished tree) are managed output, not new bookmarks: keep them out of the master list so nothing is counted twice
+const MANAGED = /(^|› )StewardOS \(new\)(\s|›|$)/;
+let managedCount = 0; for (let i = all.length - 1; i >= 0; i--) if (MANAGED.test(all[i].folder || "")) { all.splice(i, 1); managedCount++; }
 // ---- report
 const state = (() => { try { return JSON.parse(readFileSync(join(OUT, "sources.json"), "utf8")); } catch { return null; } })();
 const known = new Set((state?.sources || []).map((s) => s.key));
@@ -89,6 +92,7 @@ console.log("Browsers and profiles found:");
 for (const s of sources) console.log(`  ${s.browser.padEnd(8)} ${String(s.profile).padEnd(18)} ${String(s.count).padStart(5)} bookmarks${s.readingList ? ` (+${s.readingList} in Reading List)` : ""}${s.account ? `  [${s.account}]` : ""}${s.note ? `  — ${s.note}` : ""}${state && !known.has(s.key) ? "  ← NEW since last run" : ""}`);
 const uniqueUrls = new Set(all.map((b) => b.url.replace(/\/$/, "")));
 const sites = new Set(all.map((b) => b.site));
+if (managedCount) console.log(`\n(${managedCount} bookmarks inside "StewardOS (new)" are our own imported copies and are not counted below.)`);
 console.log(`\nMaster list: ${all.length} bookmarks, ${uniqueUrls.size} different addresses, ${sites.size} different sites.`);
 const dupSites = [...sites].filter((s) => new Set(all.filter((b) => b.site === s).map((b) => `${b.browser}/${b.profile}`)).size > 1).length;
 console.log(`${dupSites} sites are bookmarked in more than one browser or profile.`);
