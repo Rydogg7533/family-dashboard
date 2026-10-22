@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestUnsubscribe, cancelUnsubscribeRequest } from "@/app/email-subscriptions/actions";
 import type { EmailSub } from "@/lib/data-email-subs";
@@ -24,8 +24,6 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
-  const confirmRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (confirming) confirmRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); }, [confirming]);
   const n = picked.size;
   const toggle = (id: string) => { setConfirming(false); setMsg(null); setPicked((p) => { const q = new Set(p); if (q.has(id)) q.delete(id); else q.add(id); return q; }); };
   const send = () => start(async () => {
@@ -58,9 +56,10 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
           {["all", ...boxes].map((b) => <button key={b} onClick={() => setBox(b)} aria-pressed={box === b} className={`min-h-9 px-3 rounded-full border text-xs font-semibold ${box === b ? "border-accent bg-accent text-white" : "border-line"}`}>{b === "all" ? `All mailboxes (${allSubs.length})` : `${b} (${allSubs.filter((s) => s.mailbox === b).length})`}</button>)}
         </div>
       )}
-      <div className="card">{bar}</div>
+      <div className="sticky z-30 flex flex-col gap-2 top-[calc(44px+env(safe-area-inset-top)+8px)]">
+        <div className="card shadow-md">{bar}</div>
       {confirming && (
-        <div ref={confirmRef} role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber">
+        <div role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber max-h-[55vh] overflow-y-auto shadow-lg">
           <div className="text-sm font-semibold">Unsubscribe from {n} sender{n === 1 ? "" : "s"}?</div>
           {tickedAccount.length > 0 && <div className="text-xs text-amber font-semibold">{tickedAccount.length === 1 ? "One of these is an account notice" : `${tickedAccount.length} of these are account notices`} ({tickedAccount.slice(0, 3).map((s) => s.sender_name || s.address).join(", ")}{tickedAccount.length > 3 ? ", and more" : ""}). Those are often receipts, security alerts or bills. Make sure you want them gone.</div>}
           <div className="text-xs text-muted">Each sender is asked to stop. Your Mac mini sends the requests, and you can cancel until it starts. Once a sender has been told, it can&apos;t be undone from here.</div>
@@ -70,6 +69,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
           </div>
         </div>
       )}
+      </div>
       {msg && <div className="text-xs font-semibold text-accent px-1" role="status">{msg}</div>}
       {subs.length === 0 && <div className="card text-sm text-muted">No active mailing lists. New ones appear here as they are found.</div>}
       {groups.map(({ c, rows }) => {
