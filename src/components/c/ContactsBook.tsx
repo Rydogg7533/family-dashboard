@@ -1,10 +1,39 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ContactCard } from "@/lib/data-registers";
 import { groupLetter, matches, sortKey } from "@/lib/contact-search";
 import ContactForm from "@/components/c/ContactForm";
 
 const tel = (n: string) => `tel:${n.replace(/[^\d+]/g, "")}`;
+
+
+const ALPHA = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
+// Apple-style index: run a finger up and down the letters and the list follows; letters with no contacts jump to the next one.
+function IndexRail({ present }: { present: string[] }) {
+  const ref = useRef<HTMLElement>(null);
+  const [bubble, setBubble] = useState<string | null>(null);
+  const last = useRef<string | null>(null);
+  const go = (clientY: number) => {
+    const r = ref.current?.getBoundingClientRect(); if (!r || !present.length) return;
+    const i = Math.max(0, Math.min(ALPHA.length - 1, Math.floor(((clientY - r.top) / r.height) * ALPHA.length)));
+    const hit = ALPHA.slice(i).find((l) => present.includes(l)) ?? [...present].reverse().find((l) => ALPHA.indexOf(l) <= i) ?? present[present.length - 1];
+    if (hit === last.current) return;
+    last.current = hit; setBubble(hit);
+    document.getElementById(`g-${hit}`)?.scrollIntoView({ block: "start" });
+    try { navigator.vibrate?.(5); } catch { /* not supported on iPhone */ }
+  };
+  const end = () => { last.current = null; setBubble(null); };
+  return (
+    <>
+      <nav ref={ref} aria-label="Jump to letter" onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); go(e.clientY); }} onPointerMove={(e) => { if (e.buttons || e.pointerType === "touch") go(e.clientY); }} onPointerUp={end} onPointerCancel={end}
+        className="fixed right-0 z-20 w-8 flex flex-col justify-between items-center touch-none select-none text-[10px] font-bold text-accent leading-none py-1"
+        style={{ top: "calc(150px + env(safe-area-inset-top))", bottom: "calc(96px + env(safe-area-inset-bottom))" }}>
+        {ALPHA.map((l) => <span key={l} className={present.includes(l) ? "" : "opacity-30"}>{l}</span>)}
+      </nav>
+      {bubble && <div aria-hidden className="fixed right-12 top-1/2 -translate-y-1/2 z-30 w-16 h-16 rounded-2xl bg-fg text-bg grid place-items-center text-3xl font-bold shadow-lg">{bubble}</div>}
+    </>
+  );
+}
 
 export default function ContactsBook({ cards, waitingNew = [] }: { cards: ContactCard[]; waitingNew?: string[] }) {
   const [q, setQ] = useState("");
@@ -30,9 +59,9 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
       {editing === "new" && <div className="rounded-xl border border-line mb-3 bg-bg"><ContactForm onDone={done} /></div>}
       {total === 0 && <div className="text-muted text-sm">No results{q ? ` for “${q}”` : ""}.</div>}
       <div className="flex gap-2">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pr-7">
           {groups.map(([letter, rows]) => (
-            <section key={letter} id={`g-${letter}`} className="mb-2">
+            <section key={letter} id={`g-${letter}`} className="mb-2" style={{ scrollMarginTop: "calc(44px + env(safe-area-inset-top) + 64px)" }}>
               <div className="text-xs font-bold text-muted px-1 py-1 sticky top-12 bg-bg">{letter}</div>
               <div className="rounded-xl border border-line divide-y divide-line overflow-hidden">
                 {rows.map((c) => {
@@ -72,11 +101,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
             </section>
           ))}
         </div>
-        {!q && groups.length > 3 && (
-          <nav aria-label="Jump to letter" className="sticky top-24 self-start flex flex-col text-[10px] font-bold text-accent leading-4">
-            {groups.map(([l]) => <a key={l} href={`#g-${l}`} className="px-1">{l}</a>)}
-          </nav>
-        )}
+        {!q && groups.length > 3 && <IndexRail present={groups.map(([l]) => l)} />}
       </div>
     </div>
   );
