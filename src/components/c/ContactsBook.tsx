@@ -28,7 +28,7 @@ function IndexRail({ present, stickTop }: { present: string[]; stickTop: number 
     <>
       <nav ref={ref} aria-label="Jump to letter" onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); go(e.clientY); }} onPointerMove={(e) => { if (e.buttons || e.pointerType === "touch") go(e.clientY); }} onPointerUp={end} onPointerCancel={end}
         className="fixed right-0 z-20 w-8 flex flex-col justify-between items-center touch-none select-none text-[10px] font-bold text-accent leading-none py-1"
-        style={{ top: "calc(150px + env(safe-area-inset-top))", bottom: "calc(96px + env(safe-area-inset-bottom))" }}>
+        style={{ top: "calc(150px + env(safe-area-inset-top))", bottom: "calc(132px + env(safe-area-inset-bottom))" }}>
         {ALPHA.map((l) => <span key={l} className={present.includes(l) ? "" : "opacity-30"}>{l}</span>)}
       </nav>
       {bubble && <div aria-hidden className="fixed right-12 top-1/2 -translate-y-1/2 z-30 w-16 h-16 rounded-2xl bg-fg text-bg grid place-items-center text-3xl font-bold shadow-lg">{bubble}</div>}
@@ -44,6 +44,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
   const barRef = useRef<HTMLDivElement>(null);
   // Real heights, measured on this device: the fixed top bar (with its border and the notch area) and the pinned search bar.
   const [offs, setOffs] = useState({ bar: 44, head: 104 });
+  const barH = offs.head - offs.bar;
   useEffect(() => {
     const measure = () => {
       const hb = document.querySelector("header")?.getBoundingClientRect().bottom ?? 45;
@@ -64,9 +65,14 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
   const total = groups.reduce((n, [, r]) => n + r.length, 0);
   return (
     <div>
-      <div ref={barRef} className="flex gap-2 sticky z-10 bg-bg -mx-5 px-5 pt-2 pb-2" style={{ top: `${offs.bar}px` }}>
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search contacts" autoComplete="off" className="flex-1 min-w-0 min-h-11 px-3 rounded-xl border border-line bg-bg text-sm" />
-        <button onClick={() => { setEditing("new"); setMsg(null); }} className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-semibold whitespace-nowrap">+ Add</button>
+      {/* The search bar is fixed to the screen (not sticky): iPhone Safari redraws sticky bars a frame late when the page jumps,
+          which let a contact show through for an instant while scrubbing. A fixed bar never moves, so it cannot flash. */}
+      <div aria-hidden style={{ height: Math.max(0, barH - 16) }} />
+      <div className="fixed inset-x-0 z-10 bg-bg" style={{ top: `${offs.bar}px`, transform: "translateZ(0)" }}>
+        <div ref={barRef} className="max-w-md mx-auto px-5 pt-2 pb-2 flex gap-2">
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search contacts" autoComplete="off" className="flex-1 min-w-0 min-h-11 px-3 rounded-xl border border-line bg-bg text-sm" />
+          <button onClick={() => { setEditing("new"); setMsg(null); }} className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-semibold whitespace-nowrap">+ Add</button>
+        </div>
       </div>
       {msg && <div role="status" className="rounded-xl bg-green-bg text-green px-3 py-2 text-sm font-semibold mb-3">{msg}</div>}
       {waitingNew.length > 0 && <div role="status" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold mb-3">Being added to Apple Contacts (about 2 minutes, no need to add again): {waitingNew.join(", ")}</div>}
@@ -114,7 +120,8 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
               </div>
             </section>
           ))}
-          {!q && groups.length > 3 && <div aria-hidden style={{ height: "calc(100vh - 230px)" }} />}   {/* lets the last letters scroll to the top, like the others */}
+          {!q && <div className="text-center text-sm text-muted py-4">{cards.length.toLocaleString("en-US")} Contacts</div>}
+          {!q && groups.length > 3 && <div aria-hidden style={{ height: "calc(100vh - 290px)" }} />}   {/* lets the last letters scroll to the top, like the others */}
         </div>
         {!q && groups.length > 3 && <IndexRail present={groups.map(([l]) => l)} stickTop={offs.head} />}
       </div>

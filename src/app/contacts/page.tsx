@@ -15,7 +15,7 @@ export default async function Contacts({ searchParams }: PageProps<"/contacts">)
     const [problems, waitingNew] = await Promise.all([getContactEditNotes(), getPendingNewContacts()]);
     return (
       <>
-        <H1 right={`${cards.length} contacts`}>Contacts</H1>
+        <H1>Contacts</H1>
         {problems.map((p) => <div key={p.id} role="alert" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">A change was not saved{p.summary ? ` (${p.summary})` : ""}: {p.note}</div>)}
         <ContactsBook cards={cards} waitingNew={waitingNew} />
         <PageSources items={[{ label: "Apple Contacts", href: "#contacts" }]} />
