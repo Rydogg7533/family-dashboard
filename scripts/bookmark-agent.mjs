@@ -13,6 +13,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { buildPlan } from "./bookmark-plan-lib.mjs";
+import { buildCatalog, verifyCatalog } from "./bookmark-catalog-lib.mjs";
 import { parseChromium, parseSafari, parseFirefox, buildIndex, matchSender } from "./bookmarks-lib.mjs";
 
 const DRY = process.argv.includes("--dry");
@@ -128,6 +129,21 @@ if (process.argv.includes("--plan")) {
   for (const [t, n] of [...byTarget].sort((a, b) => a[0].localeCompare(b[0]))) console.log(`${String(n).padStart(5)}  ${t}`);
   console.log("\nEvery bookmark: confidence | from | to | site | title | why");
   for (const r of rows.sort((a, b) => ({ low: 0, medium: 1, high: 2 })[a.confidence] - ({ low: 0, medium: 1, high: 2 })[b.confidence] || a.target.localeCompare(b.target))) console.log(`${r.confidence} | ${r.b.browser}/${r.b.profile} › ${r.b.folder || "(none)"} | ${r.target} | ${r.b.site} | ${r.b.title.slice(0, 50)} | ${r.reason}`);
+}
+
+// ---- --catalog: build the catalog (source of truth) from the approved plan. Writes ONLY ~/Organized/_Bookmarks/catalog.json, never a browser; refuses to overwrite.
+if (process.argv.includes("--catalog")) {
+  const cat = buildCatalog(all); const v = verifyCatalog(cat, all);
+  console.log(`\nCATALOG: ${all.length} bookmarks -> ${cat.entries.length} distinct addresses (${all.length - cat.entries.length} same-address copies merged).`);
+  console.log(`Extra placements proposed (same address belongs in more than one place): ${cat.entries.filter((e) => e.also.length).length}`);
+  console.log(`Check: every bookmark accounted for: ${v.srcTotal === all.length ? "yes" : "NO"}; every folder in the approved tree: ${v.problems.some((x) => /not in tree/.test(x)) ? "NO" : "yes"}; folders over 150: ${v.over.length ? v.over.join(", ") : "none"}`);
+  if (v.problems.length) { console.log("PROBLEMS:\n  " + v.problems.slice(0, 10).join("\n  ")); process.exit(1); }
+  if (DRY) console.log("\nDRY RUN: catalog not written.");
+  else { mkdirSync(OUT, { recursive: true }); const f = join(OUT, "catalog.json");
+    if (existsSync(f)) { console.log(`\nREFUSING: ${f} already exists (the catalog is never overwritten).`); process.exit(1); }
+    writeFileSync(f, JSON.stringify(cat, null, 1), { flag: "wx", mode: 0o600 });
+    const back = JSON.parse(readFileSync(f, "utf8")); console.log(`\nPASS — wrote ${f}; read it back: ${back.entries.length} entries. No browser was changed.`); }
+  process.exit(0);
 }
 
 // ---- --loose: only the unfiled bookmarks (no folder, Link Dump, Other Bookmarks, Firefox defaults), so they can be sorted into the master tree

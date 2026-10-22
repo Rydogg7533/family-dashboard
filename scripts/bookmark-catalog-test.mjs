@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { buildCatalog, verifyCatalog, normalizeUrl } from "./bookmark-catalog-lib.mjs";
+const bm = (browser, folder, title, url) => { const h = new URL(url).hostname; return { browser, profile: "P", folder, title, url, host: h, site: h.replace(/^www\./, ""), added: null }; };
+assert.equal(normalizeUrl("https://WWW.Example.com/a/?utm_source=x#top"), "https://example.com/a");
+assert.equal(normalizeUrl("https://example.com/"), "https://example.com");
+const list = [bm("Safari", "Favorites › Crypto", "Coin", "https://coingecko.com/x"), bm("Chrome", "Other Bookmarks", "Coin gecko page", "https://www.coingecko.com/x/#a"), bm("Safari", "Favorites", "Other", "https://example.org/z")];
+const cat = buildCatalog(list, "2026-10-22T00:00:00Z");
+assert.equal(cat.entries.length, 2, "same address in two browsers is one entry");
+const coin = cat.entries.find((e) => e.url.includes("coingecko")); assert.equal(coin.sources.length, 2); assert.equal(coin.folder, "Money › Crypto & Markets");
+assert.equal(coin.title, "Coin gecko page", "longer title kept");
+const v = verifyCatalog(cat, list); assert.deepEqual(v.problems, [], v.problems.join(";"));
+console.log("PASS: bookmark-catalog-lib");
