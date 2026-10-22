@@ -13,7 +13,7 @@ const moreRoots = ["/more", "/family", "/vehicles", "/messages", "/inbox", "/cal
 
 export function Nav() {
   const path = usePathname();
-  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid")) return null;
+  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms") return null;
   return (
     <nav className="fixed bottom-0 inset-x-0 border-t border-line bg-bg/95 backdrop-blur">
       <div className="max-w-md mx-auto flex justify-around px-1 pt-2 pb-[max(18px,env(safe-area-inset-bottom))] text-[11px] font-semibold">

@@ -6,7 +6,7 @@ import { ReportIssueSheet } from "@/components/ReportIssue";
 // Persistent Ask box + "+" capture button on every working page (design principle: ask anywhere, capture anywhere).
 export function QuickBar() {
   const path = usePathname(); const router = useRouter(); const [q, setQ] = useState(""); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false);
-  if (["/login", "/ask", "/tv", "/kid"].some((p) => path.startsWith(p))) return null;
+  if (["/login", "/ask", "/tv", "/kid", "/privacy", "/terms"].some((p) => path.startsWith(p))) return null;
   return (
     <>
     <ReportIssueSheet open={report} onClose={() => setReport(false)} />

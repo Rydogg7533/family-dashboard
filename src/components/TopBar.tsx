@@ -64,7 +64,7 @@ export function crumbsFor(path: string): Crumb[] {
 
 export function TopBar() {
   const path = usePathname();
-  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid")) return null;
+  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms") return null;
   const crumbs = crumbsFor(path);
   const here = crumbs[crumbs.length - 1];
   return (

@@ -13,6 +13,8 @@ export async function proxy(request: NextRequest) {
   // (?token= or cookie) against device_tokens kind='tv' (see src/app/tv/page.tsx).
   const p = request.nextUrl.pathname;
   if (p.startsWith("/api/location/") || p === "/tv" || p.startsWith("/tv/")) return NextResponse.next();
+  // Public legal pages (Google's OAuth consent screen links here): no login, no data, static text.
+  if (p === "/privacy" || p === "/terms") return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
