@@ -13,6 +13,8 @@
 //     file is never overwritten (revoke it at myaccount.google.com/permissions and delete it by hand to redo).
 //   - If you sign in with a different Google account than --account, nothing is saved.
 //   - Read-only checks after sign-in: Gmail profile (address, message count) and the Calendar list (count only).
+//   - --purpose sheets: a SEPARATE sign-in with read-only access to Google Sheets (spreadsheets.readonly) only, saved as google-<account>.sheets.json.
+//     Used by scripts/tiller-inspect.mjs and the Tiller sync. Your existing mail/calendar token is not touched.
 //   - Scopes requested: gmail.modify, gmail.compose, calendar.events, calendar.readonly. No gmail.send.
 //
 // Client file: ~/_secrets_local_only/email-agent/google-oauth-client.json (the Desktop-app JSON from Google Cloud).
@@ -30,7 +32,8 @@ const account = (opt("--account") || "").trim().toLowerCase();
 const dir = join(homedir(), "_secrets_local_only", "email-agent");
 const clientPath = opt("--client") || join(dir, "google-oauth-client.json");
 const NO_OPEN = args.includes("--no-open");
-const SCOPES = [
+const SHEETS = opt("--purpose") === "sheets";   // a separate, read-only sign-in for Google Sheets (the Tiller sheet); the mail/calendar token is untouched
+const SCOPES = SHEETS ? ["openid", "email", "https://www.googleapis.com/auth/spreadsheets.readonly"] : [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/calendar.events",
@@ -39,7 +42,7 @@ const SCOPES = [
 
 const die = (m) => { console.error(`STOP: ${m}`); process.exit(2); };
 if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(account)) die("pass --account <the Google address you are signing in with>");
-const tokenPath = join(dir, `google-${account}.json`);
+const tokenPath = join(dir, SHEETS ? `google-${account}.sheets.json` : `google-${account}.json`);
 if (existsSync(tokenPath)) die(`${tokenPath} already exists. Not overwriting. To redo: revoke access at myaccount.google.com/permissions, delete that file, run again.`);
 
 let client;
@@ -108,9 +111,9 @@ async function main() {
   if (missing.length) throw new Error(`not all permissions were granted; missing: ${missing.map((s) => s.split("/").pop()).join(", ")}. Run again and tick every box. Nothing saved.`);
 
   const get = async (url) => { const x = await fetch(url, { headers: { Authorization: `Bearer ${tok.access_token}` } }); if (!x.ok) throw new Error(`${url.split("?")[0]} → ${x.status}`); return x.json(); };
-  const profile = await get("https://gmail.googleapis.com/gmail/v1/users/me/profile");
+  const profile = SHEETS ? { emailAddress: (await get("https://openidconnect.googleapis.com/v1/userinfo")).email } : await get("https://gmail.googleapis.com/gmail/v1/users/me/profile");
   if (String(profile.emailAddress || "").toLowerCase() !== account) throw new Error(`you signed in as ${profile.emailAddress}, not ${account}. Nothing saved.`);
-  const cals = await get("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250");
+  const cals = SHEETS ? { items: [] } : await get("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250");
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(tokenPath, JSON.stringify({ account, refresh_token: tok.refresh_token, scope: tok.scope, saved_at: new Date().toISOString() }, null, 2), { flag: "wx", mode: 0o600 });
@@ -118,8 +121,7 @@ async function main() {
 
   console.log("\nPASS");
   console.log(`  account:        ${profile.emailAddress}`);
-  console.log(`  gmail messages: ${profile.messagesTotal}`);
-  console.log(`  calendars:      ${(cals.items || []).length}`);
+  if (!SHEETS) { console.log(`  gmail messages: ${profile.messagesTotal}`); console.log(`  calendars:      ${(cals.items || []).length}`); }
   console.log(`  permissions:    ${granted.map((s) => s.split("/").pop()).join(", ")}`);
   console.log(`  saved:          ${tokenPath} (mode 600)`);
 }
