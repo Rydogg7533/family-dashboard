@@ -50,7 +50,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
   const total = groups.reduce((n, [, r]) => n + r.length, 0);
   return (
     <div>
-      <div className="flex gap-2 mb-3 sticky z-10 bg-bg -mx-5 px-5 pt-2 pb-2" style={{ top: "calc(44px + env(safe-area-inset-top))" }}>
+      <div className="flex gap-2 sticky z-10 bg-bg -mx-5 px-5 pt-2 pb-2" style={{ top: "calc(44px + env(safe-area-inset-top))" }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search contacts" autoComplete="off" className="flex-1 min-w-0 min-h-11 px-3 rounded-xl border border-line bg-bg text-sm" />
         <button onClick={() => { setEditing("new"); setMsg(null); }} className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-semibold whitespace-nowrap">+ Add</button>
       </div>
@@ -61,7 +61,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
       <div className="flex gap-2">
         <div className="flex-1 min-w-0 pr-7">
           {groups.map(([letter, rows]) => (
-            <section key={letter} id={`g-${letter}`} className="mb-2" style={{ scrollMarginTop: "calc(44px + env(safe-area-inset-top) + 64px)" }}>
+            <section key={letter} id={`g-${letter}`} className="mb-2" style={{ scrollMarginTop: "calc(44px + env(safe-area-inset-top) + 59px)" }}>
               <div className="text-xs font-bold text-muted px-1 py-1 sticky bg-bg z-[5]" style={{ top: "calc(44px + env(safe-area-inset-top) + 60px)" }}>{letter}</div>
               <div className="rounded-xl border border-line divide-y divide-line overflow-hidden">
                 {rows.map((c) => {
@@ -100,6 +100,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
               </div>
             </section>
           ))}
+          {!q && groups.length > 3 && <div aria-hidden style={{ height: "calc(100vh - 230px)" }} />}   {/* lets the last letters scroll to the top, like the others */}
         </div>
         {!q && groups.length > 3 && <IndexRail present={groups.map(([l]) => l)} />}
       </div>
