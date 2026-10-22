@@ -55,8 +55,11 @@ async function api(path) {                       // the ONLY function that talks
     const r = await fetch(BASE + path, { method: "GET", headers: { Authorization: `Bearer ${accessToken}` } });
     if (r.ok) return r.json();
     if (r.status === 401 && attempt < 3) { await refresh(); continue; }
-    if (r.status === 429 || r.status >= 500) { await sleep(800 * attempt ** 2); continue; }
-    throw new Error(`Gmail ${path.split("?")[0]} → ${r.status}`);
+    let reason = "", detail = "";
+    try { const j = await r.json(); reason = j?.error?.errors?.[0]?.reason || j?.error?.status || ""; detail = j?.error?.message || ""; } catch { /* no JSON body */ }
+    // Gmail reports rate limits as 429 or as 403 with a rate-limit reason: wait and retry those.
+    if (r.status === 429 || r.status >= 500 || /ratelimit|quota|backenderror/i.test(reason)) { await sleep(1000 * attempt ** 2); continue; }
+    throw new Error(`Gmail ${path.split("?")[0]} → ${r.status}${reason ? ` [${reason}]` : ""}${detail ? ` ${detail.slice(0, 200)}` : ""}`);
   }
   throw new Error(`Gmail ${path.split("?")[0]}: gave up after retries`);
 }
@@ -113,7 +116,7 @@ async function main() {
   const rows = []; let next = 0, done = 0; const t0 = Date.now();
   const fields = "id,labelIds,snippet,internalDate,payload/headers";
   const hdrs = ["From", "Subject", "List-Unsubscribe", "Precedence", "Auto-Submitted"].map((x) => `metadataHeaders=${x}`).join("&");
-  await Promise.all(Array.from({ length: 8 }, async () => {
+  await Promise.all(Array.from({ length: 5 }, async () => {
     for (;;) {
       const i = next++; if (i >= ids.length) return;
       const msg = await api(`/gmail/v1/users/me/messages/${ids[i]}?format=metadata&${hdrs}&fields=${encodeURIComponent(fields)}`);
