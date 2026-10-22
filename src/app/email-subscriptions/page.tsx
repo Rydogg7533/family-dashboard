@@ -13,6 +13,7 @@ const day = (iso: string | null) => {
 };
 const ago = (iso: string) => { const h = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 3600000)); return h < 1 ? "under an hour ago" : h < 48 ? `${h} hour${h === 1 ? "" : "s"} ago` : `${Math.round(h / 24)} days ago`; };
 const name = (s: EmailSub) => s.sender_name || s.address || "Unknown sender";
+const Box = ({ s }: { s: EmailSub }) => <div className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</div>;
 
 export default async function EmailSubscriptions() {
   const [subs, scan, ready] = await Promise.all([getEmailSubs(), getEmailSubsScan(), getUnsubscribeAgentReady()]);
@@ -29,7 +30,7 @@ export default async function EmailSubscriptions() {
       <H1>Email subscriptions</H1>
       <p className="text-xs text-muted mb-3">
         {scan.at ? `Mailing lists found in your Gmail, updated ${ago(scan.at)} and every few hours after that.` : "Mailing lists found in your Gmail."}{" "}
-        Only the sender and date are read, never the message. Tick the ones you are done with and tap Unsubscribe.
+        Only the sender, date and subject line are read, never the message itself. Tick the ones you are done with and tap Unsubscribe.
         {scan.state === "warn" && <span className="text-amber font-semibold"> The last scan had trouble reading some mail.</span>}
       </p>
 
@@ -38,6 +39,7 @@ export default async function EmailSubscriptions() {
           <div className="flex flex-col gap-2">{needs.slice(0, 5).map((s) => (
             <div key={s.id} className="card flex flex-col gap-1">
               <div className="font-semibold text-sm">{name(s)}</div>
+              <Box s={s} />
               <div className="text-xs text-amber font-semibold">{s.status === "failed" ? "The request did not go through." : s.status === "open_link" ? "This sender needs you to finish on its page." : "This sender needs a tap from you."}</div>
               {s.status_note && <div className="text-xs text-muted">{s.status_note}</div>}
               {links[s.id]?.open && <a href={links[s.id].open} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-accent">Open to finish</a>}
@@ -52,7 +54,7 @@ export default async function EmailSubscriptions() {
           <div className="card flex flex-col">
             {waiting.map((s) => (
               <div key={s.id} className="py-2.5 border-b border-line last:border-0 flex items-start justify-between gap-3">
-                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><div className="text-xs text-muted">Asked {day(s.requested_at)} · {s.status_note || "waiting for your Mac mini"}</div></div>
+                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><Box s={s} /><div className="text-xs text-muted">Asked {day(s.requested_at)} · {s.status_note || "waiting for your Mac mini"}</div></div>
                 <CancelRequest ids={[s.id]} />
               </div>
             ))}
@@ -71,6 +73,7 @@ export default async function EmailSubscriptions() {
             {done.map((s) => (
               <div key={s.id} className="py-2.5 border-b border-line last:border-0">
                 <div className="font-semibold text-sm">{name(s)}</div>
+                <Box s={s} />
                 <div className="text-xs text-muted">{s.status === "stopped" ? "Stopped sending" : `Unsubscribed ${day(s.completed_at)}`}</div>
                 {s.status === "done" && s.messages_since_unsub > 0 && <div className="text-xs text-amber font-semibold">{s.messages_since_unsub} email{s.messages_since_unsub === 1 ? "" : "s"} arrived since. It may not have worked.</div>}
               </div>

@@ -61,8 +61,8 @@ async function listIds() {
 }
 
 async function readAll(ids) {
-  const hdrs = ["From", "List-Id", "List-Unsubscribe", "List-Unsubscribe-Post"].map((x) => `metadataHeaders=${x}`).join("&");
-  const fields = encodeURIComponent("id,internalDate,payload/headers");           // no snippet, no subject, no body
+  const hdrs = ["From", "Subject", "List-Id", "List-Unsubscribe", "List-Unsubscribe-Post"].map((x) => `metadataHeaders=${x}`).join("&");
+  const fields = encodeURIComponent("id,internalDate,payload/headers");           // headers only: no snippet, no body
   const records = []; const failed = []; let next = 0, done = 0; const t0 = Date.now();
   const readOne = async (id) => { const r = parseMessage(await api(`/gmail/v1/users/me/messages/${id}?format=metadata&${hdrs}&fields=${fields}`)); if (r) records.push(r); };
   await Promise.all(Array.from({ length: WORKERS }, async () => {
@@ -97,6 +97,8 @@ async function main() {
   const byDomain = new Map(); for (const g of groups.values()) byDomain.set(g.domain, (byDomain.get(g.domain) || 0) + g.ts.length);
   console.log(`\n${records.length} messages carry a List-Unsubscribe header, from ${groups.size} senders.`);
   console.log(`How each can be unsubscribed: ${Object.entries(byMethod).map(([m, n]) => `${n} ${m}`).join(" · ") || "none"}`);
+  const byCat = {}; for (const g of groups.values()) byCat[g.category] = (byCat[g.category] || 0) + 1;
+  console.log(`What the lists look like: ${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} ${c}`).join(" · ")}`);
   console.log("Busiest sender domains:");
   for (const [d, n] of [...byDomain].sort((a, b) => b[1] - a[1]).slice(0, 10)) console.log(`  ${String(n).padStart(5)}  ${d}`);
   if (unreadable) console.log(`\n${unreadable} messages could not be read this run; they are picked up by the next run.`);
@@ -107,7 +109,7 @@ async function main() {
   const person = people[0].id;
   const existing = new Map();
   for (let from = 0; ; from += 1000) {
-    const page = await rest("GET", `email_subscriptions?person=eq.${person}&mailbox=eq.${encodeURIComponent(account)}&select=id,sender_key,message_count,last_message_ts,first_seen,deleted_at,completed_at,messages_since_unsub`, undefined, { Range: `${from}-${from + 999}` });
+    const page = await rest("GET", `email_subscriptions?person=eq.${person}&mailbox=eq.${encodeURIComponent(account)}&select=id,sender_key,category,message_count,last_message_ts,first_seen,deleted_at,completed_at,messages_since_unsub`, undefined, { Range: `${from}-${from + 999}` });
     for (const r of page) existing.set(r.sender_key, r);
     if (page.length < 1000) break;
   }

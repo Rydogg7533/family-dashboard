@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline tests for scripts/subscriptions-lib.mjs. No network, no mailbox. Run: node scripts/subscriptions-test.mjs
 import assert from "node:assert/strict";
-import { parseListUnsubscribe, isOneClick, methodOf, parseMessage, groupSenders, planWrites } from "./subscriptions-lib.mjs";
+import { cleanSubject, categorize, parseListUnsubscribe, isOneClick, methodOf, parseMessage, groupSenders, planWrites } from "./subscriptions-lib.mjs";
 
 const day = (d) => Date.parse(`${d}T12:00:00Z`);
 const msg = (from, headers, ts) => ({ internalDate: String(ts), payload: { headers: [{ name: "From", value: from }, ...Object.entries(headers).map(([name, value]) => ({ name, value }))] } });
@@ -61,5 +61,36 @@ assert.equal(plan.updates[0].patch.messages_since_unsub, 1);
 // a removed row stays removed
 const gone = new Map([["n@shop.com", { id: "a", message_count: 2, last_message_ts: 0, deleted_at: "2026-02-01T00:00:00Z" }]]);
 assert.equal(planWrites({ groups: groupSenders(newer), existing: gone, ...base }).updates.length, 0);
+
+// ---- topics
+assert.equal(cleanSubject("  Hi\u0000   there\n\tfriend\u200b "), "Hi there friend"); assert.equal(cleanSubject("x".repeat(300)).length, 120); assert.equal(cleanSubject(undefined), "");
+const cat = (name, domain, ...subjects) => categorize({ name, domain, subjects });
+assert.equal(cat("Smith's", "email.smiths.com", "Weekly ad: 20% off produce"), "promos");
+assert.equal(cat("Gap", "gap.com", "Extra 40% off ends tonight"), "promos");
+assert.equal(cat("Venmo", "venmo.com", "You paid Sam"), "account");
+assert.equal(cat("Credit Karma", "creditkarma.com", "Your score changed"), "account");
+assert.equal(cat("Shop", "shop.com", "Free shipping on your order"), "promos", "promo wins over orders");
+assert.equal(cat("Shop", "shop.com", "Your order has shipped"), "orders");
+assert.equal(cat("LinkedIn", "linkedin.com", "You appeared in 5 searches"), "social");
+assert.equal(cat("Delta", "delta.com", "Fly to Hawaii"), "travel");
+assert.equal(cat("Friends of Sam", "actblue.com", "Please donate before midnight"), "donations");
+assert.equal(cat("Morning Brew", "morningbrew.com", "Your daily digest"), "news");
+assert.equal(cat("Bob", "bobs.example", "hello"), "unclear");
+assert.equal(cat("Bank of X", "x.com", "Big sale on rates"), "account", "guarded wins over promos");
+// subjects: 3 newest, de-duplicated, account senders keep none
+const sm = (from, subj, ts) => parseMessage(msg(from, { "List-Unsubscribe": "<https://s.com/u>", Subject: subj }, ts));
+const g2 = groupSenders([sm("S <s@s.com>", "Sale one", day("2026-01-01")), sm("S <s@s.com>", "Sale two", day("2026-01-02")), sm("S <s@s.com>", "sale two", day("2026-01-03")), sm("S <s@s.com>", "Sale four", day("2026-01-04")), sm("S <s@s.com>", "Sale five", day("2026-01-05"))]);
+assert.deepEqual(g2.get("s@s.com").subjects, ["Sale five", "Sale four", "sale two"]);
+const p2 = planWrites({ groups: g2, existing: new Map(), ...base }).inserts[0];
+assert.equal(p2.category, "promos"); assert.equal(p2.recent_subjects.length, 3);
+const acct = groupSenders([parseMessage(msg("Venmo <v@venmo.com>", { "List-Unsubscribe": "<https://v.com/u>", Subject: "You paid Sam $40" }, day("2026-01-01")))]);
+const pa = planWrites({ groups: acct, existing: new Map(), ...base }).inserts[0];
+assert.equal(pa.category, "account"); assert.deepEqual(pa.recent_subjects, [], "no subject text kept for account senders");
+// rows from before topics existed get a label once, counts untouched; then are left alone
+const old = new Map([["s@s.com", { id: "z", category: null, message_count: 5, last_message_ts: day("2026-01-05"), first_seen: "2026-01-01", deleted_at: null }]]);
+let bf = planWrites({ groups: g2, existing: old, ...base });
+assert.equal(bf.updates.length, 1); assert.equal(bf.updates[0].patch.category, "promos"); assert.ok(!("message_count" in bf.updates[0].patch) && !("last_seen" in bf.updates[0].patch));
+old.get("s@s.com").category = "promos";
+assert.equal(planWrites({ groups: g2, existing: old, ...base }).updates.length, 0);
 
 console.log("PASS: subscriptions-lib (all checks)");
