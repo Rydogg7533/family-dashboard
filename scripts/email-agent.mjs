@@ -13,6 +13,8 @@
 //   --model-triage     ALSO ask the small Claude model (Haiku) about each single message: sender, subject, date and Gmail's
 //                      ~100-character preview only, never the body. Decisions are cached locally (triage-cache-<account>.json), so
 //                      each message is paid for once. Urgent ones (urgency now/soon) become tasks; --include-whenever adds the rest.
+//   --receipts-from-handled   ALSO read receipts already filed under Dashboard/Handled, so subscriptions are still found after the filer has run.
+//                      Reads only receipt-like mail there; changes nothing. Slower on a big Handled label.
 //   --model-limit N    most messages to send in one run (default 300).
 //
 // Safety rules:
@@ -29,7 +31,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { die, option, openGmail, readMessages, pattern } from "./email-lib.mjs";
+import { die, option, openGmail, readMessages, pattern, merchantKey, amountOf, cycleOf } from "./email-lib.mjs";
 import { loadKey, ask, loadCache, saveCache } from "./email-triage-lib.mjs";
 
 const args = process.argv.slice(2);
@@ -40,6 +42,7 @@ const MIN = parseInt(option(args, "--min") || "3", 10);          // messages in 
 const MIN_RECEIPTS = parseInt(option(args, "--min-receipts") || "2", 10);
 const PERSON = option(args, "--person") || "Ryan";
 const TRIAGE = args.includes("--model-triage");
+const HANDLED = args.includes("--receipts-from-handled");   // ALSO look for receipts already filed under Dashboard/Handled (only to find subscriptions)
 const MODEL_LIMIT = parseInt(option(args, "--model-limit") || "300", 10);
 const INCLUDE_WHENEVER = args.includes("--include-whenever");
 const MODEL = option(args, "--model") || "claude-haiku-5-5";
@@ -67,10 +70,16 @@ async function main() {
   const profile = await api("/gmail/v1/users/me/profile");
   if (String(profile.emailAddress).toLowerCase() !== account) die(`the saved sign-in belongs to ${profile.emailAddress}, not ${account}`);
   const rows = await readMessages(api, query, MAX, { log: console.log });
+  let handledReceipts = [];
+  if (HANDLED) {
+    console.log("\nReading receipts already filed under Dashboard/Handled (to find subscriptions)…");
+    handledReceipts = (await readMessages(api, 'label:Dashboard/Handled (receipt OR invoice OR "your order" OR "payment received" OR statement)', MAX, { log: console.log })).filter((r) => r.action === "money");
+    console.log(`  ${handledReceipts.length} receipts found there.`);
+  }
 
   // group candidates: mail the free rules could not place, and receipts
   const groups = new Map();
-  for (const r of rows.filter((x) => x.action === "needs-model" || x.action === "money")) {
+  for (const r of [...rows, ...handledReceipts].filter((x) => x.action === "needs-model" || x.action === "money")) {
     const key = `${r.address}|${pattern(r.subject)}`;
     const g = groups.get(key) || { key, address: r.address, domain: r.domain, name: r.name, pat: pattern(r.subject), action: r.action, msgs: [] };
     g.msgs.push(r); groups.set(key, g);
@@ -89,8 +98,16 @@ async function main() {
       summary = `${n} similar emails from ${g.address} between ${oldest.date} and ${newest.date}. Archive them all, make a rule, or keep this as a task. The newest is linked.`;
     } else { if (g.action === "money") singleReceipts += n; else { single += n; singleRows.push(...g.msgs); } continue; }
     tasks.push({ merge_key: `email:${account}:${g.domain}:${g.pat}`, kind: "decide", tier: 2, origin_kind: "email", origin_ref: gmailUrl(newest.id), title, summary,
-      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id) })), count: n, sub: g.action === "money", rep: g.action === "needs-model" ? newest : null });
+      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id) })), count: n, sub: g.action === "money", rep: g.action === "needs-model" ? newest : null,
+      cand: g.action === "money" ? { merchant_key: merchantKey(g.name, g.domain), name: who, address: g.address, domain: g.domain, mailbox: account, task_merge_key: `email:${account}:${g.domain}:${g.pat}`, receipt_count: n, first_seen: oldest.date, last_seen: newest.date, amount_hint: g.msgs.map(amountOf).find((x) => x !== null) ?? null, cycle_hint: cycleOf(g.msgs.map((m) => m.date)) } : null });
   }
+
+  // A merchant you already answered (subscription or not) is never asked about again.
+  const cands = new Map();
+  if (SB_URL && SB_KEY) { try { for (const c of await rest("GET", "subscription_candidates?select=merchant_key,status,amount_hint,cycle_hint")) cands.set(c.merchant_key, c); } catch (e) { console.log(`  (could not read earlier answers: ${e.message})`); } }
+  let answered = 0;
+  for (let i = tasks.length - 1; i >= 0; i--) { const c = tasks[i].cand && cands.get(tasks[i].cand.merchant_key); if (c && c.status !== "asking") { tasks.splice(i, 1); answered++; } }
+  if (answered) console.log(`\n${answered} merchants you already answered are not asked about again.`);
 
   // ---------- optional: model triage ----------
   // The model judges every single message AND the newest message of each repeat group (so a group of failed-payment
@@ -159,7 +176,7 @@ async function main() {
 
   let created = 0, updated = 0, skipped = 0;
   for (const t of tasks) {
-    const { count, sub, rep, ...row } = t;
+    const { count, sub, rep, cand, ...row } = t;
     const ex = await rest("GET", `tasks?merge_key=eq.${encodeURIComponent(t.merge_key)}&select=id,status`);
     if (!ex.length) {
       const made = await rest("POST", "tasks", { ...row, person }, { Prefer: "return=representation" });
@@ -169,6 +186,19 @@ async function main() {
       await rest("PATCH", `tasks?id=eq.${ex[0].id}`, { title: t.title, summary: t.summary, origins: t.origins, origin_ref: t.origin_ref, updated_at: new Date().toISOString() });
       updated++;
     } else skipped++;
+  }
+  // remember each possible subscription for the Subscriptions page (the answer columns are never touched here)
+  const byKey = new Map();
+  for (const t of tasks.filter((x) => x.cand && x.cand.merchant_key)) {
+    const c = t.cand, o = byKey.get(c.merchant_key);
+    if (!o) { byKey.set(c.merchant_key, { ...c }); continue; }
+    o.receipt_count += c.receipt_count; o.first_seen = o.first_seen < c.first_seen ? o.first_seen : c.first_seen;
+    if (c.last_seen > o.last_seen) { o.last_seen = c.last_seen; o.amount_hint = c.amount_hint ?? o.amount_hint; }
+    o.cycle_hint = o.cycle_hint ?? c.cycle_hint;
+  }
+  if (byKey.size) {
+    const body = [...byKey.values()].map((c) => ({ ...c, amount_hint: c.amount_hint ?? cands.get(c.merchant_key)?.amount_hint ?? null, cycle_hint: c.cycle_hint ?? cands.get(c.merchant_key)?.cycle_hint ?? null, updated_at: new Date().toISOString() }));
+    await rest("POST", "subscription_candidates?on_conflict=merchant_key", body, { Prefer: "resolution=merge-duplicates,return=minimal" });
   }
   const line = `${account}: ${rows.length} emails read, ${created} tasks suggested, ${updated} updated, ${skipped} left (already handled by you), no mailbox changes${TRIAGE ? ", model triage on" : ""}`;
   await rest("POST", "activity_log", { actor: "email-agent", action: "email_run", subject: line, ref: account, undoable: false });

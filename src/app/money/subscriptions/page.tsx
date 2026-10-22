@@ -2,11 +2,13 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section, OpenIn, SyncLine } from "@/components/money";
 import { getAccounts, getRecurring, money, shortDate, accountLabel, hoursAgo } from "@/lib/data-money";
+import { getCandidates } from "@/lib/data-subscriptions";
+import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
 
 export const dynamic = "force-dynamic";
 
 export default async function Subscriptions() {
-  const [accounts, items] = await Promise.all([getAccounts(), getRecurring()]);
+  const [accounts, items, candidates] = await Promise.all([getAccounts(), getRecurring(), getCandidates()]);
   const subs = items.filter((r) => r.kind === "subscription").sort((a, b) => a.next_charge.localeCompare(b.next_charge));
   const acc = (id: string) => accounts.find((a) => a.id === id);
   const needs = subs.filter((s) => s.ack_waiting || !s.on_register || s.decision === "review" || s.decision === "cancel");
@@ -17,6 +19,19 @@ export default async function Subscriptions() {
       <Link href="/money" className="text-xs font-semibold text-accent">‹ Money</Link>
       <H1>Subscriptions</H1>
       <p className="text-xs text-muted mb-3"><SyncLine at={hoursAgo(5)} label="register sheet" /><br />{subs.length} subscriptions, about {money(yearly)} a year. Monthly audit: register vs reality. Keep, cancel or downgrade is a decision here; the cancelling happens where the service lives, from a prepared task.</p>
+
+      {candidates.length > 0 && (
+        <Section title="Is this a subscription?" right={`${candidates.length}`}>
+          <div className="flex flex-col gap-2">{candidates.slice(0, 5).map((c) => (
+            <div key={c.id} className="card flex flex-col gap-2">
+              <div><div className="font-semibold">{c.name}</div>
+                <div className="text-xs text-muted">{c.receipt_count} receipts{c.first_seen && c.last_seen ? ` · ${shortDate(c.first_seen)} to ${shortDate(c.last_seen)}` : ""}{c.domain ? ` · from ${c.domain}` : ""}{c.cycle_hint ? ` · looks ${c.cycle_hint}` : ""}</div></div>
+              <SubscriptionCandidate c={c} />
+              <div className="text-[11px] text-muted">Found in {c.mailbox ?? "your mail"} · adding it only records it here; nothing is charged or cancelled.</div>
+            </div>
+          ))}{candidates.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {candidates.length - 5} more</span>}</div>
+        </Section>
+      )}
 
       <Section title="Needs me" right={`${needs.length}`}>
         {needs.length === 0 ? <div className="card text-muted text-sm">Nothing to decide or acknowledge.</div> : (

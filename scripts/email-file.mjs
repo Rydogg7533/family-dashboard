@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { die, option, openGmail, readMessages, dir, pattern } from "./email-lib.mjs";
+import { die, option, openGmail, readMessages, dir, pattern, merchantKey, amountOf } from "./email-lib.mjs";
 import { loadCache } from "./email-triage-lib.mjs";
 
 const args = process.argv.slice(2);
@@ -54,11 +54,6 @@ async function ensureLabel() {
   return (await api("/gmail/v1/users/me/labels", { method: "POST", body: { name: LABEL, labelListVisibility: "labelShow", messageListVisibility: "show" } })).id;
 }
 async function countIds(q) { let n = 0, page = ""; do { const r = await api(`/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=500${page ? `&pageToken=${page}` : ""}`); n += (r.messages || []).length; page = r.nextPageToken || ""; } while (page); return n; }
-
-// "mail.anthropic.com" -> "anthropic"; "email.claude.com" -> "claude"; "co.uk"-style endings are not special-cased (the register can hold several keys).
-const family = (domain) => { const p = String(domain || "").toLowerCase().split(".").filter(Boolean); return p.length >= 2 ? p[p.length - 2] : p[0] || ""; };
-// First dollar amount in the subject or the preview. Returns null when none is visible.
-const amountOf = (r) => { const m = `${r.subject} ${r.snippet}`.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/); return m ? parseFloat(m[1].replace(/,/g, "")) : null; };
 
 async function main() {
   const profile = await api("/gmail/v1/users/me/profile");
@@ -99,7 +94,7 @@ async function main() {
   let noMatch = 0, noAmount = 0, over = 0;
   const receipts = inbox.filter((r) => r.action === "money" && !holdIds.has(r.id));
   for (const r of receipts) {
-    const sub = regBy.get(family(r.domain)); const amt = amountOf(r);
+    const sub = regBy.get(merchantKey(r.name, r.domain)) || regBy.get(merchantKey("", r.domain)); const amt = amountOf(r);
     if (!sub) { noMatch++; continue; }
     if (amt === null) { noAmount++; continue; }
     if (amt >= THRESHOLD) { over++; continue; }

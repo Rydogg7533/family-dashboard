@@ -7,6 +7,8 @@ import { getDisplayName } from "@/lib/data";
 import { TaskActions } from "@/components/TaskActions";
 import { DraftEditor } from "@/components/DraftEditor";
 import { isPast } from "@/lib/data-money";
+import { getCandidateForTask } from "@/lib/data-subscriptions";
+import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
   const [tasks, name] = await Promise.all([getOpenTasks(), getDisplayName()]);
   const task = tasks.find((t) => t.id === id);
   if (!task) notFound();
+  const cand = await getCandidateForTask(task.id);
   const draft = task.kind === "reply" ? await getDraftForTask(task.id) : null;
   const due = task.due_at ? new Date(task.due_at) : null;
   const originLabel = task.origin_kind === "email" ? "Gmail" : task.origin_kind === "message" ? "Messages" : task.origin_kind === "receipt" ? "Money" : task.origin_kind === "calendar" ? "Calendar" : "Source";
@@ -33,9 +36,10 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
           {due && <span className={isPast(task.due_at!) ? " text-red font-semibold" : ""}> · due {due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>}
           {" · "}<a href={task.origin_ref ?? "#"} className="font-semibold text-accent">Open in {originLabel}</a>
         </div>
-        <TaskActions id={task.id} kind={task.kind} />
+        <TaskActions id={task.id} kind={cand && cand.status === "asking" ? "snooze" : task.kind} />
       </div>
 
+      {cand && cand.status === "asking" && <div className="card mb-4"><div className="font-semibold mb-1">Is {cand.name} a subscription?</div><SubscriptionCandidate c={cand} /></div>}
       {task.kind === "reply" && (draft ? <DraftEditor draft={draft} /> : <div className="card text-sm text-muted">The draft is being written. It will appear here, never in your mail app, until its attachments are complete.</div>)}
       {task.kind === "do" && <div className="card text-sm text-muted">Do this outside the dashboard, then tap Done. Anything with money in it is prepared here and paid by you there.</div>}
     </>

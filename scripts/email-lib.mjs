@@ -119,3 +119,22 @@ export async function readMessages(api, query, max, { log = () => {}, workers = 
   }
   return rows;
 }
+
+// ---------- subscription helpers (shared by the agent and the filer) ----------
+// Stable id for a merchant. The sender's own name wins ("Eleven Labs Inc." -> "elevenlabs", even when Stripe sends the mail);
+// the domain family is the fallback ("mail.anthropic.com" -> "anthropic").
+export function merchantKey(name, domain) {
+  const slug = String(name || "").toLowerCase().replace(/\b(inc|llc|ltd|pbc|corp|corporation|co|gmbh|limited|billing|receipts?|invoices?|payments?|team|support|no-?reply)\b\.?/g, "").replace(/[^a-z0-9]+/g, "");
+  if (slug.length >= 3) return slug;
+  const p = String(domain || "").toLowerCase().split(".").filter(Boolean);
+  return p.length >= 2 ? p[p.length - 2] : p[0] || "";
+}
+// First dollar amount in the subject or preview; null when none is visible.
+export const amountOf = (r) => { const m = `${r.subject} ${r.snippet}`.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/); return m ? parseFloat(m[1].replace(/,/g, "")) : null; };
+// Billing cycle from the typical gap (days) between receipt dates; null when there are too few or the gaps are irregular.
+export function cycleOf(dates) {
+  const d = [...new Set(dates)].sort().map((x) => Date.parse(x) / 86400000).filter((x) => !Number.isNaN(x));
+  if (d.length < 3) return null;
+  const gaps = d.slice(1).map((x, i) => x - d[i]).sort((a, b) => a - b), med = gaps[Math.floor(gaps.length / 2)];
+  return med >= 5 && med <= 10 ? "weekly" : med >= 25 && med <= 35 ? "monthly" : med >= 340 && med <= 390 ? "yearly" : null;
+}

@@ -26,7 +26,7 @@ export function TaskRow({ task }: { task: Task }) {
           </div>
         </div>
       </div>
-      <TaskActions id={task.id} kind={task.kind} />
+      <TaskActions id={task.id} kind={task.title.startsWith("Subscription? ") ? "sub" : task.kind} />
     </div>
   );
 }
