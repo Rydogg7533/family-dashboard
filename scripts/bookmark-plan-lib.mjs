@@ -23,10 +23,14 @@ const R = (re) => new RegExp(re, "i");
 // Domain-or-title keyword rules, tried in order inside a group. First hit wins.
 const STRAY = [
   [AR + "For review", R("isohunt|aMule|cracked")],
-  [TL + "Business Software", R("softonic|osxdaily|sourceforge|iusethis|imafish|panic\\.com|dropbox|mailchimp|ehow|doublehelixcables|nycartridgeoutlet|gainsaver|crucial|iconarchive|iconfinder|bgpatterns|patterncooler|speckyboy|mudcu|cmscritic|tipsandtricks|blockergroup|kernbranding|adbeat|artlist|audiojungle|monoprice|mpix")],
+  [TL + "Design Assets", R("iconarchive|iconfinder|bgpatterns|patterncooler|audiojungle|artlist")],
+  [LE + "Tutorials", R("osxdaily|imafish|ehow")],
+  [HF + "Shopping", R("doublehelixcables|nycartridgeoutlet|gainsaver|crucial|monoprice|corsair|vengeance|jomashop")],
+  [AR + "For review", R("softonic|sourceforge|iusethis|panic\\.com|candybar")],
+  [TL + "Web & Ecommerce", R("mudcu|speckyboy|cmscritic|tipsandtricks|blockergroup|kernbranding|adbeat|mpix")],
+  [TL + "Business Software", R("dropbox|mailchimp")],
   [HF + "Health & Fitness", R("barbrothers|simplyshredded|calisthenics")],
   [AR + "For review", R("careerbuilder|monster\\.com|timetohire|fameswap|chrismccombs|msn\\.com|harborhousecafe|sushiplantation|table-q|walmart|uncrate")],
-  [TL + "Business Software", R("corsair|vengeance|candybar")],
 ];
 const CONSTRUCTION = [
   [F + "Business Ops", R("fairpointconstruction|staples|bizchair|officechairs|drafting stool|inmodehome|binder|pendaflex|zebra")],
@@ -90,8 +94,16 @@ const LOOSE = [
   [TL + "Design Assets", R("fontsquirrel|lightroom|preset|totally ?rad|fadedandblurred|vsco|replichrome|photographyconcentrate|coolhunter")],
   [TL + "AI & APIs", R("vidyo\\.ai|opus\\.pro|reworkd|agentgpt")],
   [TL + "Web & Ecommerce", R("hypefury|viralfindr|pickfu|refersion|squarespace|uxthemes|flipsnack|shophunter|queue-it")],
-  [TL + "Business Software", R("whispersystems|silentcircle|spideroak|ontraport|neutroninteractive|wetransfer|trello|apple\\.com|icloud|bing\\.com|flourish|idstc|powtoon")],
+  [TL + "Business Software", R("whispersystems|silentcircle|spideroak|ontraport|neutroninteractive|wetransfer|trello|flourish|idstc|powtoon")],
+  ["Pinned", R("apple\\.com|icloud|bing\\.com")],
   [F + "Subcontractors", R("excavat|knockonwood|radiusmaps|manta\\.com")],
+];
+// Checked before folder maps: items that sit in the wrong old folder.
+const OVERRIDE = [
+  [HF + "Shopping", R("jomashop")],
+  [LE + "Business Know-how", R("basicbizsolutions|forbes\\.com")],
+  [F + "Business Ops", R("facebook.*fairpoint|pinterest.*fairpoint|fairpoint.*(facebook|pinterest|instagram)")],
+  [HF + "Home & Property", R("paccoastplumbing")],
 ];
 const MEDREP_SITES = /(^|\.)(notion|supabase|vercel|github|stripe|brand24|beehiiv|buffer|sentry|betterstack|resend)\./i;
 
@@ -101,6 +113,7 @@ export function classify(b) {
   const hit = (list) => { for (const [t, re] of list) if (re.test(text)) return t; return null; };
   const done = (target, confidence, reason) => { if (!TREE_SET.has(target)) throw new Error(`target not in tree: ${target}`); return { target, confidence, reason }; };
 
+  const ov = hit(OVERRIDE); if (ov) return done(ov, "medium", "moved out of an old folder it did not belong in");
   for (const [re, target] of FOLDER_MAP) if (re.test(where)) return done(target, "high", "its current folder maps directly");
   if (/localhost|127\.0\.0\.1/.test(b.host)) return done(VL + "Local dashboards", "high", "a link to a service on this Mac");
   if (/^Chrome\/shvr\.co › Other Bookmarks/i.test(where) || /^Chrome\/medrepdesk\.io/i.test(where)) { if (MEDREP_SITES.test(b.host + ".") || /medrepdesk|drive/i.test(text)) return done(MR + "Reference", "medium", "MedRepDesk tool already in the Daily/Weekly set (same site)"); return done(TL + "AI & APIs", "medium", "work-profile tool"); }

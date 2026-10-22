@@ -15,7 +15,14 @@ assert.equal(t(bm("Safari", "Default", "Veil Labs", "Firecrawl", "https://firecr
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Case Search", "https://cityofpasadena.net/x")), "Ventures › Fairpoint › Construction › Permits & Agencies");
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Vandevelde Architects", "https://vandevelde-architects.com/")), "Ventures › Fairpoint › Construction › Architects & Designers");
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Inverters, Off Grid", "https://civicsolar.com/")), "Ventures › Fairpoint › Construction › Solar & Energy");
-assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Mac download", "https://softonic.com/")), "Tools › Business Software", "stray in a construction folder is rerouted");
+assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Mac download", "https://softonic.com/")), "Archive › For review", "stray in a construction folder is rerouted");
+const F2 = (title, url, folder = "Favorites › Exercise & Fitness") => t(bm("Safari", "Default", folder, title, url));
+assert.equal(F2("Swatch watch", "https://jomashop.com/x"), "Home & Family › Shopping");
+assert.equal(F2("Equity", "https://forbes.com/x"), "Learn › Business Know-how");
+assert.equal(F2("Fitness", "https://simplescience.com/x"), "Home & Family › Health & Fitness");
+assert.equal(t(bm("Safari", "Default", "Favorites", "iCloud", "https://icloud.com/")), "Pinned");
+assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Icon Search", "https://iconfinder.com/")), "Tools › Design Assets");
+assert.equal(t(bm("Safari", "Default", "Favorites › Social Media", "Facebook (Fairpoint Construction & Development)", "https://facebook.com/x")), "Ventures › Fairpoint › Construction › Business Ops");
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Omnifocus 1.5 cracked", "https://isohunt.com/x")), "Archive › For review");
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Wood-Mode cabinetry", "https://wood-mode.com/")), "Ventures › Fairpoint › Construction › Materials & Suppliers");
 assert.equal(t(bm("Safari", "Default", "Business › Little Miss Lorynn", "Paper Gift Bag", "https://alibaba.com/x")), "Ventures › Little Miss Lorynn › Sourcing › Alibaba");
@@ -32,7 +39,7 @@ assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Lady Skater Pattern 
 assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Funding Rates for Crypto Futures", "https://viewbase.com/")), "Money › Crypto & Markets");
 assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "50 Websites Your Startup Needs", "https://inc.com/x")), "Learn › Business Know-how");
 assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Zebra pen", "https://staples.com/x")), "Ventures › Fairpoint › Construction › Business Ops");
-assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Corsair Vengeance 16GB", "https://amazon.com/x")), "Tools › Business Software");
+assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Corsair Vengeance 16GB", "https://amazon.com/x")), "Home & Family › Shopping");
 assert.equal(t(bm("Safari", "Default", "Business › Little Miss Lorynn", "Giant Mustache Lollipop Masks", "https://melvillecandycompany.com/")), "Ventures › Little Miss Lorynn › Reference");
 assert.equal(t(bm("Safari", "Default", "Personal › Financial", "Coinbase", "https://coinbase.com/")), "Money › Crypto & Markets");
 assert.equal(t(bm("Firefox", "default-release-1", "Bookmarks Menu › Mozilla Firefox", "Get Help", "https://support.mozilla.org/")), "Archive › Browser defaults");
