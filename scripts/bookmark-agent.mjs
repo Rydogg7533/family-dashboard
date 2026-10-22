@@ -12,6 +12,7 @@ import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, copyFi
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { buildPlan } from "./bookmark-plan-lib.mjs";
 import { parseChromium, parseSafari, parseFirefox, buildIndex, matchSender } from "./bookmarks-lib.mjs";
 
 const DRY = process.argv.includes("--dry");
@@ -117,6 +118,16 @@ if (process.argv.includes("--contents")) {
     console.log(`\nSites in folders matching "${needle}" (${inF.length} bookmarks, ${m.size} sites): site x count | sample title`);
     for (const [site, e] of [...m].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))) console.log(`${site} x${e.n} | ${e.title.slice(0, 50)}`);
   }
+}
+
+// ---- --plan: where every bookmark WOULD go in the approved master tree (prints only; moves nothing)
+if (process.argv.includes("--plan")) {
+  const { rows, byTarget, conf } = buildPlan(all);
+  console.log(`\nMOVE PLAN (proposal only, nothing is changed): ${rows.length} bookmarks. Confidence: ${conf.high} high, ${conf.medium} medium, ${conf.low} low.`);
+  console.log("\nHow many would land in each folder:");
+  for (const [t, n] of [...byTarget].sort((a, b) => a[0].localeCompare(b[0]))) console.log(`${String(n).padStart(5)}  ${t}`);
+  console.log("\nEvery bookmark: confidence | from | to | site | title | why");
+  for (const r of rows.sort((a, b) => ({ low: 0, medium: 1, high: 2 })[a.confidence] - ({ low: 0, medium: 1, high: 2 })[b.confidence] || a.target.localeCompare(b.target))) console.log(`${r.confidence} | ${r.b.browser}/${r.b.profile} › ${r.b.folder || "(none)"} | ${r.target} | ${r.b.site} | ${r.b.title.slice(0, 50)} | ${r.reason}`);
 }
 
 // ---- --loose: only the unfiled bookmarks (no folder, Link Dump, Other Bookmarks, Firefox defaults), so they can be sorted into the master tree
