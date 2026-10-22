@@ -45,7 +45,10 @@ Decide whether the email needs something from Ryan. Answer with ONE JSON object 
 kind: reply = a person is waiting for his answer; do = a concrete thing to do (pay, sign, fix, submit); decide = a choice or approval; fyi = worth knowing but no action; ignore = marketing, automated noise, or nothing to do.
 If the preview is too short to tell, choose the safer option: needs_action true, kind "decide", and say what is unclear in "why".`;
 
-const userText = (r) => `From: ${r.name ? `${r.name} ` : ""}<${r.address}>\nDate: ${r.date}\nSubject: ${r.subject}\nPreview: ${r.snippet}`;
+// Previews carry invisible filler characters and HTML entities; strip them so tokens are not wasted and the model sees plain text.
+const clean = (t) => String(t || "").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+  .replace(/[\u00ad\u034f\u200b-\u200f\u2060\u2061-\u2064\ufeff]/g, "").replace(/\s+/g, " ").trim().slice(0, 220);
+const userText = (r) => `From: ${r.name ? `${r.name} ` : ""}<${r.address}>\nDate: ${r.date}\nSubject: ${r.subject}\nPreview: ${clean(r.snippet)}`;
 
 async function ask(r) {
   for (let attempt = 1; attempt <= 5; attempt++) {
