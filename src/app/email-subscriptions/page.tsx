@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section } from "@/components/money";
-import { getEmailSubs, getEmailSubsScan, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
+import { getEmailSubs, getEmailSubsScan, getFinishLinks, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
 import { EmailSubscriptionList, CancelRequest } from "@/components/EmailSubscriptionList";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ export default async function EmailSubscriptions() {
   const needs = subs.filter((s) => s.status === "needs_tap" || s.status === "open_link" || s.status === "failed");
   const waiting = subs.filter((s) => s.status === "requested");
   const done = subs.filter((s) => s.status === "done" || s.status === "stopped");
+  const links = await getFinishLinks(needs.slice(0, 5).map((s) => s.id));
   const quietBefore = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
 
   return (
@@ -39,6 +40,8 @@ export default async function EmailSubscriptions() {
               <div className="font-semibold text-sm">{name(s)}</div>
               <div className="text-xs text-amber font-semibold">{s.status === "failed" ? "The request did not go through." : s.status === "open_link" ? "This sender needs you to finish on its page." : "This sender needs a tap from you."}</div>
               {s.status_note && <div className="text-xs text-muted">{s.status_note}</div>}
+              {links[s.id]?.open && <a href={links[s.id].open} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-accent">Open to finish</a>}
+              {links[s.id]?.mail && <a href={links[s.id].mail} className="text-xs font-semibold text-accent">Open the email to send</a>}
             </div>
           ))}{needs.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {needs.length - 5} more</span>}</div>
         </Section>
@@ -49,7 +52,7 @@ export default async function EmailSubscriptions() {
           <div className="card flex flex-col">
             {waiting.map((s) => (
               <div key={s.id} className="py-2.5 border-b border-line last:border-0 flex items-start justify-between gap-3">
-                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><div className="text-xs text-muted">Asked {day(s.requested_at)} · waiting for your Mac mini</div></div>
+                <div className="min-w-0"><div className="font-semibold text-sm truncate">{name(s)}</div><div className="text-xs text-muted">Asked {day(s.requested_at)} · {s.status_note || "waiting for your Mac mini"}</div></div>
                 <CancelRequest ids={[s.id]} />
               </div>
             ))}

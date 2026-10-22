@@ -2,7 +2,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 // Mailing lists found in the person's mailbox by scripts/email-subscriptions.mjs (table email_subscriptions, migrations 0016 and 0017).
 // Not the same thing as Money › Subscriptions, which tracks paid recurring charges.
-// The unsubscribe links themselves are never read here: they can carry a personal token, and only the Mac mini agent uses them.
+// The list never reads unsubscribe links (they can carry a personal token). Only rows that need the person to finish (getFinishLinks) do.
 export type EmailSubStatus = "active" | "requested" | "done" | "needs_tap" | "open_link" | "failed" | "stopped";
 export type EmailSub = {
   id: string; sender_name: string | null; address: string | null; domain: string | null;
@@ -40,4 +40,18 @@ export async function getUnsubscribeAgentReady(): Promise<boolean> {
   const sb = await createClient();
   const { data } = await sb.from("system_status").select("state,updated_at").eq("key", "email_unsubscriber").maybeSingle();
   return !!data?.updated_at && data.state !== "error" && Date.now() - Date.parse(data.updated_at) < 3600_000;
+}
+
+// Links for rows waiting on the person (open_link, needs_tap) only. Header-sourced, so anything but a plain https page or a mailto: is dropped.
+export type FinishLinks = { open?: string; mail?: string };
+const safeHttps = (v: unknown) => { try { const u = new URL(String(v)); return u.protocol === "https:" && !u.username && !u.password && String(v).length <= 2048 ? u.toString() : undefined; } catch { return undefined; } };
+const safeMailto = (v: unknown) => { try { const u = new URL(String(v)); return u.protocol === "mailto:" && String(v).length <= 1024 && /^[^\s<>"]+@[^\s<>"]+$/.test(decodeURIComponent(u.pathname)) ? u.toString() : undefined; } catch { return undefined; } };
+export async function getFinishLinks(ids: string[]): Promise<Record<string, FinishLinks>> {
+  if (!ids.length) return {};
+  if (!hasSupabaseEnv()) return {};
+  const sb = await createClient();
+  const { data } = await sb.from("email_subscriptions").select("id,status,unsub_http,unsub_mailto").in("id", ids).in("status", ["open_link", "needs_tap"]);
+  const out: Record<string, FinishLinks> = {};
+  for (const r of data ?? []) out[r.id] = { open: r.status === "open_link" ? safeHttps(r.unsub_http) : undefined, mail: r.status === "needs_tap" ? safeMailto(r.unsub_mailto) : undefined };
+  return out;
 }
