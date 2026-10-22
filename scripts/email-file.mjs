@@ -14,6 +14,8 @@
 //                      - an amount is visible in the subject or preview, and it is UNDER the threshold (default $100, --threshold),
 //                      - the sighting is recorded first in recurring_observations (append-only), so the filed mail has a record behind it.
 //                    No match, no visible amount, or $100 and over: it stays in the inbox. (Over $100 always asks; no match asks.)
+//   3. MODEL RULE    a message the model judged 'needs nothing' (saved by email-agent.mjs --model-triage), or a repeat group where every judged
+//                    message says so -> filed. Never receipts. --skip-model-rule turns it off; the dry run lists senders and examples to spot-check.
 // Never filed: starred mail, anything with an OPEN task, anything the rules above do not name. Nothing is ever deleted;
 // "filed" = label Dashboard/Handled + removed from the inbox, exactly as email-apply.mjs does, so its --undo works on this script's undo files.
 // Secrets: ~/_secrets_local_only/family-dashboard.env (SUPABASE_URL, SUPABASE_SERVICE_KEY), same as the other agents.
@@ -21,11 +23,14 @@
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { die, option, openGmail, readMessages, dir } from "./email-lib.mjs";
+import { die, option, openGmail, readMessages, dir, pattern } from "./email-lib.mjs";
+import { loadCache } from "./email-triage-lib.mjs";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const UNDO = option(args, "--undo");
+const SKIP_MODEL = args.includes("--skip-model-rule");
+const SHOW_ALL = args.includes("--show-all");
 const THRESHOLD = parseFloat(option(args, "--threshold") || "100");
 const LABEL = "Dashboard/Handled";
 const { account, api } = openGmail(args, { allowWrite: true });
@@ -101,11 +106,44 @@ async function main() {
     add(r, "receipt", `${sub.name} $${amt.toFixed(2)} (registered subscription)`, { sub, amt });
   }
 
+  // ---- rule 3: mail the model judged "needs nothing" (from the triage cache the email agent keeps) ----
+  // Single messages use their own verdict. A repeat group (3 or more with the same sender and subject pattern) inherits the verdict
+  // of the newest message the model read, but only when every verdict in that group says "needs nothing".
+  // Never: receipts, starred mail, mail behind an open task, or anything the model rated as needing action at any urgency.
+  let modelFiled = 0, noCache = 0;
+  if (!SKIP_MODEL) {
+    const cache = loadCache(account);
+    if (!Object.keys(cache).length) console.log("\n(no model decisions saved for this account yet, so the model rule has nothing to use; run email-agent.mjs --model-triage first)");
+    const groups = new Map();
+    for (const r of inbox) { const k = `${r.address}|${pattern(r.subject)}`; (groups.get(k) || groups.set(k, []).get(k)).push(r); }
+    for (const list of groups.values()) {
+      const verdicts = list.map((r) => cache[r.id]).filter(Boolean);
+      const allQuiet = verdicts.length > 0 && verdicts.every((d) => d.needs_action === false);
+      for (const r of list) {
+        if (r.action === "money" || holdIds.has(r.id) || r.labels.includes("STARRED") || plan.has(r.id)) continue;
+        const own = cache[r.id];
+        if (own) { if (own.needs_action === false) add(r, "model", `model: needs nothing — ${String(own.why || own.title || "").slice(0, 70)}`); continue; }
+        if (list.length >= 3 && allQuiet) add(r, "model", `model: repeat group needs nothing — ${String(verdicts[0].why || "").slice(0, 60)}`);
+        else if (r.action === "needs-model") noCache++;
+      }
+    }
+    modelFiled = [...plan.values()].filter((x) => x.rule === "model").length;
+  }
+
   const todo = [...plan.values()];
-  console.log(`\nScanned ${inbox.length}. Would file ${todo.length}: ${todo.filter((x) => x.rule === "task").length} from finished/dismissed tasks, ${todo.filter((x) => x.rule === "receipt").length} receipts.`);
+  console.log(`\nScanned ${inbox.length}. Would file ${todo.length}: ${todo.filter((x) => x.rule === "task").length} from finished/dismissed tasks, ${todo.filter((x) => x.rule === "receipt").length} receipts, ${modelFiled} the model judged as needing nothing.`);
+  if (noCache) console.log(`${noCache} messages the model has not judged yet stay in the inbox.`);
   console.log(`Receipts staying in the inbox: ${noMatch} with no registered subscription (they need your answer), ${noAmount} with no visible amount, ${over} at $${THRESHOLD} or more (always asks). Registered subscriptions: ${reg.length}.`);
-  for (const x of todo.slice(0, 30)) console.log(`  ${x.rule.padEnd(7)} ${x.r.domain.padEnd(24)} ${x.r.subject.slice(0, 50).padEnd(50)} — ${x.why.slice(0, 60)}`);
-  if (todo.length > 30) console.log(`  … and ${todo.length - 30} more`);
+  if (modelFiled) {
+    const by = new Map(); for (const x of todo.filter((y) => y.rule === "model")) by.set(x.r.domain, (by.get(x.r.domain) || 0) + 1);
+    console.log("\nModel rule — by sender (check these look like mail you do not need):");
+    for (const [d, n] of [...by].sort((a, b) => b[1] - a[1]).slice(0, SHOW_ALL ? 999 : 15)) console.log(`  ${String(n).padStart(4)}  ${d}`);
+    console.log("\nA spread of examples, one per sender (use --show-all for every message):");
+    const seen = new Set();
+    for (const x of todo.filter((y) => y.rule === "model")) { if (!SHOW_ALL && (seen.has(x.r.domain) || seen.size >= 25)) continue; seen.add(x.r.domain); console.log(`  ${x.r.domain.padEnd(24)} ${x.r.subject.slice(0, 48).padEnd(48)} — ${x.why.replace("model: ", "").slice(0, 60)}`); }
+    console.log("");
+  }
+  for (const x of todo.filter((y) => y.rule !== "model").slice(0, 30)) console.log(`  ${x.rule.padEnd(7)} ${x.r.domain.padEnd(24)} ${x.r.subject.slice(0, 50).padEnd(50)} — ${x.why.slice(0, 60)}`);
   if (!APPLY) { console.log("\nDRY RUN finished. Nothing was changed. Run again with --apply to file these."); return; }
   if (!todo.length) { console.log("\nNothing to file."); return; }
 
@@ -132,7 +170,7 @@ async function main() {
     appendFileSync(file + ".applied", JSON.stringify({ ids: chunk, at: new Date().toISOString() }) + "\n", { mode: 0o600 });
     console.log(`  ${Math.min(i + 500, ids.length)}/${ids.length} filed`);
   }
-  const line = `${account}: ${ids.length} emails filed (${final.filter((x) => x.rule === "task").length} from finished tasks, ${final.filter((x) => x.rule === "receipt").length} receipts matched to a subscription)`;
+  const line = `${account}: ${ids.length} emails filed (${final.filter((x) => x.rule === "task").length} from finished tasks, ${final.filter((x) => x.rule === "receipt").length} receipts matched to a subscription, ${final.filter((x) => x.rule === "model").length} the model judged as needing nothing)`;
   await rest("POST", "activity_log", { actor: "email-filer", action: "mail_filed", subject: line, ref: account, undoable: true });
 
   // ---- verify ----
