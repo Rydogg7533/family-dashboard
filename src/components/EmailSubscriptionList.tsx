@@ -57,7 +57,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
           {["all", ...boxes].map((b) => <button key={b} onClick={() => setBox(b)} aria-pressed={box === b} className={`min-h-9 px-3 rounded-full border text-xs font-semibold ${box === b ? "border-accent bg-accent text-white" : "border-line"}`}>{b === "all" ? `All mailboxes (${allSubs.length})` : `${b} (${allSubs.filter((s) => s.mailbox === b).length})`}</button>)}
         </div>
       )}
-      <div className="sticky z-30 flex flex-col gap-2 top-[calc(44px+env(safe-area-inset-top)+8px)]">
+      <div className="sticky z-30 flex flex-col gap-2 top-[calc(44px+env(safe-area-inset-top))] bg-bg -mx-5 px-5 pt-2 pb-2">
         <div className="card shadow-md">{bar}</div>
       {confirming && (
         <div role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber max-h-[55vh] overflow-y-auto shadow-lg">
