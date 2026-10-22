@@ -120,7 +120,8 @@ function labelFrom(params, groupLabel) {
   if (groupLabel) return groupLabel.replace(/^_\$!<|>!\$_$/g, "").toLowerCase();
   const m = params.match(/TYPE=([^;:]+)/gi) || [];
   const types = m.flatMap((x) => x.slice(5).split(",")).map((t) => t.replace(/^"|"$/g, "").toLowerCase()).filter((t) => !["pref", "voice", "internet"].includes(t));
-  return types[0] || "other";
+  const t = types[0] || "other";
+  return t === "cell" ? "mobile" : t;
 }
 function parseVcard(text) {
   const lines = unfold(text).split("\n").filter(Boolean);
@@ -205,5 +206,5 @@ async function main() {
   if (state === "error") process.exit(1);
 }
 
-export { parseVcard, unesc };
+export { parseVcard, unesc, dav, davHeaders, findAddressbooks, fetchCards, tag, tags, hrefIn, rest, get, env, URL as SUPABASE_URL, KEY as SUPABASE_KEY };
 if (process.argv[1] && process.argv[1].endsWith("contacts-sync.mjs")) main().catch((e) => { console.error(e); process.exit(1); });

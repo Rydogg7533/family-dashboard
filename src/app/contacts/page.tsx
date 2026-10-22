@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources } from "@/components/registers";
-import { getContacts, getContactCards } from "@/lib/data-registers";
+import { getContacts, getContactCards, getContactEditNotes } from "@/lib/data-registers";
 import ContactsBook from "@/components/c/ContactsBook";
 
 export const dynamic = "force-dynamic";
@@ -12,9 +12,11 @@ export default async function Contacts({ searchParams }: PageProps<"/contacts">)
   const kind = typeof sp.kind === "string" ? sp.kind : "";
   const cards = await getContactCards();
   if (cards.length > 0) {
+    const problems = await getContactEditNotes();
     return (
       <>
         <H1 right={`${cards.length} contacts`}>Contacts</H1>
+        {problems.map((p) => <div key={p.id} role="alert" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">A change was not saved{p.summary ? ` (${p.summary})` : ""}: {p.note}</div>)}
         <ContactsBook cards={cards} />
         <PageSources items={[{ label: "Apple Contacts", href: "#contacts" }]} />
       </>
