@@ -2,6 +2,7 @@ import { getStatus, overall, ago, HEARTBEAT_MAX_HOURS } from "@/lib/data";
 import { Banner, Card, Chip, H1 } from "@/components/ui";
 import { listIssues, isOwner } from "@/app/issues/actions";
 import IssueStatus from "@/components/IssueStatus";
+import { Fold } from "@/components/Fold";
 import { ReportIssueButton } from "@/components/ReportIssue";
 
 const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space" };
@@ -17,6 +18,18 @@ export default async function Health() {
   const o = overall(status);
   const order = ["heartbeat", "mirror", "time_machine", "free_space_mini", "free_space_8tb"];
   const rows = [...status].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  const renderIssue = (i: (typeof issues)[number]) => (
+    <Card key={i.id}>
+              <div className="flex justify-between items-start gap-2">
+                <div className="font-semibold text-[15px] min-w-0">{i.text}</div>
+                <span className={`shrink-0 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold ${ISSUE_CLS[i.status] ?? "bg-soft"}`}>{ISSUE_LABEL[i.status] ?? i.status}</span>
+              </div>
+              <div className="text-xs text-muted mt-1">{i.reporter_name ?? "someone"} · {SEV_LABEL[i.severity] ?? i.severity} · {i.page}{i.item_kind ? ` · ${i.item_kind}` : ""} · {ago(i.created_at)}{i.app_version ? ` · v${i.app_version}` : ""}</div>
+              {i.screenshots && i.screenshots.length > 0 && <div className="text-xs mt-1.5 flex gap-3">{i.screenshots.map((_, n) => <a key={n} href={`/api/issue-shot/${i.id}/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">Screenshot {n + 1}</a>)}</div>}
+              {i.status_note && <div className="text-sm mt-1.5">{i.status_note}{i.fixed_in ? <span className="text-muted"> · fixed in {i.fixed_in}</span> : null}</div>}
+              {owner && <IssueStatus id={i.id} status={i.status} note={i.status_note} fixedIn={i.fixed_in} />}
+            </Card>
+  );
   return (
     <>
       <H1>System health</H1>
@@ -47,20 +60,19 @@ export default async function Health() {
       {issues.length === 0 ? (
         <Card className="text-sm text-muted">Nothing reported yet. Use the + button on any page, or the button above. One problem per report, in your words.</Card>
       ) : (
-        <div className="flex flex-col gap-2">
-          {issues.map((i) => (
-            <Card key={i.id}>
-              <div className="flex justify-between items-start gap-2">
-                <div className="font-semibold text-[15px] min-w-0">{i.text}</div>
-                <span className={`shrink-0 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold ${ISSUE_CLS[i.status] ?? "bg-soft"}`}>{ISSUE_LABEL[i.status] ?? i.status}</span>
+        <>
+          {issues.filter((i) => i.status !== "fixed").length === 0 && <Card className="text-sm text-muted">No open reports.</Card>}
+          <div className="flex flex-col gap-2">
+            {issues.filter((i) => i.status !== "fixed").map(renderIssue)}
+          </div>
+          {issues.some((i) => i.status === "fixed") && (
+            <Fold id="issues-fixed" title="Fixed" summary={`${issues.filter((i) => i.status === "fixed").length}`}>
+              <div className="flex flex-col gap-2">
+                {issues.filter((i) => i.status === "fixed").map(renderIssue)}
               </div>
-              <div className="text-xs text-muted mt-1">{i.reporter_name ?? "someone"} · {SEV_LABEL[i.severity] ?? i.severity} · {i.page}{i.item_kind ? ` · ${i.item_kind}` : ""} · {ago(i.created_at)}{i.app_version ? ` · v${i.app_version}` : ""}</div>
-              {i.screenshots && i.screenshots.length > 0 && <div className="text-xs mt-1.5 flex gap-3">{i.screenshots.map((_, n) => <a key={n} href={`/api/issue-shot/${i.id}/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">Screenshot {n + 1}</a>)}</div>}
-              {i.status_note && <div className="text-sm mt-1.5">{i.status_note}{i.fixed_in ? <span className="text-muted"> · fixed in {i.fixed_in}</span> : null}</div>}
-              {owner && <IssueStatus id={i.id} status={i.status} note={i.status_note} fixedIn={i.fixed_in} />}
-            </Card>
-          ))}
-        </div>
+            </Fold>
+          )}
+        </>
       )}
     </>
   );
