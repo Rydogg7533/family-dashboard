@@ -12,15 +12,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
   manifest: "/manifest.webmanifest",
 };
-import { NoZoom } from "@/components/NoZoom";
-export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1, maximumScale: 1, userScalable: false };
+export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
       <head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" /></head>
       <body className="min-h-full flex flex-col">
-        <NoZoom />
         <AppearanceProvider>
           <TopBar />
           <main className="flex-1 w-full max-w-md mx-auto px-5 pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-28">{children}</main>

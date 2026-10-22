@@ -38,6 +38,6 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
 /* status colors never change with theme accents */
 .ok { color: var(--green); } .warn { color: var(--amber); } .err { color: var(--red); }
 
-/* No zoom surprises: double-tap zoom off, no text resizing on rotate, and 16px form fields so iOS does not zoom in when one is focused. */
+/* No accidental zoom: double-tap zoom off, 16px form fields so iOS does not zoom in on focus, no sideways drift. Pinch zoom stays available on purpose (accessibility). */
 html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip; }
 input:not([type="checkbox"]):not([type="radio"]), textarea, select { font-size: max(16px, 1em); }
