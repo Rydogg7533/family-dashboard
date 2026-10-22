@@ -99,6 +99,13 @@ if (process.argv.includes("--folders")) {
   for (const [k, m] of by) { console.log(`\n${k}`); for (const [f, n] of [...m].sort((a, b) => b[1] - a[1]).slice(0, 30)) console.log(`  ${String(n).padStart(5)}  ${f}`); }
 }
 
+// ---- --loose: only the unfiled bookmarks (no folder, Link Dump, Other Bookmarks, Firefox defaults), so they can be sorted into the master tree
+if (process.argv.includes("--loose")) {
+  const loose = all.filter((b) => !b.folder || /^(Link Dump|Other Bookmarks|Bookmarks Menu › Mozilla Firefox|Bookmarks bar|Veil Labs|Broadbeach)/i.test(b.folder) || /^Other Bookmarks/i.test(b.folder));
+  console.log(`\nUnfiled (${loose.length}): browser | folder | site | title`);
+  for (const b of loose) console.log(`${b.browser}/${b.profile} | ${b.folder || "(none)"} | ${b.site} | ${b.title.slice(0, 60)}`);
+}
+
 // ---- preview: which email-list senders already have a bookmark? (reads the dashboard database; writes nothing)
 async function preview() {
   const envPath = join(HOME, "_secrets_local_only", "family-dashboard.env"); const env = {};
