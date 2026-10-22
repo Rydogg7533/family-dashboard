@@ -60,3 +60,28 @@ export async function listIssues(limit = 50): Promise<IssueRow[]> {
   const { data } = await sb.from("issues").select("id, reporter_name, text, severity, page, item_kind, status, status_note, fixed_in, app_version, created_at, updated_at, screenshots").order("created_at", { ascending: false }).limit(limit);
   return (data as IssueRow[]) ?? [];
 }
+
+const STATUSES = ["open", "needs_info", "fixed", "cannot_reproduce", "by_design", "duplicate"];
+const ISSUE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Owner only (checked again in the database by set_issue_status, migration 0020): the maintainer's call on a report.
+export async function isOwner(): Promise<boolean> {
+  if (!hasSupabaseEnv()) return true;
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return false;
+  const { data } = await sb.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  return data?.role === "owner";
+}
+export async function setIssueStatus(id: string, status: string, note: string, fixedIn: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ISSUE_UUID.test(id) || !STATUSES.includes(status)) return { ok: false, error: "Pick a status." };
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in again." };
+  const { error } = await sb.rpc("set_issue_status", { p_id: id, p_status: status, p_note: note.trim().slice(0, 500), p_fixed_in: fixedIn.trim().slice(0, 40) });
+  if (error) return { ok: false, error: /owners only/.test(error.message) ? "Only the owner can change a report's status." : "Could not save." };
+  const { data: prof } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  await sb.from("activity_log").insert({ actor: prof?.display_name ?? "owner", action: "issue_status_set", subject: `Report marked ${status.replace("_", " ")}${note ? `: ${note.slice(0, 60)}` : ""}`, ref: id, undoable: false }).then(() => {}, () => {});
+  return { ok: true };
+}

@@ -1,6 +1,7 @@
 import { getStatus, overall, ago, HEARTBEAT_MAX_HOURS } from "@/lib/data";
 import { Banner, Card, Chip, H1 } from "@/components/ui";
-import { listIssues } from "@/app/issues/actions";
+import { listIssues, isOwner } from "@/app/issues/actions";
+import IssueStatus from "@/components/IssueStatus";
 import { ReportIssueButton } from "@/components/ReportIssue";
 
 const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space" };
@@ -12,7 +13,7 @@ const ISSUE_CLS: Record<string, string> = { open: "bg-amber-bg text-amber", need
 const SEV_LABEL: Record<string, string> = { blocks: "blocks", annoying: "annoying", cosmetic: "cosmetic", idea: "idea" };
 
 export default async function Health() {
-  const [status, issues] = await Promise.all([getStatus(), listIssues()]);
+  const [status, issues, owner] = await Promise.all([getStatus(), listIssues(), isOwner()]);
   const o = overall(status);
   const order = ["heartbeat", "mirror", "time_machine", "free_space_mini", "free_space_8tb"];
   const rows = [...status].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
@@ -56,6 +57,7 @@ export default async function Health() {
               <div className="text-xs text-muted mt-1">{i.reporter_name ?? "someone"} · {SEV_LABEL[i.severity] ?? i.severity} · {i.page}{i.item_kind ? ` · ${i.item_kind}` : ""} · {ago(i.created_at)}{i.app_version ? ` · v${i.app_version}` : ""}</div>
               {i.screenshots && i.screenshots.length > 0 && <div className="text-xs mt-1.5 flex gap-3">{i.screenshots.map((_, n) => <a key={n} href={`/api/issue-shot/${i.id}/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">Screenshot {n + 1}</a>)}</div>}
               {i.status_note && <div className="text-sm mt-1.5">{i.status_note}{i.fixed_in ? <span className="text-muted"> · fixed in {i.fixed_in}</span> : null}</div>}
+              {owner && <IssueStatus id={i.id} status={i.status} note={i.status_note} fixedIn={i.fixed_in} />}
             </Card>
           ))}
         </div>
