@@ -99,6 +99,14 @@ if (process.argv.includes("--folders")) {
   for (const [k, m] of by) { console.log(`\n${k}`); for (const [f, n] of [...m].sort((a, b) => b[1] - a[1]).slice(0, 30)) console.log(`  ${String(n).padStart(5)}  ${f}`); }
 }
 
+// ---- --contents: what is in each folder (top sites per folder), so a better structure can be designed from the real material
+if (process.argv.includes("--contents")) {
+  const f = new Map();
+  for (const b of all) { const k = `${b.browser}/${b.profile} › ${b.folder.split(" › ").slice(0, 2).join(" › ") || "(none)"}`; if (!f.has(k)) f.set(k, { n: 0, sites: new Map() }); const e = f.get(k); e.n++; e.sites.set(b.site, (e.sites.get(b.site) || 0) + 1); }
+  console.log("\nFolder contents (folder: bookmarks | top sites with counts):");
+  for (const [k, e] of [...f].sort((a, b) => b[1].n - a[1].n).slice(0, 45)) console.log(`${String(e.n).padStart(4)}  ${k}  |  ${[...e.sites].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([s, n]) => `${s}${n > 1 ? ` x${n}` : ""}`).join(", ")}`);
+}
+
 // ---- --loose: only the unfiled bookmarks (no folder, Link Dump, Other Bookmarks, Firefox defaults), so they can be sorted into the master tree
 if (process.argv.includes("--loose")) {
   const loose = all.filter((b) => !b.folder || /^(Link Dump|Other Bookmarks|Bookmarks Menu › Mozilla Firefox|Bookmarks bar|Veil Labs|Broadbeach)/i.test(b.folder) || /^Other Bookmarks/i.test(b.folder));
