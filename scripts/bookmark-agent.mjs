@@ -61,15 +61,21 @@ if (appInstalled("Firefox")) {
   }
 }
 
-// ---- Safari (plutil ships with macOS; reading needs the Terminal / launchd job to have Full Disk Access)
+// ---- Safari (python3 ships with macOS; reading needs the Terminal / launchd job to have Full Disk Access)
 {
   const plist = join(HOME, "Library", "Safari", "Bookmarks.plist");
   if (existsSync(plist)) {
     try {
-      const json = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist], { maxBuffer: 500e6 }).toString());
+      // plutil's JSON converter refuses Safari's file (it holds binary data and dates), so Python's plistlib reads it instead and drops those fields.
+      const py = "import plistlib,json,sys\nd=plistlib.load(open(sys.argv[1],'rb'))\nprint(json.dumps(d,default=lambda o: None))";
+      const json = JSON.parse(execFileSync("/usr/bin/python3", ["-c", py, plist], { maxBuffer: 500e6, stdio: ["ignore", "pipe", "pipe"] }).toString());
       const { bookmarks, readingList } = parseSafari(json);
       all.push(...bookmarks); sources.push({ key: "Safari/Default", browser: "Safari", profile: "Default", account: null, count: bookmarks.length, readingList });
-    } catch (e) { sources.push({ key: "Safari/Default", browser: "Safari", profile: "Default", account: null, count: 0, note: "NOT READABLE. Give Terminal Full Disk Access (System Settings › Privacy & Security), then run again" }); }
+    } catch (e) {
+      const msg = String(e.stderr || e.message).trim().split("\n").pop().slice(0, 140);
+      const perm = /not permitted|permission/i.test(msg);
+      sources.push({ key: "Safari/Default", browser: "Safari", profile: "Default", account: null, count: 0, note: perm ? `NOT READABLE: macOS is blocking it (${msg}). Give Terminal Full Disk Access, quit and reopen Terminal, run again` : `NOT READABLE: ${msg}` });
+    }
   }
 }
 
