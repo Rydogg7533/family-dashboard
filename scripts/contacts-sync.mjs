@@ -57,7 +57,7 @@ async function dav(method, url, user, pass, body, depth) {
   }
   throw new Error(`too many redirects for ${url}`);
 }
-const unesc = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+const unesc = (s) => s.replace(/&#(x[0-9a-f]+|\d+);/gi, (_, n) => String.fromCodePoint(/^x/i.test(n) ? parseInt(n.slice(1), 16) : parseInt(n, 10))).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 function tag(xml, name) { const m = xml.match(new RegExp(`<(?:[\\w-]+:)?${name}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[\\w-]+:)?${name}>`, "i")); return m ? m[1] : null; }
 function tags(xml, name) { const out = []; const re = new RegExp(`<(?:[\\w-]+:)?${name}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[\\w-]+:)?${name}>`, "gi"); let m; while ((m = re.exec(xml))) out.push(m[1]); return out; }
 const hrefIn = (xml) => { const h = tag(xml, "href"); return h ? unesc(h.trim()) : null; };
@@ -167,7 +167,7 @@ async function syncPerson(cfg, log) {
   for (const book of books) {
     const listed = await listCards(book, cfg.user, cfg.pass);
     // Only fetch cards whose etag changed; we need uid ↔ href, so first-run fetches everything.
-    const need = listed.filter((c) => ![...existing.values()].some((e) => e.etag === c.etag && !e.deleted_at));
+    const need = process.argv.includes("--refetch") ? listed : listed.filter((c) => ![...existing.values()].some((e) => e.etag === c.etag && !e.deleted_at));
     unchanged += listed.length - need.length;
     for (const e of existing.values()) if (listed.some((c) => c.etag === e.etag)) seen.add(e.uid);
     const fetched = need.length ? await fetchCards(book, need.map((c) => c.path), cfg.user, cfg.pass) : [];
@@ -205,5 +205,5 @@ async function main() {
   if (state === "error") process.exit(1);
 }
 
-export { parseVcard };
+export { parseVcard, unesc };
 if (process.argv[1] && process.argv[1].endsWith("contacts-sync.mjs")) main().catch((e) => { console.error(e); process.exit(1); });
