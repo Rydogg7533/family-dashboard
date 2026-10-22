@@ -76,6 +76,11 @@ assert.equal(cat("Delta", "delta.com", "Fly to Hawaii"), "travel");
 assert.equal(cat("Friends of Sam", "actblue.com", "Please donate before midnight"), "donations");
 assert.equal(cat("Morning Brew", "morningbrew.com", "Your daily digest"), "news");
 assert.equal(cat("Bob", "bobs.example", "hello"), "unclear");
+assert.equal(cat("Google", "google.com", "Ryan, review your Google Account settings"), "account");
+assert.equal(cat("Helius", "helius.xyz", "Updated Helius Terms of Service"), "account");
+assert.equal(cat("MetaMask Team", "metamask.io", "A 20K sweepstakes just went live"), "promos");
+assert.equal(cat("Cursor Team", "mail.cursor.com", "Now in Cursor: Web Layout Editor"), "news");
+assert.equal(cat("Couch Critics", "mail.beehiiv.com", "Holiday films"), "news");
 assert.equal(cat("Bank of X", "x.com", "Big sale on rates"), "account", "guarded wins over promos");
 // subjects: 3 newest, de-duplicated, account senders keep none
 const sm = (from, subj, ts) => parseMessage(msg(from, { "List-Unsubscribe": "<https://s.com/u>", Subject: subj }, ts));
@@ -92,5 +97,7 @@ let bf = planWrites({ groups: g2, existing: old, ...base });
 assert.equal(bf.updates.length, 1); assert.equal(bf.updates[0].patch.category, "promos"); assert.ok(!("message_count" in bf.updates[0].patch) && !("last_seen" in bf.updates[0].patch));
 old.get("s@s.com").category = "promos";
 assert.equal(planWrites({ groups: g2, existing: old, ...base }).updates.length, 0);
+old.get("s@s.com").category = "unclear";
+assert.equal(planWrites({ groups: g2, existing: old, ...base }).updates[0].patch.category, "promos", "a label stored under older rules is refreshed");
 
 console.log("PASS: subscriptions-lib (all checks)");

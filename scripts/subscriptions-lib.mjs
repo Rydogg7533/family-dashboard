@@ -23,13 +23,13 @@ export const cleanSubject = (v) => String(v || "").replace(/[\u0000-\u001f\u007f
 // ---------- what is this list about? keyword rules on the sender and its recent subjects; no model, nothing leaves the Mac mini ----------
 // First match wins, so order matters. 'account' comes first on purpose: when in doubt a sender is guarded, never offered as junk.
 const RULES = [
-  ["account", /\b(bank|credit union|credit karma|venmo|paypal|zelle|cash app|chase|wells ?fargo|capital ?one|amex|american express|discover card|fidelity|schwab|vanguard|coinbase|insurance|statement|autopay|your (account|payment|receipt|invoice|bill|balance|password|security|appointment|prescription)|verify|verification|security alert|two-?factor|sign-?in|log-?in|password|prescription|pharmacy|clinic|patient|school|district|tax|irs|utility|openai|anthropic|github|vercel|supabase|stripe|cloudflare|namecheap|godaddy)\b/i],
+  ["account", /\b(bank|credit union|credit karma|venmo|paypal|zelle|cash app|chase|wells ?fargo|capital ?one|amex|american express|discover card|fidelity|schwab|vanguard|coinbase|insurance|statement|autopay|your (account|payment|receipt|invoice|bill|balance|password|security|appointment|prescription)|verify|verification|security alert|two-?factor|sign-?in|log-?in|password|prescription|pharmacy|clinic|patient|school|district|tax|irs|utility|terms of service|privacy policy|google account|account data|openai|anthropic|github|vercel|supabase|stripe|cloudflare|namecheap|godaddy)\b/i],
   ["social", /\b(linkedin|facebook|instagram|twitter|nextdoor|pinterest|reddit|quora|meetup|tiktok|snapchat|discord|strava|goodreads|youtube|(connection|follower|invitation)s?|mentioned you|new followers)\b|\bx\.com\b/i],
   ["travel", /\b(airlines?|flights?|hotels?|airbnb|vrbo|expedia|marriott|hilton|hyatt|cruises?|vacations?|resorts?|rental car|hertz|avis|delta|southwest|united airlines|booking\.com|travel|trip)\b/i],
   ["donations", /\b(donate|donations?|fundrais\w*|petitions?|vote|voting|election|candidate|committee|congress|senate|nonprofit|charity|pac)\b/i],
-  ["promos", /\d+\s?% ?off|\b(sale|deals?|coupons?|promo\w*|discounts?|save \$?\d+|free shipping|clearance|offers?|sneak peek|new arrivals|limited time|last chance|ends (today|tonight|soon|sunday)|exclusive|rewards|bundle|shop now|black friday|cyber monday|bogo|flash|% off)\b/i],
+  ["promos", /\d+\s?% ?off|\b(sale|deals?|coupons?|promo\w*|discounts?|save \$?\d+|free shipping|clearance|offers?|sneak peek|new arrivals|limited time|last chance|ends (today|tonight|soon|sunday)|exclusive|rewards|bundle|shop now|black friday|cyber monday|bogo|flash|sweepstakes|giveaway|just listed|new listing|% off)\b/i],
   ["orders", /\b(orders?|shipped|shipping|delivery|delivered|tracking|package|your purchase)\b/i],
-  ["news", /\b(newsletters?|digests?|weekly|daily|briefing|brief|edition|issue|roundup|substack|medium|podcasts?|blog|news|reports?|insights?|tips|stories|read)\b/i],
+  ["news", /\b(newsletters?|digests?|weekly|daily|briefing|brief|edition|issue|roundup|substack|medium|podcasts?|blog|news|reports?|insights?|tips|stories|read|beehiiv|mailchimp|convertkit|what'?s new|now in|new features?|trending|release notes|product update)\b/i],
 ];
 export function categorize({ name, domain, subjects }) {
   const text = `${name || ""} ${domain || ""} | ${(subjects || []).join(" | ")}`;
@@ -93,7 +93,8 @@ export function planWrites({ groups, existing, person, mailbox, now }) {
     const fresh = sorted.filter((t) => t > cursor);
     if (!fresh.length) {
       // Rows found before topics existed get their label and subjects once, with no change to counts or dates.
-      if (ex.category == null && (g.subjects.length || g.category !== "unclear")) updates.push({ id: ex.id, patch: { ...topic, updated_at: now } });
+      // Also when the rules have changed since the label was stored (the label is derived data; nothing the person sets).
+      if ((ex.category ?? null) !== g.category && (ex.category != null || g.subjects.length || g.category !== "unclear")) updates.push({ id: ex.id, patch: { ...topic, updated_at: now } });
       continue;
     }
     const patch = { ...link, ...topic, message_count: (ex.message_count || 0) + fresh.length, last_seen: isoDay(fresh[fresh.length - 1]), last_message_ts: fresh[fresh.length - 1], updated_at: now };
