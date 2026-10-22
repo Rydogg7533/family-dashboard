@@ -5,13 +5,23 @@ writes to a temp file, replaces atomically, then reads it back and checks. Only 
   python3 scripts/safari_sync.py [--apply] [--only "Pinned"] [--folder StewardOS] [--plist PATH] [--catalog PATH] [--no-safari-check]"""
 import sys, os, json, uuid, shutil, subprocess, plistlib, argparse, tempfile, datetime
 ap = argparse.ArgumentParser()
-ap.add_argument("--apply", action="store_true"); ap.add_argument("--only", help="only this top-level catalog folder (for tests)")
+ap.add_argument("--apply", action="store_true"); ap.add_argument("--status", action="store_true", help="print test | pending | current and exit"); ap.add_argument("--only", help="only this top-level catalog folder (for tests)")
 ap.add_argument("--folder", default="StewardOS"); ap.add_argument("--no-safari-check", action="store_true")
 home = os.path.expanduser("~")
 ap.add_argument("--plist", default=os.path.join(home, "Library/Safari/Bookmarks.plist"))
 ap.add_argument("--catalog", default=os.path.join(home, "Organized/_Bookmarks/catalog.json"))
 ap.add_argument("--backups", default=os.path.join(home, "Organized/_Bookmarks/backups"))
+ap.add_argument("--state", default=os.path.join(home, "Organized/_Bookmarks/sync-state.json"))
 a = ap.parse_args()
+
+import hashlib
+def load_state():
+    try: return json.load(open(a.state))
+    except Exception: return {}
+def cat_sha(): return hashlib.sha256(open(a.catalog, "rb").read()).hexdigest()
+if a.status:
+    st = load_state().get("safari", {})
+    print("test" if not st.get("test_ok") else ("current" if st.get("catalog_sha") == cat_sha() else "pending")); sys.exit(0)
 
 def uid(): return str(uuid.uuid4()).upper()
 def leaf(e): return {"WebBookmarkType": "WebBookmarkTypeLeaf", "WebBookmarkUUID": uid(), "URLString": e["url"], "URIDictionary": {"title": e.get("title") or e["host"]}}
@@ -64,4 +74,9 @@ mf = [c for c in back["Children"] if c.get("Title") == a.folder]
 others_before = before - (count_leaves(existing[0]) if existing else 0); others_after = count_leaves(back) - (count_leaves(mf[0]) if mf else 0)
 ok = len(mf) == 1 and count_leaves(mf[0]) == n and others_before == others_after
 print(f"{'PASS' if ok else 'PROBLEM'} — wrote '{a.folder}' with {count_leaves(mf[0]) if mf else 0} bookmarks; all other bookmarks unchanged ({others_before} -> {others_after}). Backup: {bdir}")
+if ok:
+    stt = load_state(); sf = stt.setdefault("safari", {})
+    if a.only: sf["test_ok"] = True
+    else: sf["catalog_sha"] = cat_sha(); sf["at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    json.dump(stt, open(a.state, "w"), indent=1)
 sys.exit(0 if ok else 1)
