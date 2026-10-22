@@ -24,7 +24,16 @@ assert.equal(t(bm("Safari", "Default", "Business › Little Miss Lorynn", "MLM S
 assert.equal(t(bm("Safari", "Default", "Business › Little Miss Lorynn", "eCC QuickBooks", "https://shopify.com/x")), "Tools › Web & Ecommerce");
 assert.equal(t(bm("Safari", "Default", "Broadbeach Malibu Cold Calls", "Malibu Glass", "https://malibuglass.net/")), "Ventures › Fairpoint › Construction › Subcontractors");
 assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Mikey's Fabric", "https://mikeysfabric.com/")), "Ventures › Little Miss Lorynn › Sourcing › Fabric");
-assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Hyatt choir", "https://youtube.com/x")), "Inbox");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Hyatt choir", "https://youtube.com/x")), "Home & Family › Music");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Some video", "https://youtube.com/y")), "Inbox", "a video with no topic clue is left for a human");
+assert.notEqual(t(bm("Safari", "Default", "Favorites", "Koshiji", "https://yelp.com/biz/x")), "Archive › For review", "yelp outside a construction folder is not treated as a stray");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "MLM LAW BOOK", "https://mlmconsultant.com/")), "Ventures › Little Miss Lorynn › Direct Sales & MLM");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Lady Skater Pattern Review", "https://deliacreates.com/")), "Ventures › Little Miss Lorynn › Patterns & Sewing");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "Funding Rates for Crypto Futures", "https://viewbase.com/")), "Money › Crypto & Markets");
+assert.equal(t(bm("Safari", "Default", "Link Dump Folder", "50 Websites Your Startup Needs", "https://inc.com/x")), "Learn › Business Know-how");
+assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Zebra pen", "https://staples.com/x")), "Ventures › Fairpoint › Construction › Business Ops");
+assert.equal(t(bm("Safari", "Default", "Business › Fairpoint Contstruction", "Corsair Vengeance 16GB", "https://amazon.com/x")), "Tools › Business Software");
+assert.equal(t(bm("Safari", "Default", "Business › Little Miss Lorynn", "Giant Mustache Lollipop Masks", "https://melvillecandycompany.com/")), "Ventures › Little Miss Lorynn › Reference");
 assert.equal(t(bm("Safari", "Default", "Personal › Financial", "Coinbase", "https://coinbase.com/")), "Money › Crypto & Markets");
 assert.equal(t(bm("Firefox", "default-release-1", "Bookmarks Menu › Mozilla Firefox", "Get Help", "https://support.mozilla.org/")), "Archive › Browser defaults");
 assert.equal(classify(bm("Safari", "Default", "(none)", "zzz", "https://unknown-site.example/")).confidence, "low");

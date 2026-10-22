@@ -7,8 +7,8 @@ export const TREE = [
   "Pinned", "Inbox",
   ...["Materials & Suppliers", "Architects & Designers", "Solar & Energy", "Pools & Outdoor", "Permits & Agencies", "Subcontractors", "Business Ops", "Legal & Finance", "Inspiration & Costs"].map((x) => F + x),
   "Ventures" + S + "Fairpoint" + S + "Development", "Ventures" + S + "Fairpoint" + S + "Management",
-  L + "Sourcing" + S + "Alibaba", L + "Sourcing" + S + "Wholesale clothing", L + "Sourcing" + S + "Fabric", L + "Packaging & Printing", L + "Direct Sales & MLM", L + "Marketing & Social", L + "Legal & Trademark",
-  LO + "Sourcing", LO + "Printing",
+  L + "Sourcing" + S + "Alibaba", L + "Sourcing" + S + "Wholesale clothing", L + "Sourcing" + S + "Fabric", L + "Packaging & Printing", L + "Direct Sales & MLM", L + "Marketing & Social", L + "Legal & Trademark", L + "Patterns & Sewing", L + "Reference",
+  LO + "Sourcing", LO + "Printing", LO + "Reference",
   MR + "Daily", MR + "Weekly", MR + "As Needed", MR + "Reference",
   VL + "AI APIs", VL + "Local dashboards", "Ventures" + S + "SHVR", "Ventures" + S + "StewardOS",
   MO + "Banking & Cards", MO + "Crypto & Markets",
@@ -21,11 +21,17 @@ const TREE_SET = new Set(TREE);
 
 const R = (re) => new RegExp(re, "i");
 // Domain-or-title keyword rules, tried in order inside a group. First hit wins.
-const CONSTRUCTION = [
+const STRAY = [
   [AR + "For review", R("isohunt|aMule|cracked")],
   [TL + "Business Software", R("softonic|osxdaily|sourceforge|iusethis|imafish|panic\\.com|dropbox|mailchimp|ehow|doublehelixcables|nycartridgeoutlet|gainsaver|crucial|iconarchive|iconfinder|bgpatterns|patterncooler|speckyboy|mudcu|cmscritic|tipsandtricks|blockergroup|kernbranding|adbeat|artlist|audiojungle|monoprice|mpix")],
   [HF + "Health & Fitness", R("barbrothers|simplyshredded|calisthenics")],
-  [AR + "For review", R("careerbuilder|monster\\.com|timetohire|fameswap|chrismccombs|msn\\.com|harborhousecafe|sushiplantation|table-q|walmart|uncrate|yelp\\.com")],
+  [AR + "For review", R("careerbuilder|monster\\.com|timetohire|fameswap|chrismccombs|msn\\.com|harborhousecafe|sushiplantation|table-q|walmart|uncrate")],
+  [TL + "Business Software", R("corsair|vengeance|candybar")],
+];
+const CONSTRUCTION = [
+  [F + "Business Ops", R("fairpointconstruction|staples|bizchair|officechairs|drafting stool|inmodehome|binder|pendaflex|zebra")],
+  [F + "Subcontractors", R("storypole|story pole|mapping|radius|survey|\\bpods\\b|upack|moving|excavat|designescrow")],
+  [F + "Inspiration & Costs", R("photograph|video services|whitespacestudios|brianthomasjones|quazmo")],
   [F + "Permits & Agencies", R("\\.gov|cityof|county|socalgas|permit|title24|adapacific|energy\\.ca|ipermit|assessor|\\.ca\\.gov")],
   [F + "Solar & Energy", R("solar|inverter|photovoltaic|sma-america|ekotrope|microgeneration|perlight|prosolar|mysolarbackup|wholesalesolar|findthebest|ncalculators|howstuffworks|northerntool")],
   [F + "Pools & Outdoor", R("pool|waterscape|water ?garden|pond|paver|belgard|hardscape|rockscape|patio|rustic ?stone|urbanlandscape|richardlusk|boydjohnson|acochran|lightfaktor|grassy|resedapottery|igastone")],
@@ -36,6 +42,8 @@ const CONSTRUCTION = [
   [F + "Subcontractors", R("removal|abatement|asbestos|mold|polishing|gutter|garage ?door|framing|carpentry|plumbing|electric|engineering|surveying|waterproof|construction\\b.*(masonry|concrete)|davepycz|fresh ?air|alliance-enviro|teecor|socalengineering|callandeng|smith-bros|larrabure|wcgarage|coastalca|jobsite")],
 ];
 const LML = [
+  [L + "Direct Sales & MLM", R("lularoe|network marketing|recruiting superstar|party girl|selling it softly|rep_agree|sales rep agreement|mlmconsultant|mlm law|compensation pay plan")],
+  [L + "Patterns & Sewing", R("pattern|sewing|tutorial.*(skirt|dress)|(skirt|dress).*tutorial|maxi|lady skater|craftymom|asmallsnippet|deliacreates|simplicity|kitschy|winthrop|dress\\??\\b")],
   [AR + "For review", R("blackhat|instaget|instaliker|boostlikes|boostagram|followliker|autobot|ghosttweeting|instabrand|softigniter|socialkaty|fameswap|matrixproject|alien seo|tiered link|instagram (bot|mega)|bot\\b")],
   [L + "Sourcing" + S + "Alibaba", R("alibaba")],
   [L + "Sourcing" + S + "Fabric", R("fabric|textile|prints?\\b|minky|ezfabric|myfabric|shavali|bluemoon|mytextile")],
@@ -67,6 +75,24 @@ const FOLDER_MAP = [
   [/^Safari\/[^›]+› Business › Fairpoint Development/i, "Ventures" + S + "Fairpoint" + S + "Development"], [/^Safari\/[^›]+› Business › Fairpoint Management/i, "Ventures" + S + "Fairpoint" + S + "Management"],
   [/^Safari\/[^›]+› Broadbeach Malibu Cold Calls/i, F + "Subcontractors"],
 ];
+// General rules for loose items (Link Dump, unfiled, Favorites root, Personal root, Chrome/Firefox leftovers).
+const LOOSE = [
+  [AR + "For review", R("buypsychedelic|instaautomator|blackhatworld")],
+  [MO + "Crypto & Markets", R("bitcoin|crypto|coingecko|ripple|defi|yield farming|avax|mstr|strategy\\.com|short ?interest|viewbase|poap|theblockcrypto|libertyblitz|stock")],
+  [HF + "Health & Fitness", R("hemocue|mitozen|fatcalc|dickssporting|fitness|workout|calorie|vitamin")],
+  [HF + "Travel", R("tripadvisor|expedia|airbnb|orbitz|jetblue|hotel")],
+  [HF + "Music", R("music|choir|anthem|clarkelane")],
+  [HF + "Home & Property", R("airfilters|repairclinic|searspartsdirect|thepartsbiz|corecentric|repairsuniverse|appliance")],
+  [HF + "Shopping", R("touchofmodern|taylorstitch|kustomfootwear|craigslist|kanex|dcables|ebay|amazon\\.com")],
+  [LE + "Business Know-how", R("inc\\.com|entrepreneur|businessinsider|altucher|internetretailer|about\\.com|bigthink|forbes|thecoolhunter")],
+  [LE + "News", R("petersantilli|disclose\\.tv|theblaze|squidoo|breitbart|drudge|foxnews")],
+  [LE + "Tutorials", R("w3schools|maclife|tuaw|osxdaily|terminal 101")],
+  [TL + "Design Assets", R("fontsquirrel|lightroom|preset|totally ?rad|fadedandblurred|vsco|replichrome|photographyconcentrate|coolhunter")],
+  [TL + "AI & APIs", R("vidyo\\.ai|opus\\.pro|reworkd|agentgpt")],
+  [TL + "Web & Ecommerce", R("hypefury|viralfindr|pickfu|refersion|squarespace|uxthemes|flipsnack|shophunter|queue-it")],
+  [TL + "Business Software", R("whispersystems|silentcircle|spideroak|ontraport|neutroninteractive|wetransfer|trello|apple\\.com|icloud|bing\\.com|flourish|idstc|powtoon")],
+  [F + "Subcontractors", R("excavat|knockonwood|radiusmaps|manta\\.com")],
+];
 const MEDREP_SITES = /(^|\.)(notion|supabase|vercel|github|stripe|brand24|beehiiv|buffer|sentry|betterstack|resend)\./i;
 
 export function classify(b) {
@@ -84,12 +110,12 @@ export function classify(b) {
   if (/medrepdesk\.io|medreps\.com/.test(b.host)) return done(MR + "Reference", "medium", "MedRepDesk");
 
   const inFolder = (re) => re.test(where);
-  if (inFolder(/Business › Fairpoint Contstruction|Favorites › Fairpoint/i)) { const t = hit(CONSTRUCTION); return t ? done(t, "medium", "matched on site/title keywords") : done(F + "Materials & Suppliers", "low", "default for this folder; no keyword matched"); }
-  if (inFolder(/Business › Little Miss Lorynn/i)) { const t = hit(LML); return t ? done(t, "medium", "matched on site/title keywords") : done("Inbox", "low", "Little Miss Lorynn item no rule placed"); }
-  if (inFolder(/Love and Ocean/i)) { const t = hit(LOVE); return t ? done(t, "medium", "matched on site/title keywords") : done("Inbox", "low", "Love and Ocean item no rule placed"); }
+  if (inFolder(/Business › Fairpoint Contstruction|Favorites › Fairpoint/i)) { const t = hit([...STRAY, ...CONSTRUCTION]); return t ? done(t, "medium", "matched on site/title keywords") : done(F + "Materials & Suppliers", "low", "default for this folder; no keyword matched"); }
+  if (inFolder(/Business › Little Miss Lorynn/i)) { const t = hit(LML); return t ? done(t, "medium", "matched on site/title keywords") : done(L + "Reference", "low", "in the Little Miss Lorynn folder; no rule matched"); }
+  if (inFolder(/Love and Ocean/i)) { const t = hit(LOVE); return t ? done(t, "medium", "matched on site/title keywords") : done(LO + "Reference", "low", "in the Love and Ocean folder; no rule matched"); }
 
   // Loose items (Link Dump, no folder, Favorites root, untitled, Personal root, Chrome other, etc.): try every group, venture folders first.
-  const t = hit([...CONSTRUCTION.filter(([x]) => x !== F + "Materials & Suppliers"), ...LML, ...LOVE]);
+  const t = hit([...LOOSE, ...LML, ...LOVE, ...CONSTRUCTION.filter(([x]) => x !== F + "Materials & Suppliers")]);
   if (t) return done(t, "low", "loose item placed by keywords; please confirm");
   if (/youtube\.com|vimeo\.com/.test(b.host)) return done("Inbox", "low", "video: needs a human to say which topic");
   if (/facebook|instagram|pinterest|twitter|linkedin|google\.com|yahoo|wikipedia|flickr|weather|rottentomatoes|disney|ebay|craigslist|yelp/.test(b.host) && /Favorites/.test(where)) return done(LE + "Reference", "medium", "general web link from Favorites; you may want some Pinned");
