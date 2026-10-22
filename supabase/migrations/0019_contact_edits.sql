@@ -29,5 +29,6 @@ drop policy if exists "own queues contact edits" on public.contact_edits;
 create policy "own queues contact edits" on public.contact_edits for insert to authenticated
   with check (is_member() and person = auth.uid() and requested_by = auth.uid() and status = 'pending' and applied_at is null);
 
-revoke all on public.contact_edits from anon;
+-- Supabase grants new tables to signed-in users broadly (including truncate, which row-level security does not cover).
+revoke all on public.contact_edits from anon, authenticated;
 grant select, insert on public.contact_edits to authenticated;
