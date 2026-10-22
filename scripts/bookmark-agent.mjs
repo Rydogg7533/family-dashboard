@@ -107,6 +107,18 @@ if (process.argv.includes("--contents")) {
   for (const [k, e] of [...f].sort((a, b) => b[1].n - a[1].n).slice(0, 45)) console.log(`${String(e.n).padStart(4)}  ${k}  |  ${[...e.sites].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([s, n]) => `${s}${n > 1 ? ` x${n}` : ""}`).join(", ")}`);
 }
 
+// ---- --sites "folder name": every site in matching folders with counts and one sample title, to design subfolders for big folders
+{
+  const i = process.argv.indexOf("--sites");
+  if (i >= 0) {
+    const needle = String(process.argv[i + 1] || "").toLowerCase();
+    const inF = all.filter((b) => b.folder.toLowerCase().includes(needle));
+    const m = new Map(); for (const b of inF) { if (!m.has(b.site)) m.set(b.site, { n: 0, title: b.title }); m.get(b.site).n++; }
+    console.log(`\nSites in folders matching "${needle}" (${inF.length} bookmarks, ${m.size} sites): site x count | sample title`);
+    for (const [site, e] of [...m].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))) console.log(`${site} x${e.n} | ${e.title.slice(0, 50)}`);
+  }
+}
+
 // ---- --loose: only the unfiled bookmarks (no folder, Link Dump, Other Bookmarks, Firefox defaults), so they can be sorted into the master tree
 if (process.argv.includes("--loose")) {
   const loose = all.filter((b) => !b.folder || /^(Link Dump|Other Bookmarks|Bookmarks Menu › Mozilla Firefox|Bookmarks bar|Veil Labs|Broadbeach)/i.test(b.folder) || /^Other Bookmarks/i.test(b.folder));
