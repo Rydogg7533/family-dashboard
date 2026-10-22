@@ -31,13 +31,13 @@ export function openGmail(args, { allowWrite }) {
   async function api(path, { method = "GET", body } = {}) {
     if (method !== "GET" && !allowWrite) throw new Error(`read-only script tried a ${method} call: refused`);
     if (!accessToken) await refresh();
-    for (let attempt = 1; attempt <= 6; attempt++) {
+    for (let attempt = 1; attempt <= 8; attempt++) {
       const r = await fetch(BASE + path, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
       if (r.ok) { const t = await r.text(); return t ? JSON.parse(t) : {}; }
       if (r.status === 401 && attempt < 3) { await refresh(); continue; }
       let reason = "", detail = "";
       try { const j = await r.json(); reason = j?.error?.errors?.[0]?.reason || j?.error?.status || ""; detail = j?.error?.message || ""; } catch { /* no JSON body */ }
-      if (r.status === 429 || r.status >= 500 || /ratelimit|quota|backenderror/i.test(reason)) { await sleep(1000 * attempt ** 2); continue; }
+      if (r.status === 429 || r.status >= 500 || /ratelimit|quota|backenderror/i.test(reason)) { await sleep(1000 * attempt ** 2 + Math.random() * 1000); continue; }
       throw new Error(`Gmail ${method} ${path.split("?")[0]} → ${r.status}${reason ? ` [${reason}]` : ""}${detail ? ` ${detail.slice(0, 200)}` : ""}`);
     }
     throw new Error(`Gmail ${path.split("?")[0]}: gave up after retries`);
@@ -81,7 +81,7 @@ export function parse(msg) {
 }
 
 // List ids for a Gmail search, then read each message's headers + snippet with a few parallel readers.
-export async function readMessages(api, query, max, { log = () => {}, workers = 5 } = {}) {
+export async function readMessages(api, query, max, { log = () => {}, workers = 3 } = {}) {
   const ids = []; let page = "";
   do {
     const r = await api(`/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=500${page ? `&pageToken=${page}` : ""}`);
@@ -92,13 +92,22 @@ export async function readMessages(api, query, max, { log = () => {}, workers = 
   const rows = []; let next = 0, done = 0; const t0 = Date.now();
   const fields = "id,labelIds,snippet,internalDate,payload/headers";
   const hdrs = ["From", "Subject", "List-Unsubscribe", "Precedence", "Auto-Submitted"].map((x) => `metadataHeaders=${x}`).join("&");
+  const failed = [];
+  const readOne = async (id) => { const e = parse(await api(`/gmail/v1/users/me/messages/${id}?format=metadata&${hdrs}&fields=${encodeURIComponent(fields)}`)); rows.push({ ...e, ...decide(e) }); };
   await Promise.all(Array.from({ length: workers }, async () => {
     for (;;) {
       const i = next++; if (i >= ids.length) return;
-      const e = parse(await api(`/gmail/v1/users/me/messages/${ids[i]}?format=metadata&${hdrs}&fields=${encodeURIComponent(fields)}`));
-      rows.push({ ...e, ...decide(e) });
+      try { await readOne(ids[i]); } catch (e) { failed.push(ids[i]); }   // a message that can't be read now is left alone and retried below
       if (++done % 500 === 0) log(`  ${done}/${ids.length} read · ${Math.round(done / ((Date.now() - t0) / 60000))}/min`);
     }
   }));
+  if (failed.length) {
+    log(`  ${failed.length} messages hit Gmail's rate limit; pausing 30s, then retrying them one at a time.`);
+    await sleep(30000);
+    const still = [];
+    for (const id of failed) { try { await readOne(id); } catch { still.push(id); await sleep(2000); } }
+    rows.unreadable = still.length;
+    if (still.length) log(`  ${still.length} messages could not be read; they are left untouched in the inbox.`);
+  }
   return rows;
 }
