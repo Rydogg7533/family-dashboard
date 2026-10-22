@@ -51,15 +51,18 @@ const clean = (t) => String(t || "").replace(/&#(\d+);/g, (_, n) => String.fromC
 const userText = (r) => `From: ${r.name ? `${r.name} ` : ""}<${r.address}>\nDate: ${r.date}\nSubject: ${r.subject}\nPreview: ${clean(r.snippet)}`;
 
 async function ask(r) {
+  let retried = false, inTok = 0, outTok = 0;
   for (let attempt = 1; attempt <= 5; attempt++) {
     const res = await fetch(API, { method: "POST", headers: { "content-type": "application/json", "x-api-key": KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 300, system: SYSTEM, messages: [{ role: "user", content: userText(r) }] }) });
+      body: JSON.stringify({ model: MODEL, max_tokens: 700, system: SYSTEM, messages: [{ role: "user", content: userText(r) }] }) });
     if (res.status === 429 || res.status >= 500) { await sleep(1500 * attempt); continue; }
     const j = await res.json();
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${j?.error?.message || "error"}`);
     const text = (j.content || []).map((c) => c.text || "").join("");
     let out; try { out = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch { out = null; }
-    return { out, inTok: j.usage?.input_tokens || 0, outTok: j.usage?.output_tokens || 0 };
+    if (!out && !retried) { retried = true; inTok += j.usage?.input_tokens || 0; outTok += j.usage?.output_tokens || 0; continue; }   // one more try when the answer was not valid JSON
+    const t = { inTok: inTok + (j.usage?.input_tokens || 0), outTok: outTok + (j.usage?.output_tokens || 0) };
+    return { out, raw: out ? "" : `${j.stop_reason || "?"}: ${text.replace(/\s+/g, " ").slice(0, 160)}`, ...t };
   }
   throw new Error("Anthropic API: gave up after retries");
 }
@@ -87,7 +90,7 @@ async function main() {
   await Promise.all(Array.from({ length: 3 }, async () => {
     for (;;) {
       const i = next++; if (i >= pick.length) return;
-      try { const a = await ask(pick[i]); inTok += a.inTok; outTok += a.outTok; results[i] = { r: pick[i], out: a.out }; }
+      try { const a = await ask(pick[i]); inTok += a.inTok; outTok += a.outTok; results[i] = { r: pick[i], out: a.out, raw: a.raw }; }
       catch (e) { failed++; results[i] = { r: pick[i], out: null, err: e.message }; }
     }
   }));
@@ -95,12 +98,12 @@ async function main() {
   const urg = { now: 0, soon: 1, whenever: 2 };
   for (const x of results) {
     const o = x.out;
-    const line = o ? `${o.needs_action ? "ACTION" : "no action"}  ${String(o.kind).padEnd(6)} ${String(o.urgency || "").padEnd(8)} ${o.title || "(none)"}  — ${o.why || ""}` : `COULD NOT READ ANSWER${x.err ? `: ${x.err}` : ""}`;
+    const line = o ? `${o.needs_action ? "ACTION" : "no action"}  ${String(o.kind).padEnd(6)} ${String(o.urgency || "").padEnd(8)} ${o.title || "(none)"}  — ${o.why || ""}` : `COULD NOT READ ANSWER${x.err ? `: ${x.err}` : x.raw ? ` (${x.raw})` : ""}`;
     console.log(`\n${x.r.domain} · ${x.r.subject.slice(0, 70)}\n   ${line}`);
   }
-  const need = results.filter((x) => x.out?.needs_action).length;
+  const need = results.filter((x) => x.out?.needs_action).length, unreadable = results.filter((x) => !x.out).length;
   const cost = (inTok * PRICE_IN + outTok * PRICE_OUT) / 1e6;
-  console.log(`\nDONE — ${results.length} messages: ${need} need action, ${results.length - need - failed} do not, ${failed} failed.`);
+  console.log(`\nDONE — ${results.length} messages: ${need} need action, ${results.length - need - unreadable} do not, ${unreadable} could not be read (${failed} of those were errors).`);
   console.log(`Tokens: ${inTok} in, ${outTok} out. Cost: $${cost.toFixed(4)} at $${PRICE_IN}/M in and $${PRICE_OUT}/M out. For all ${singles.length}: about $${((cost / Math.max(results.length, 1)) * singles.length).toFixed(3)}.`);
   console.log("Nothing was written to Gmail or the app.");
 }
