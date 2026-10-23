@@ -12,6 +12,11 @@
 
 /* More page section colors. Blue follows the person's accent; the others are fixed hues, lighter in dark mode.
    Never red, amber or green: those mean problem, warning and ok everywhere else in the app. */
+/* Fixed bottom elements. The Ask bar hides when the page scrolls down and comes back on a scroll up (html[data-askbar="hidden"]);
+   the page's bottom padding and any sticky compose box follow it through these variables, so nothing is ever covered. */
+:root { --bar-bottom: calc(58px + max(18px, env(safe-area-inset-bottom))); --ask-h: 44px; --page-bottom: calc(var(--bar-bottom) + var(--ask-h) + 24px); }
+html[data-askbar="hidden"] { --ask-h: 0px; }
+main { transition: padding-bottom var(--motion) ease; }
 :root { --sec-teal: #0F6E56; --sec-purple: #534AB7; --sec-slate: #5F6672; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sec-teal: #5DCAA5; --sec-purple: #AFA9EC; --sec-slate: #B4B8C0; } }
 :root[data-theme="dark"] { --sec-teal: #5DCAA5; --sec-purple: #AFA9EC; --sec-slate: #B4B8C0; }

@@ -48,6 +48,8 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
   const isAssistant = thread.kind === "assistant";
 
   // Lines queued here show as "sending…" until the Mac has sent them through Messages and the mirror has read them back.
+  // Open at the latest line, like Messages.
+  useEffect(() => { window.scrollTo({ top: document.documentElement.scrollHeight }); }, [thread.id]);
   useEffect(() => {
     let on = true;
     const tick = async () => { try { const w = await pendingLines(thread.id); if (on) setWaiting(w); } catch { /* keep the last state */ } };
@@ -69,7 +71,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 min-h-[calc(100dvh-var(--page-bottom)-170px)]">
       <div className="text-[11px] font-bold text-muted">{thread.name.toUpperCase()} · {thread.members.length} people · today</div>
       {all.map((m) => (
         <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] ${m.mine ? "self-end items-end" : "self-start"}`}>
@@ -117,7 +119,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
         </div>
       )}
 
-      <div className="sticky bottom-[136px] bg-bg/95 backdrop-blur border-t border-line pt-2 -mx-1 px-1 mb-16">
+      <div className="mt-auto sticky bottom-[calc(var(--bar-bottom)+var(--ask-h)+4px)] transition-[bottom] duration-200 bg-bg/95 backdrop-blur border-t border-line pt-2 pb-1 -mx-1 px-1">
         {waiting.map((w) => (
           <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80">
             <div>{w.text}</div>
