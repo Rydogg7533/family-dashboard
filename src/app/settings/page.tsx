@@ -26,7 +26,7 @@ const info = [
 export default function Settings() {
   return (
     <>
-      <H1>Settings and Info</H1>
+      <H1>Settings</H1>
       <p className="text-xs text-muted mb-3">Every setting shows who last changed it and when. Last change: Ryan · Look and feel · today.</p>
       <SectionTitle>Settings</SectionTitle>
       <RowGroup>{settings.map((r) => <Row key={r.label} href={r.href} label={r.label} sub={r.sub} />)}</RowGroup>

@@ -13,7 +13,7 @@ const MONEY: Crumb = { label: "Money", href: "/money" };
 // Pages that live under the More tab (same set the bottom nav treats as More).
 const moreTitles: Record<string, string> = {
   "/day": "Day", "/calendar": "Calendar", "/inbox": "Inbox", "/messages": "Messages", "/shop": "Shop",
-  "/recurring": "Recurring", "/records": "Records", "/family": "Family", "/vehicles": "Vehicles", "/devices": "Devices",
+  "/recurring": "Due dates and renewals", "/email-subscriptions": "Mailing lists", "/records": "Records", "/family": "Family", "/vehicles": "Vehicles", "/devices": "Devices",
   "/meds": "Medications", "/home-property": "Home and property", "/contacts": "Contacts", "/emergency": "Emergency plan",
   "/places": "Places", "/sources": "Sources", "/register": "Source register", "/health": "System health", "/log": "Log",
   "/voice": "Phone calls", "/claims": "Claims", "/settings": "Settings",
@@ -23,13 +23,13 @@ const subTitles: Record<string, string> = {
   "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications", "/vehicles/new": "Add a vehicle",
 };
 const moneyTitles: Record<string, string> = {
-  "/money/receipts": "Receipts", "/money/recurring": "Recurring", "/money/subscriptions": "Subscriptions",
+  "/money/receipts": "Receipts", "/money/recurring": "Bills and charges", "/money/subscriptions": "Subscriptions",
 };
 // Where the page's own heading is longer than the short name used in parent crumbs, the bar uses the heading,
 // so the page does not need to repeat it.
 const pageTitle: Record<string, string> = {
   "/places": "Schedule and activities", "/meds": "Health and medications", "/register": "Sources",
-  "/devices": "Devices and belongings", "/settings": "Settings and Info",
+  "/devices": "Devices and belongings", "/settings": "Settings",
 };
 // Detail pages: /<root>/<id> → label for the last crumb.
 const detailLabel: Record<string, string> = {

@@ -1,23 +1,32 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
-import { MORE_LINKS } from "@/lib/more-links";
+import { MORE_GROUPS, MORE_LINKS } from "@/lib/more-links";
+import { MoreIcon } from "@/components/MoreIcons";
+import { RecentRow } from "@/components/RecentPages";
 
+// Four sections of two-column tiles. Each section has its own color (tokens in globals.css), icon and count;
+// the tile shape is the same everywhere, so a section is recognised by color, icon and heading.
 export default function More() {
-  const groups = ["Daily", "Reference", "Settings and Info"] as const;
   return (
     <>
       <H1>More</H1>
-      {groups.map((g) => {
-        const links = MORE_LINKS.filter((l) => l.group === g);
+      <RecentRow />
+      {MORE_GROUPS.map((g) => {
+        const links = MORE_LINKS.filter((l) => l.group === g.id);
         if (!links.length) return null;
         return (
-          <section key={g} className="mb-5">
-            <div className="text-[11px] font-bold tracking-wide text-muted mb-1.5">{g.toUpperCase()}</div>
-            <div className="flex flex-col">
+          <section key={g.id} data-sec={g.sec} aria-labelledby={`more-${g.id}`} className="sec sec-panel mb-5">
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <span className="sec-badge w-9 h-9 rounded-full flex items-center justify-center"><MoreIcon name={g.icon} size={20} /></span>
+              <h2 id={`more-${g.id}`} className="sec-title text-lg flex-1">{g.label}</h2>
+              <span className="sec-badge text-xs font-bold rounded-full px-2.5 py-0.5">{links.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               {links.map((l) => (
-                <Link key={l.href} href={l.href} className="flex justify-between items-center min-h-12 border-b border-line">
-                  <span className="font-semibold">{l.label}</span>
-                  <span className="text-xs text-muted">{l.note ?? ""} ›</span>
+                <Link key={l.href} href={l.href}
+                  className={`sec-tile min-h-[76px] p-3 flex ${l.wide ? "col-span-2 min-h-[60px] flex-row items-center gap-2.5" : "flex-col justify-between"}`}>
+                  <MoreIcon name={l.icon} className="sec-ic shrink-0" />
+                  <span className="text-sm font-semibold leading-tight">{l.label}</span>
                 </Link>
               ))}
             </div>

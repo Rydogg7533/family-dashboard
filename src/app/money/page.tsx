@@ -109,7 +109,7 @@ export default async function Money() {
           <div className="flex justify-between"><span>{recurring.length} items · about {money(monthly)} a month</span></div>
           {nextSub && <div className="text-xs text-muted">Next charge: {nextSub.name} {money(nextSub.amount)} on {shortDate(nextSub.next_charge)}</div>}
           <div className="text-xs text-muted">{subs.filter((s) => s.decision === "cancel").length} cancel-prep task{subs.filter((s) => s.decision === "cancel").length === 1 ? "" : "s"} prepared · {recurring.filter((r) => r.ack_waiting).length} waiting on acknowledgement · {recurring.filter((r) => !r.on_register).length} not on the register</div>
-          <div className="flex gap-3 mt-1"><Link href="/money/subscriptions" className="text-xs font-semibold text-accent">Subscriptions</Link><Link href="/money/recurring" className="text-xs font-semibold text-accent">All recurring</Link></div>
+          <div className="flex gap-3 mt-1"><Link href="/money/subscriptions" className="text-xs font-semibold text-accent">Subscriptions</Link><Link href="/money/recurring" className="text-xs font-semibold text-accent">Bills and charges</Link></div>
         </div>
       </Section>
 

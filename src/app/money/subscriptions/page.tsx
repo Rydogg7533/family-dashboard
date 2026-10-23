@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
-import { Section, OpenIn, SyncLine } from "@/components/money";
-import { getAccounts, getRecurring, money, shortDate, accountLabel, hoursAgo } from "@/lib/data-money";
+import { Section, OpenIn } from "@/components/money";
+import { getAccounts, getRecurring, money, shortDate, accountLabel } from "@/lib/data-money";
 import { getCandidates } from "@/lib/data-subscriptions";
 import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
 
@@ -18,7 +18,7 @@ export default async function Subscriptions() {
     <>
       <Link href="/money" className="text-xs font-semibold text-accent">‹ Money</Link>
       <H1>Subscriptions</H1>
-      <p className="text-xs text-muted mb-3"><SyncLine at={hoursAgo(5)} label="register sheet" /><br />{subs.length} subscriptions, about {money(yearly)} a year. Monthly audit: register vs reality. Keep, cancel or downgrade is a decision here; the cancelling happens where the service lives, from a prepared task.</p>
+      <p className="text-xs text-muted mb-3">{subs.length} subscriptions, about {money(yearly)} a year. Monthly audit: register vs reality. Keep, cancel or downgrade is a decision here; the cancelling happens where the service lives, from a prepared task.</p>
 
       {candidates.length > 0 && (
         <Section title="Is this a subscription?" right={`${candidates.length}`}>
@@ -70,12 +70,6 @@ export default async function Subscriptions() {
         </div>
       </Section>
 
-      <Section title="Change Log" right="two-party">
-        <div className="card text-sm flex flex-col">
-          <div className="py-2 border-b border-line"><div className="font-semibold">[Streaming service] → review</div><div className="text-xs text-muted">Ryan asked · {shortDate(hoursAgo(48).slice(0, 10))} · price increase · waiting on Melissa</div></div>
-          <div className="py-2"><div className="font-semibold">[Design tool seat] → cancel</div><div className="text-xs text-muted">Ryan asked · SHVR, Ryan only · acknowledged (single-owner entity)</div></div>
-        </div>
-      </Section>
     </>
   );
 }

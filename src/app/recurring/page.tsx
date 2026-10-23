@@ -5,8 +5,8 @@ import { Who } from "@/components/c/Who";
 
 export const dynamic = "force-dynamic";
 
-// Recurring and renewals: the register of what comes around (F7.5 shares the subscriptions rows with Money;
-// F9/F12.1 add vehicle and home dates). Needs-me first, then everything by next due date.
+// Due dates and renewals: what comes around, needs-me first, then everything by next due date.
+// Today it lists calendar events tagged recurring. Feeding it from Money's register, warranties, vehicles and claims is not built yet.
 export default async function Recurring({ searchParams }: PageProps<"/recurring">) {
   const sp = await searchParams;
   const kind = typeof sp.kind === "string" ? sp.kind : null;
@@ -37,27 +37,36 @@ export default async function Recurring({ searchParams }: PageProps<"/recurring"
 
   return (
     <>
-      <H1 right={`${all.length} on the register`}>Recurring</H1>
-      <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-3">
+      <H1 right={all.length ? `${all.length} listed` : undefined}>Due dates and renewals</H1>
+      {all.length > 0 && <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-3">
         {chips.map(([k, label]) => <Link key={k} href={k === "all" ? "/recurring" : `/recurring?kind=${k}`} className={`px-3 py-1.5 rounded-full ${(k === "all" && !kind) || k === kind ? "bg-accent text-white" : "bg-soft"}`}>{label}</Link>)}
-      </div>
+      </div>}
 
-      <section className="mb-5">
-        <div className="flex items-baseline justify-between mb-2"><h2 className="text-base">Needs you</h2><span className="text-xs text-muted">{needs.length} due soon or overdue</span></div>
-        {needs.length === 0 ? <Card className="text-muted">Nothing due in the next 10 days.</Card> : (
-          <div className="flex flex-col gap-2">
-            {needs.slice(0, 5).map((i) => <Row key={i.id} i={i} />)}
-            {needs.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {needs.length - 5} more</span>}
-          </div>
-        )}
-      </section>
+      {all.length === 0 ? (
+        <Card className="text-sm">
+          <div className="font-semibold mb-1">Nothing listed yet</div>
+          <div className="text-muted">Renewals and due dates that the app recognizes will show here. Warranty end dates are on <Link href="/warranties" className="font-semibold text-accent">Warranties</Link>, vehicle dates on <Link href="/vehicles" className="font-semibold text-accent">Vehicles</Link>, and confirmed subscriptions on <Link href="/money/subscriptions" className="font-semibold text-accent">Subscriptions</Link>.</div>
+        </Card>
+      ) : (
+        <>
+        <section className="mb-5">
+          <div className="flex items-baseline justify-between mb-2"><h2 className="text-base">Needs you</h2><span className="text-xs text-muted">{needs.length} due soon or overdue</span></div>
+          {needs.length === 0 ? <Card className="text-muted">Nothing due in the next 10 days.</Card> : (
+            <div className="flex flex-col gap-2">
+              {needs.slice(0, 5).map((i) => <Row key={i.id} i={i} />)}
+              {needs.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {needs.length - 5} more</span>}
+            </div>
+          )}
+        </section>
+  
+        <section className="mb-5">
+          <h2 className="text-base mb-2">Coming up</h2>
+          <div className="flex flex-col gap-2">{rest.map((i) => <Row key={i.id} i={i} />)}</div>
+        </section>
+        </>
+      )}
 
-      <section className="mb-5">
-        <h2 className="text-base mb-2">Coming up</h2>
-        <div className="flex flex-col gap-2">{rest.map((i) => <Row key={i.id} i={i} />)}</div>
-      </section>
-
-      <p className="text-xs text-muted">Subscriptions and bills are the same rows as <Link href="/money/recurring" className="font-semibold text-accent">Money › Recurring</Link> (amounts, cards, where to cancel, decisions). Vehicle dates come from <Link href="/vehicles" className="font-semibold text-accent">Vehicles</Link>, home dates from the <Link href="/home" className="font-semibold text-accent">Home register</Link>. One reminder per item at its lead time; it repeats only if the date passes unrecorded.</p>
+      <p className="text-xs text-muted">This list shows calendar events marked as recurring. Bills and subscriptions from <Link href="/money/recurring" className="font-semibold text-accent">Bills and charges</Link>, warranty end dates and vehicle dates are not shown here yet. One reminder per item at its lead time; it repeats only if the date passes unrecorded.</p>
     </>
   );
 }

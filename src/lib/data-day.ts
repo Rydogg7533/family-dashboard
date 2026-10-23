@@ -166,12 +166,12 @@ export async function getCalendarEvents(fromDate = d(0), days = 14): Promise<Cal
 }
 
 export async function getRecurring(): Promise<RecurringItem[]> {
-  // The register itself is Money's (F7.5). Until that slice exposes a table, this reads the same rows from
-  // calendar_events tagged kind='recurring' and falls back to samples.
+  // Reads calendar_events tagged kind='recurring'. It does NOT yet read Money's register (recurring_items), warranty end dates or
+  // vehicle dates. Samples only appear in local preview (no Supabase env); a connected app shows its real rows or an empty state.
   if (!hasSupabaseEnv()) return sampleRecurring;
   const sb = await createClient();
   const { data } = await sb.from("calendar_events").select("*").eq("kind", "recurring").order("date");
-  if (!data?.length) return sampleRecurring;
+  if (!data?.length) return [];
   return (data as Array<Record<string, unknown>>).map((r) => {
     const due = String(r.date); const days = Math.round((new Date(due).getTime() - Date.now()) / 86_400_000);
     return { id: String(r.id), name: String(r.title), kind: "event", next_due: due, cycle: String(r.cycle ?? ""), who: String(r.person_name ?? ""), entity: null, amount_note: null, reminders: [], source: { name: String(r.calendar_name ?? "Calendar"), href: "#" }, status: days < 0 ? "overdue" : days <= 10 ? "soon" : "ok", requested_by: String(r.requested_by ?? "System") } as RecurringItem;

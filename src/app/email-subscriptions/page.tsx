@@ -28,7 +28,7 @@ export default async function EmailSubscriptions() {
     <>
       <AutoRefresh active={waiting.length > 0} />
       <Link href="/more" className="text-xs font-semibold text-accent">‹ More</Link>
-      <H1>Email subscriptions</H1>
+      <H1>Mailing lists</H1>
       <p className="text-xs text-muted mb-3">
         {scan.at ? `Mailing lists found in your Gmail, updated ${ago(scan.at)} and every few hours after that.` : "Mailing lists found in your Gmail."}{" "}
         Only the sender, date and subject line are read, never the message itself. Tick the ones you are done with and tap Unsubscribe.

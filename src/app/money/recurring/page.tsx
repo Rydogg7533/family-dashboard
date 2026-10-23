@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
-import { Section, OpenIn, SyncLine } from "@/components/money";
-import { getAccounts, getRecurring, money, shortDate, daysUntil, accountLabel, hoursAgo } from "@/lib/data-money";
+import { Section, OpenIn } from "@/components/money";
+import { getAccounts, getRecurring, money, shortDate, daysUntil, accountLabel } from "@/lib/data-money";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +17,8 @@ export default async function Recurring() {
   return (
     <>
       <Link href="/money" className="text-xs font-semibold text-accent">‹ Money</Link>
-      <H1>Recurring</H1>
-      <p className="text-xs text-muted mb-3"><SyncLine at={hoursAgo(5)} label="register sheet" /><br />Every subscription, bill, loan payment and premium: {items.length} items, about {money(monthly)} a month. Shared with the Recurring page; the register sheet is the source.</p>
+      <H1>Bills and charges</H1>
+      <p className="text-xs text-muted mb-3">Every subscription, bill, loan payment and premium: {items.length} items, about {money(monthly)} a month.</p>
 
       <Section title="Next 7 days" right={`${soon.length}`}>
         {soon.length === 0 ? <div className="card text-muted text-sm">Nothing charges in the next week.</div> : (
