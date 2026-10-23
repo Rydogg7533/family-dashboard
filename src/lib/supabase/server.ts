@@ -32,6 +32,7 @@ export async function createClient() {
 // uses asymmetric keys (no network round trip); otherwise it falls back to asking the Auth server, as before.
 // Writes (server actions) keep calling getUser() so they always verify with the Auth server.
 export const getRequestUser = cache(async (): Promise<{ id: string; email: string | null } | null> => {
+  if (!hasSupabaseEnv()) return null;   // sample mode (no env): nobody is signed in, pages show samples
   const sb = await createClient();
   const { data } = await sb.auth.getClaims();
   const c = data?.claims;
