@@ -15,6 +15,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/settings", label: "Settings and Info", note: "People, connections, filing, privacy", group: "Settings and Info" },
   { href: "/settings/appearance", label: "Look and feel", group: "Settings and Info" },
   { href: "/settings/modules", label: "My dashboard", note: "Modules on or off", group: "Settings and Info" },
+  { href: "/settings/filing-rules", label: "Filing rules", note: "Vendor → folder rules you made", group: "Settings and Info" },
   { href: "/settings/notifications", label: "Notifications", note: "Where each kind appears", group: "Settings and Info" },
   { href: "/sources", label: "Sources", note: "Go and Sync now for every source", group: "Settings and Info" },
   { href: "/emergency", label: "Emergency plan", note: "Parents only", group: "Settings and Info" },

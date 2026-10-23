@@ -3,7 +3,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { fileCapture } from "@/app/inbox/file";
 import { readCapture } from "@/app/inbox/read";
 import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
-import { filingFolders } from "@/lib/filing-folders";
+import { filingFolders, vendorKey, toTemplate } from "@/lib/filing-folders";
 import { callModel } from "@/lib/ai";
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
@@ -136,4 +136,22 @@ export async function changeFiling(id: string, input: { folder?: string; request
   if (out.action === "change" && out.folder && choices.includes(out.folder)) return save(out.folder, out.reply ?? "");
   if (out.action === "change") return { ok: false, message: "I could not match that to a folder in the structure. Pick one from the list." };
   return { ok: true, changed: false, message: out.reply ?? "" };
+}
+
+// "Always file this vendor here": remembers the current folder for the vendor, so the same question is not asked again.
+export async function saveFilingRule(id: string): Promise<{ ok: boolean; message: string }> {
+  if (!hasSupabaseEnv()) return { ok: false, message: "Not available in preview." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, message: "Not signed in." };
+  const { data: row } = await sb.from("inbox_items").select("read_result,status").eq("id", id).maybeSingle();
+  const rr = row?.read_result as Record<string, unknown> | null;
+  const key = vendorKey(rr?.vendor), home = String(rr?.home ?? "");
+  if (!rr || !key || !home) return { ok: false, message: "No vendor on this document, so there is nothing to make a rule for." };
+  if (/\/Vehicles\//.test(home)) return { ok: false, message: "Vehicle documents follow the vehicle, so they do not get a vendor rule." };
+  const label = String(rr.vendor).replace(/\s*#\s*\d+/g, "").trim() || String(rr.vendor);
+  const { error } = await sb.from("filing_rules").upsert({ vendor_key: key, vendor_label: label, folder_template: toTemplate(home), created_by: user.id, source_item: id }, { onConflict: "vendor_key" });
+  if (error) return { ok: false, message: "Could not save the rule." };
+  await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "filing_rule_saved", subject: `${label} → ${toTemplate(home)}`, ref: id, undoable: true }).then(() => {}, () => {});
+  return { ok: true, message: `Done. ${label} receipts will go to ${toTemplate(home).replace("Organized/", "").replace("{year}", "<year>")}. You can remove this rule in Settings › Filing rules.` };
 }

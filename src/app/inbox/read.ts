@@ -3,6 +3,7 @@
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { callModelVision } from "@/lib/ai";
+import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
 const READABLE = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
@@ -72,8 +73,14 @@ export async function readCapture(inboxId: string) {
   // The plan: ONE place the file lives (FILE), and every other place that only points at it (LINK).
   const plan: { t: "file" | "link"; text: string }[] = [];
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
-  const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
-  plan.push({ t: "file", text: `${name ?? "this document"} → kept in the app; a copy goes to ${home} when the Mac mini filing agent is running` });
+  let home0 = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
+  let ruleNote = "";
+  if (!vehicle && parsed.vendor) {
+    const { data: rule } = await sb.from("filing_rules").select("folder_template,vendor_label").eq("vendor_key", vendorKey(parsed.vendor)).maybeSingle();
+    if (rule?.folder_template) { home0 = fromTemplate(rule.folder_template as string, yr); ruleNote = ` (your rule for ${rule.vendor_label})`; }
+  }
+  const home = home0;
+  plan.push({ t: "file", text: `${name ?? "this document"} → kept in the app; a copy goes to ${home}${ruleNote} when the Mac mini filing agent is running` });
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
     plan.push({ t: "link", text: dup && dup.length ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });

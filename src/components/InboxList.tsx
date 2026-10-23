@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
 import { readCapture } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
@@ -194,13 +194,14 @@ function FolderFix({ item }: { item: InboxItem }) {
   const [words, setWords] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [canRule, setCanRule] = useState(false);
   async function toggle() {
     const next = !open; setOpen(next); setMsg(null);
     if (next && !choices.length) { const r = await getFolderChoices(item.id); if (r.ok && r.choices) setChoices(r.choices); }
   }
   async function run(input: { folder?: string; request?: string }) {
     setBusy(true); const r = await changeFiling(item.id, input).catch(() => ({ ok: false, message: "That did not work. Try again.", changed: false })); setBusy(false);
-    setMsg(r.message); if (r.changed) { setWords(""); router.refresh(); }
+    setMsg(r.message); if (r.changed) { setWords(""); setCanRule(true); router.refresh(); }
   }
   return (
     <div className="text-xs">
@@ -217,6 +218,7 @@ function FolderFix({ item }: { item: InboxItem }) {
             {choices.map((c) => <option key={c} value={c}>{c.replace("Organized/", "")}</option>)}
           </select>
           {msg && <div className="text-sm">{msg}</div>}
+          {canRule && <button type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await saveFilingRule(item.id).catch(() => ({ ok: false, message: "Could not save the rule." })); setBusy(false); setMsg(r.message); if (r.ok) setCanRule(false); }} className="min-h-10 rounded-xl border border-line text-sm font-semibold disabled:opacity-40">Always file this vendor here</button>}
         </div>
       )}
     </div>
