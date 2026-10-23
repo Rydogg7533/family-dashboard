@@ -27,7 +27,7 @@ export function daysUntil(iso: string) {
   return Math.round((new Date(iso + "T12:00:00").getTime() - Date.now()) / 86_400_000);
 }
 export function clock(iso: string) {
-  const dt = new Date(iso); const sameDay = dt.toDateString() === new Date().toDateString();
+  const dt = new Date(iso); if (!iso || Number.isNaN(dt.getTime())) return ""; const sameDay = dt.toDateString() === new Date().toDateString();
   return sameDay ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/ ?(AM|PM)$/i, "") : dt.toLocaleDateString("en-US", { weekday: "short" });
 }
 

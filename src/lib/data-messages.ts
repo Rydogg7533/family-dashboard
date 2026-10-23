@@ -70,8 +70,9 @@ export async function getThread(id: string): Promise<Thread | null> {
 export async function getMessages(threadId: string): Promise<Message[]> {
   if (!hasSupabaseEnv()) return sampleMessages.filter((m) => m.thread_id === threadId);
   const sb = await createClient();
-  const { data } = await sb.from("messages").select("*").eq("thread_id", threadId).order("at").limit(200);
-  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+  const { data } = await sb.from("messages").select("*").eq("thread_id", threadId).order("at", { ascending: false }).limit(200);
+  // newest 200, shown oldest-first (the old query kept the OLDEST 200 and hid new lines)
+  return ((data ?? []) as Array<Record<string, unknown>>).reverse().map((r) => ({
     id: String(r.id), thread_id: String(r.thread_id), sender: String(r.sender), mine: Boolean(r.is_me), at: String(r.at), text: String(r.text ?? ""),
     attachment: (r.attachment as Message["attachment"]) ?? null, action: (r.action as MessageAction) ?? null, assistant_kind: (r.assistant_kind as Message["assistant_kind"]) ?? null,
   }));
