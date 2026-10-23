@@ -36,7 +36,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", r.vendor).eq("amount", r.amount).eq("date", r.date).limit(1);
     if (dup && dup.length) { filed.duplicate_of = dup[0].id; filed.receipt_id = dup[0].id; done.push("already in Receipts (linked, not added twice)"); }
     else {
-      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "unmatched", entity: null, captured_by: who, uploaded_by: user.id }).select("id").single();
+      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
     }
   }

@@ -43,7 +43,7 @@ export default async function Money() {
         )}
       </Section>
 
-      <Section title="At a glance">
+      <Section title="At a glance" right={<Link href="/money/receipts" className="font-semibold text-accent">Receipts ›</Link>}>
         <div className="grid grid-cols-2 gap-2">
           <div className="card"><div className="text-[11px] text-muted">Month to date</div><div className="font-semibold">{money(spent)}</div><div className="text-[11px] text-muted">typical {money(typical)}</div></div>
           <div className="card"><div className="text-[11px] text-muted">Cash across accounts</div><div className="font-semibold">{money(cash)}</div><div className="text-[11px] text-muted">as of last sync</div></div>
