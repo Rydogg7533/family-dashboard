@@ -1,4 +1,5 @@
 "use server";
+import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 // Per-item capture: the browser stores the file in the private captures bucket; this records the proof pointing at it.
@@ -68,5 +69,30 @@ export async function removeReceiptSubject(receiptId: string, subjectId: string)
   if (!hasSupabaseEnv()) return { ok: true };
   const sb = await createClient();
   const { error } = await sb.from("receipt_subjects").update({ removed_at: new Date().toISOString() }).eq("receipt_id", receiptId).eq("subject_id", subjectId);
+  return { ok: !error };
+}
+
+// Accounts: every card and bank account owes a statement each month. Owners only; accounts are retired, never deleted.
+export type AccountInput = { id?: string; kind: string; institution: string; last4: string; owner: string; entity: string; statement_arrival_day: number | null; statement_delivery: string };
+export async function saveAccount(a: AccountInput) {
+  const institution = a.institution.trim().slice(0, 40), last4 = a.last4.replace(/\D/g, "").slice(-4);
+  if (!institution || last4.length !== 4) return { ok: false, error: "Name and the last four digits are needed." };
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const day = a.statement_arrival_day && a.statement_arrival_day >= 1 && a.statement_arrival_day <= 31 ? Math.round(a.statement_arrival_day) : null;
+  const row = { kind: a.kind, institution, last4, owner: a.owner.trim() || "Joint", entity: a.entity.trim() || "Personal", statement_arrival_day: day, statement_delivery: a.statement_delivery, retired_at: null as string | null };
+  const id = a.id || `${institution}-${last4}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const { error } = a.id ? await sb.from("accounts").update(row).eq("id", a.id) : await sb.from("accounts").insert({ id, ...row, source: "manual" });
+  if (!error) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "account_saved", subject: `${institution} ••${last4}`, ref: id, undoable: false }).then(() => {}, () => {});
+  revalidatePath("/money"); revalidatePath("/money/accounts"); revalidatePath("/money/receipts");
+  return { ok: !error, error: error ? (error.code === "23505" ? "That account is already listed." : "Only an owner can change accounts.") : undefined };
+}
+export async function retireAccount(id: string) {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { error } = await sb.from("accounts").update({ retired_at: new Date().toISOString() }).eq("id", id);
+  revalidatePath("/money"); revalidatePath("/money/accounts");
   return { ok: !error };
 }

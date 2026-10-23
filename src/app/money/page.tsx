@@ -72,9 +72,9 @@ export default async function Money() {
         </div>
       </Section>
 
-      <Section title="Accounts" right={<OpenIn label="Tiller" />}>
+      <Section title="Accounts" right={<Link href="/money/accounts" className="font-semibold text-accent">Manage ›</Link>}>
         <div className="flex flex-col gap-2">
-          {accounts.map((a) => (
+          {accounts.filter((a) => !a.retired_at).map((a) => (
             <Link key={a.id} href={`/money/reconcile/${a.id}`} className="card flex justify-between gap-2">
               <div className="min-w-0">
                 <div className="font-semibold text-sm">{accountLabel(a)} <span className="text-xs text-muted font-normal">· {a.owner} · {a.entity}</span></div>

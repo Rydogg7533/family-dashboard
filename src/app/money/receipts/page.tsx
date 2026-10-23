@@ -17,7 +17,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
   const asks = receipts.filter((r) => r.status === "needs_info");
   const queue = tx.filter((t) => proofState(t.id, proofs).state !== "green" && t.status !== "transfer");
   const expecting = receipts.filter((r) => r.status === "expecting_charge");
-  const knownCards = Array.from(new Set(receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")));
+  const knownCards = Array.from(new Set([...accounts.filter((a) => !a.retired_at && a.kind !== "checking" && a.kind !== "savings").map((a) => `${a.institution} ${a.last4}`), ...receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")]));
   const matched = receipts.filter((r) => r.status === "matched");
   const resolved = matched.length, total = matched.length + asks.length + expecting.length + queue.length;
 

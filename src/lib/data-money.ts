@@ -6,7 +6,7 @@ export type Account = {
   id: string; kind: "credit" | "checking" | "savings" | "payment_app" | "business"; institution: string; last4: string;
   owner: "Ryan" | "Melissa" | "Joint" | string; entity: string; statement_close_day: number | null; due_day: number | null;
   autopay: boolean; balance_current: number | null; balance_statement: number | null; last_reconciled: string | null;
-  unreconciled: number; vault_item: string | null; synced_at: string; source: string;
+  unreconciled: number; vault_item: string | null; synced_at: string; source: string; statement_arrival_day?: number | null; statement_delivery?: "email_pdf" | "email_link" | "upload"; retired_at?: string | null;
 };
 export type Transaction = {
   id: string; account_id: string; amount: number; merchant: string; date: string; category: string | null; entity: string;
