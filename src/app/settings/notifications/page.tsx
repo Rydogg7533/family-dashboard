@@ -6,7 +6,8 @@ import { getViewer } from "@/lib/data-registers";
 export const dynamic = "force-dynamic";
 
 // A key pasted into a dashboard field can carry a stray space, quote or line break; keep only base64url characters.
-const cleanKey = (k: string) => k.replace(/[^A-Za-z0-9_-]/g, "");
+// An uncompressed P-256 public key is always 87 characters, so anything trailing the 87th is paste debris.
+const cleanKey = (k: string) => k.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 87);
 
 export default async function NotificationsPage() {
   const viewer = await getViewer();
