@@ -74,9 +74,9 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
     <div className="flex flex-col gap-3 pb-16">
       <div className="text-[11px] font-bold text-muted">{thread.name.toUpperCase()} · {thread.members.length} people · today</div>
       {all.map((m) => (
-        <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] ${m.mine ? "self-end items-end" : "self-start"}`}>
+        <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] min-w-0 ${m.mine ? "self-end items-end" : "self-start"}`}>
           <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender}{isAssistant && !m.mine ? " · AI" : ""} · {clock(m.at)}{!m.mine && !isAssistant ? ` · for ${thread.kind === "group" ? "Family" : "you"}` : ""}</div>
-          <div className={`px-3.5 py-2.5 text-sm ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
+          <div className={`px-3.5 py-2.5 text-sm max-w-full min-w-0 break-words [overflow-wrap:anywhere] whitespace-pre-wrap ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
             {m.text}
             {m.attachment && <div className={`text-xs mt-1 ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷 photo" : "🔗"} {m.attachment.label} · opens in Messages</div>}
           </div>
@@ -121,7 +121,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
 
       <div className="fixed left-0 right-0 bottom-[var(--bar-bottom)] z-10 bg-bg/95 backdrop-blur border-t border-line"><div className="max-w-md mx-auto px-5 pt-2 pb-2">
         {waiting.map((w) => (
-          <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80">
+          <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80 break-words [overflow-wrap:anywhere]">
             <div>{w.text}</div>
             <div className="text-[11px] text-muted">{w.status === "failed" ? `Not sent: ${w.error ?? "the Mac could not send it"}` : "Sending through Messages…"}</div>
           </div>

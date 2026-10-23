@@ -68,8 +68,10 @@ async function status(state, summary) { if (DRY || LIST) return; await rest("POS
 function sendViaMessages(chatGuid, text) {
   const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const script = `tell application "Messages"\n  set theChat to a reference to chat id "${esc(chatGuid)}"\n  send "${esc(text)}" to theChat\nend tell`;
-  const r = spawnSync("osascript", ["-e", script], { encoding: "utf8", timeout: 20000 });
-  if (r.status !== 0) throw new Error((r.stderr || "osascript failed").trim().slice(0, 200));
+  // Up to 2 minutes: the first send makes macOS ask "node wants to control Messages", and someone has to click Allow.
+  const r = spawnSync("osascript", ["-e", script], { encoding: "utf8", timeout: 120000 });
+  if (r.error?.code === "ETIMEDOUT" || r.signal) throw new Error("Messages did not answer in 2 minutes. If a permission prompt is on the Mac mini screen, click Allow and send again.");
+  if (r.status !== 0) throw new Error((r.stderr || "").trim().slice(0, 200) || `osascript exited ${r.status} with no message (Automation permission for Messages may be denied: System Settings › Privacy & Security › Automation › node › Messages)`);
 }
 
 async function main() {
