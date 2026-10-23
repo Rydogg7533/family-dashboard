@@ -60,7 +60,8 @@ export function decideFromAnswer(d, { includeWhenever = false, ageDays = 0, task
 }
 const keyOf = (r) => r.messageId || `icloud:${r.date}:${r.subject}`.slice(0, 200);
 
-const htmlText = (t) => t.replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+const htmlText = (t) => t.replace(/<!--[\s\S]*?-->/g, " ").replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+const noCss = (t) => t.replace(/@[a-z-]+[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, " ").replace(/[.#a-z][\w .#,>:\-\[\]="']*\{[^{}]*\}/gi, " ").replace(/\{[^{}]*\}/g, " ");
 function findPart(node) {            // first text/plain part in a body structure, else first text/html
   const flat = []; (function walk(n) { if (!n) return; if (n.childNodes?.length) n.childNodes.forEach(walk); else flat.push(n); })(node);
   const t = flat.find((n) => /^text\/plain$/i.test(n.type || "")) || flat.find((n) => /^text\/html$/i.test(n.type || ""));
@@ -70,10 +71,10 @@ async function preview(c, uid) {
   try {
     const one = await c.fetchOne(uid, { bodyStructure: true }, { uid: true });
     const p = findPart(one?.bodyStructure) || { part: "1", html: false };
-    const { content } = await c.download(uid, p.part, { uid: true, maxBytes: 6000 });
+    const { content } = await c.download(uid, p.part, { uid: true, maxBytes: 40000 });
     const parts = []; for await (const ch of content) parts.push(ch);
     const raw = Buffer.concat(parts).toString("utf8");
-    return (p.html ? htmlText(raw) : raw).replace(/\s+/g, " ").trim().slice(0, 600);
+    return noCss(p.html ? htmlText(raw) : raw).replace(/\s+/g, " ").replace(/^(view (this email )?in (your )?browser|having trouble viewing)[^.]*\.?/i, "").trim().slice(0, 600);
   } catch { return ""; }
 }
 
@@ -87,7 +88,8 @@ async function main() {
       const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => (r.cls.to === null && /needs a person/.test(r.cls.why)) || r.cls.to === "suspicious");
       const sus = cands.filter((r) => r.cls.to === "suspicious"), never = cands.filter((r) => r.cls.to !== "suspicious" && isNever(r)), eligible = cands.filter((r) => r.cls.to !== "suspicious" && !isNever(r));
       const cache = loadCache(`icloud-${user}`);
-      const fresh = eligible.filter((r) => cache[keyOf(r)]?.v !== PV);
+      const isStale = (d) => !d || d.v !== PV || (d.unclear && !d.retried);   // an answer that said "preview unclear" gets one more try with the better preview
+      const fresh = eligible.filter((r) => isStale(cache[keyOf(r)]));
       console.log(`${user}: ${rows.length} in the inbox; ${cands.length} in this window need a judgment (the free rules could not place them).`);
       console.log(`  suspicious (never sent to the model, never a task): ${sus.length}${sus.length ? `   e.g. ${sus.slice(0, 4).map((r) => `${r.address} (${r.cls.why})`).join(" | ")}` : ""}`);
       if (sus.length) { const bd = {}; for (const r of sus) { const k = `${r.domain} | ${r.cls.why}`; bd[k] = (bd[k] || 0) + 1; } console.log("  flagged senders (check for real ones; they go to Dashboard/Suspicious, undoable):"); for (const [k, n] of Object.entries(bd).sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`      ${String(n).padStart(3)}  ${k.slice(0, 120)}`); }
@@ -110,7 +112,7 @@ async function main() {
         for (const r of batch) {                                        // previews are fetched one at a time on the open connection
           const snippet = await preview(c, r.uid);
           const a = await ask({ name: "", address: r.address, date: new Date(r.date).toISOString().slice(0, 10), subject: r.subject, snippet }, { key, api: API, model: MODEL, today, system: triageSystem(today) }).catch(() => null);
-          if (a?.out) { inTok += a.inTok; outTok += a.outTok; cache[keyOf(r)] = { ...a.out, topic: String(a.out.topic || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40), v: PV, at: today, from: r.address, subject: r.subject.slice(0, 120) }; }
+          if (a?.out) { inTok += a.inTok; outTok += a.outTok; cache[keyOf(r)] = { ...a.out, topic: String(a.out.topic || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40), v: PV, unclear: /preview|unclear|too short|cut off|only html|css/i.test(`${a.out.why} ${a.out.title}`), retried: !!cache[keyOf(r)], at: today, from: r.address, subject: r.subject.slice(0, 120) }; }
           else bad++;
           if (++i % 25 === 0) { saveCache(`icloud-${user}`, cache); console.log(`  asked ${i}/${batch.length}`); }
         }
@@ -191,8 +193,8 @@ async function main() {
       // tell the app how many messages sit in Dashboard/Suspicious (a count only: no senders, no subjects)
       try {
         const st = await c.status(FOLDERS.suspicious, { messages: true }).catch(() => null);
-        if (st && SB && SK) {
-          const n = st.messages ?? 0;
+        if (SB && SK) {
+          const n = st?.messages ?? 0;
           await rest("POST", "system_status?on_conflict=key", [{ key: "mail_suspicious", state: "ok", summary: n ? `${n} message${n === 1 ? "" : "s"} held as suspicious. Open Mail › Dashboard › Suspicious to look. Nothing in there was opened, sent to the model, or made a task.` : "No messages held as suspicious.", value_num: n, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" });
         }
       } catch { /* the status line is a convenience; the move already happened */ }
