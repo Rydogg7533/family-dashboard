@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addWarranty, updateWarranty, type WarrantyInput } from "@/app/warranties/actions";
+import { readWarrantyInfo, type WarrantySuggestion } from "@/app/warranties/read";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 type Role = "receipt" | "warranty info";
@@ -16,6 +17,9 @@ export function AddWarranty({ initial }: { initial?: Initial }) {
   const [files, setFiles] = useState<Att[]>(initial?.attachments ?? []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [sug, setSug] = useState<WarrantySuggestion | null>(null);
+  const [reading, setReading] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const pick = useRef<HTMLInputElement>(null);
   const role = useRef<Role>("warranty info");
   const router = useRouter();
@@ -38,6 +42,13 @@ export function AddWarranty({ initial }: { initial?: Initial }) {
         added.push({ path: key, name: file.name, role: role.current });
       }
       setFiles((c) => [...c, ...added].slice(0, 8));
+      const info = added.filter((a) => a.role === "warranty info").map((a) => a.path);
+      if (info.length) {
+        setReading(true); setSug(null); setNote(null);
+        const r = await readWarrantyInfo(info).catch(() => ({ ok: false as const, message: "Reading failed. You can fill the form in by hand.", suggestion: undefined }));
+        setReading(false);
+        if (r.ok && r.suggestion) setSug(r.suggestion); else setNote(r.message ?? null);
+      }
     } catch (e) { setErr(`A file did not upload (${e instanceof Error ? e.message : "unknown error"}). Nothing was added; try again.`); }
     setBusy(false);
   }
@@ -70,6 +81,23 @@ export function AddWarranty({ initial }: { initial?: Initial }) {
         <button type="button" disabled={busy || files.length >= 8} onClick={() => choose("receipt")} className="min-h-10 rounded-xl border border-line text-sm font-semibold disabled:opacity-40">Add receipt</button>
         <button type="button" disabled={busy || files.length >= 8} onClick={() => choose("warranty info")} className="min-h-10 rounded-xl border border-line text-sm font-semibold disabled:opacity-40">Add warranty info</button>
       </div>
+      {reading && <div className="text-xs text-accent font-semibold">Reading the warranty info…</div>}
+      {note && <div className="text-xs text-muted">{note}</div>}
+      {sug && (
+        <div className="rounded-xl border border-accent p-2 text-xs flex flex-col gap-1">
+          <div className="font-bold tracking-wide text-accent">SUGGESTED FROM THE FILE (check before you use it)</div>
+          {sug.item && <div>Covers: {sug.item}</div>}
+          {sug.provider && <div>Provider: {sug.provider}</div>}
+          {sug.start && <div>Starts: {sug.start}</div>}
+          {sug.end && <div>Ends: {sug.end}{sug.endNote ? ` (${sug.endNote})` : ""}</div>}
+          {sug.terms && <div>Terms: {sug.terms}</div>}
+          <div className="flex gap-2 mt-1">
+            <button type="button" onClick={() => { setF((c) => ({ item: c.item || sug.item || "", provider: c.provider || sug.provider || "", for_who: c.for_who, start: c.start || sug.start || "", end: c.end || sug.end || "", terms: c.terms || sug.terms || "" })); setSug(null); }} className="min-h-9 px-3 rounded-xl bg-accent text-white font-semibold">Use these</button>
+            <button type="button" onClick={() => setSug(null)} className="min-h-9 px-3 rounded-xl border border-line font-semibold">Ignore</button>
+          </div>
+          <div className="text-muted">“Use these” fills only the empty boxes. Nothing is saved until you tap Save warranty.</div>
+        </div>
+      )}
       <p className="text-[11px] text-muted">Warranty info = the warranty card, certificate, terms page, or a photo of the label. Photos and PDFs, up to 8 files.</p>
       <input ref={pick} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => void upload(e.target.files)} />
       {err && <div className="text-sm text-red font-semibold">{err}</div>}
