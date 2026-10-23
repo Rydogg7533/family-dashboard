@@ -10,7 +10,7 @@ export function QuickBar() {
   return (
     <>
     <ReportIssueSheet open={report} onClose={() => setReport(false)} />
-    <div className="fixed left-0 right-0 bottom-[76px] pointer-events-none">
+    <div className="fixed left-0 right-0 bottom-[calc(58px+max(18px,env(safe-area-inset-bottom)))] pointer-events-none">
       <div className="max-w-md mx-auto px-5 flex gap-2 items-end pointer-events-auto">
         <form className="flex-1 flex" onSubmit={(e) => { e.preventDefault(); if (q.trim()) router.push(`/ask?q=${encodeURIComponent(q.trim())}`); }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask anything…" aria-label="Ask" className="w-full min-h-11 rounded-full border border-line bg-bg/95 backdrop-blur px-4 shadow-sm text-sm" />

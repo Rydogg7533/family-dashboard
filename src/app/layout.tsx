@@ -23,7 +23,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AppearanceProvider>
           <TopBar />
           <PullToRefresh />
-          <main className="flex-1 w-full max-w-md mx-auto px-5 pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-28">{children}</main>
+          <main className="flex-1 w-full max-w-md mx-auto px-5 pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-[calc(58px+max(18px,env(safe-area-inset-bottom))+44px+24px)]">{children}</main>
           <QuickBar />
           <Nav />
         </AppearanceProvider>
