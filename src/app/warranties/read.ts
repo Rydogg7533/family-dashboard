@@ -38,7 +38,8 @@ export async function readWarrantyInfo(paths: string[]): Promise<{ ok: boolean; 
   const sug: WarrantySuggestion = { item: s(out.item), provider: s(out.provider), start: iso(out.start), end: iso(out.end), terms: s(out.terms) };
   const months = typeof out.duration_months === "number" && out.duration_months > 0 && out.duration_months <= 600 ? Math.round(out.duration_months) : null;
   if (!sug.end && sug.start && months) {
-    const d = new Date(sug.start + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() + months);
+    const d = new Date(sug.start + "T00:00:00Z"); const day = d.getUTCDate(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + months);
+    d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()));
     sug.end = d.toISOString().slice(0, 10);
     sug.endNote = `calculated: ${sug.start} plus ${months >= 12 && months % 12 === 0 ? `${months / 12} year${months === 12 ? "" : "s"}` : `${months} months`}`;
   }
