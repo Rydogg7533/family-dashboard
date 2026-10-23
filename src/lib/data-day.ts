@@ -1,6 +1,7 @@
 // Slice C data: the day (F3), weather on blocks (F5), checklists (F6), calendar (F5/F12), recurring register.
 // Same pattern as data.ts: types, sample data, readers that fall back to samples when Supabase is unset.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { hasGoogleCal, listEvents } from "@/lib/google-calendar";
 import type { Weather } from "@/lib/c-shared";
 export type { Weather } from "@/lib/c-shared";
 export { fmtTime, shortTime, fmtDate, daysUntil, weatherGlyph, weatherLine } from "@/lib/c-shared";
@@ -22,6 +23,7 @@ export type SyncStatus = { key: "calendar" | "location" | "messages" | "orders" 
 export type CalendarEvent = {
   id: string; date: string; start: string | null; end: string | null; title: string; place: string | null; person: string;
   weather: Weather | null; trip: boolean; from_message?: string; source: { name: string; href: string }; requested_by: string;
+  href?: string; color?: string | null; allDay?: boolean;   // set when the event comes live from Google (D72)
 };
 export type RecurringItem = {
   id: string; name: string; kind: "renewal" | "subscription" | "bill" | "event"; next_due: string; cycle: string; who: string;
@@ -156,6 +158,13 @@ async function readSyncFromStatus(): Promise<SyncStatus[]> {
 
 export async function getCalendarEvents(fromDate = d(0), days = 14): Promise<CalendarEvent[]> {
   if (!hasSupabaseEnv()) return sampleEvents.filter((e) => e.date >= fromDate && e.date <= d(days));
+  if (hasGoogleCal()) {   // live from Google (D72); the cache table below is only the fallback when the app has no calendar token
+    try {
+      const evs = await listEvents(fromDate, d(days));
+      return evs.map((e) => ({ id: `${e.calendarId}|${e.id}`, date: e.date, start: e.start, end: e.end, title: e.title, place: e.location, person: e.calendarName, weather: null, trip: false,
+        source: { name: "Google Calendar", href: e.htmlLink ?? "#" }, requested_by: e.creator ?? "Google", href: `/calendar/e/${encodeURIComponent(e.calendarId)}/${encodeURIComponent(e.id)}`, color: e.color, allDay: e.allDay }));
+    } catch { /* fall through to the cache so the page still renders; the sync line shows the problem */ }
+  }
   const sb = await createClient();
   const { data } = await sb.from("calendar_events").select("*").gte("date", fromDate).lte("date", d(days)).order("date").order("start_time");
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({

@@ -22,12 +22,13 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
 
   return (
     <>
-      <H1 right={<Link href="/day" className="font-semibold text-accent">Today's schedule</Link>}>Calendar</H1>
+      <H1 right={<span className="flex gap-3"><Link href="/day" className="font-semibold text-accent">Today</Link><Link href="/calendar/new" className="font-semibold text-accent">+ New</Link></span>}>Calendar</H1>
       <div className="flex gap-1.5 mb-3">
         <Link href="/calendar" className={chip(view === "agenda")}>Agenda</Link>
         <Link href="/calendar?view=week" className={chip(view === "week")}>Week</Link>
       </div>
 
+      {sp.deleted === "1" && <Card className="mb-4"><div className="text-sm">Deleted from Google Calendar.</div></Card>}
       {addedEvent && (
         <Card className="mb-4 border-accent">
           <div className="text-[11px] font-bold tracking-wide text-accent">ADDED TO SCHEDULE</div>
@@ -76,7 +77,7 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
                 <Card key={e.id}>
                   <div className="flex justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="font-semibold">{e.title}</div>
+                      <div className="font-semibold flex items-center gap-1.5">{e.color && <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.color }} />}{e.href ? <Link href={e.href} className="truncate">{e.title}</Link> : e.title}</div>
                       <div className="text-sm text-muted">{e.start ? `${fmtTime(e.start)}${e.end ? `–${fmtTime(e.end)}` : ""}` : "All day"}{e.place ? ` · ${e.place}` : ""} · {e.person}</div>
                     </div>
                     {e.weather && <div className="text-right text-sm shrink-0"><span className="text-amber">{weatherGlyph(e.weather.icon)}</span> {e.weather.temp}°{e.weather.precip && e.weather.precip >= 30 ? <div className="text-xs text-muted">{e.weather.precip}% rain</div> : null}</div>}
@@ -91,7 +92,7 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
       </section>
 
       <section className="card mt-5"><SyncLine items={sync} /></section>
-      <p className="text-xs text-muted mt-3">New events are written to the person's real calendar (Google for Ryan, Apple for Melissa, the family calendar for shared), never only here. Renewals and recurring dates: <Link href="/recurring" className="font-semibold text-accent">Recurring</Link>.</p>
+      <p className="text-xs text-muted mt-3">Events live in Google Calendar; the app reads and writes them there, never only here. Renewals and recurring dates: <Link href="/recurring" className="font-semibold text-accent">Recurring</Link>.</p>
     </>
   );
 }
