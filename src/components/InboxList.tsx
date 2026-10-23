@@ -4,12 +4,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
 import { readCapture } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
-export function InboxList({ items, pendingIds = [], capture, claimId, resolvedThisWeek }: { items: InboxItem[]; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
+export function InboxList({ items, me = null, names = {}, pendingIds = [], capture, claimId, resolvedThisWeek }: { items: InboxItem[]; me?: string | null; names?: Record<string, string>; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
   const [open, setOpen] = useState(items);
   useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
@@ -25,7 +25,13 @@ export function InboxList({ items, pendingIds = [], capture, claimId, resolvedTh
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const total = items.length + resolvedThisWeek;
   const done = total - open.length;
-  const shown = showAll ? open : open.slice(0, 5);
+  const [filter, setFilter] = useState<string>("all");
+  const ids = Object.keys(names);
+  const sorted = [...open].sort((a, b) => Number(b.assigned_to === me) - Number(a.assigned_to === me));
+  const handedToMe = sorted.filter((i) => me && i.assigned_to === me).length;
+  const fromWho = (i: InboxItem, id: string) => i.created_by === id || i.requested_by === names[id];
+  const visible = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
+  const shown = showAll ? visible : visible.slice(0, 5);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
 
@@ -51,13 +57,20 @@ export function InboxList({ items, pendingIds = [], capture, claimId, resolvedTh
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
+        {ids.length > 1 && (
+          <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2">
+            {[{ id: "all", label: "All" }, ...ids.map((id) => ({ id, label: `From ${names[id]}` })), ...(handedToMe ? [{ id: "mine", label: `Handed to me (${handedToMe})` }] : [])].map((c) => (
+              <button key={c.id} onClick={() => { setFilter(c.id); setShowAll(false); }} className={`px-3 py-1.5 rounded-full min-h-9 ${filter === c.id ? "bg-accent text-white" : "bg-soft"}`}>{c.label}</button>
+            ))}
+          </div>
+        )}
         {pendingIds.length > 0 && <div className="card text-sm text-muted mb-2 animate-pulse">Reading {pendingIds.length} new document{pendingIds.length === 1 ? "" : "s"}… it will appear here in a few seconds.</div>}
         {open.length === 0 && pendingIds.length === 0 ? (
           <div className="card text-muted">Nothing to identify, file or decide. Everything is where it belongs.</div>
         ) : (
           <div className="flex flex-col gap-2">
-            {shown.map((it) => <InboxCard key={it.id} item={it} onAnswer={(a) => resolve(it, a)} />)}
-            {!showAll && open.length > 5 && <button onClick={() => setShowAll(true)} className="text-sm font-semibold text-accent px-1 text-left min-h-10">and {open.length - 5} more</button>}
+            {shown.map((it) => <InboxCard key={it.id} item={it} me={me} names={names} onAnswer={(a) => resolve(it, a)} />)}
+            {!showAll && visible.length > 5 && <button onClick={() => setShowAll(true)} className="text-sm font-semibold text-accent px-1 text-left min-h-10">and {visible.length - 5} more</button>}
           </div>
         )}
       </section>
@@ -74,15 +87,21 @@ export function InboxList({ items, pendingIds = [], capture, claimId, resolvedTh
   );
 }
 
-function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) => void }) {
+function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string | null; names: Record<string, string>; onAnswer: (a: string) => void }) {
   const [text, setText] = useState("");
   const [thread, setThread] = useState(false);
+  const router = useRouter();
+  const [handBusy, setHandBusy] = useState(false);
+  const otherId = Object.keys(names).find((x) => x !== me) ?? null;
+  const assignedName = item.assigned_to ? names[item.assigned_to] : null;
+  const by = item.created_by && names[item.created_by] ? names[item.created_by] : item.requested_by;
+  async function hand(to: string | null) { setHandBusy(true); await assignInboxItem(item.id, to).catch(() => null); setHandBusy(false); router.refresh(); }
   return (
     <div className="card flex flex-col gap-2">
       <div>
         <div className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</div>
         <div className="font-semibold">{item.title}</div>
-        <div className="text-xs text-muted mt-0.5">{item.requested_by === "System" ? "System" : `${item.requested_by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
+        <div className="text-xs text-muted mt-0.5">{by === "System" ? "System" : by.includes("@") ? "Uploaded" : `${by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
       </div>
       {item.thread && (
         <div>
@@ -96,6 +115,13 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
           <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>
           <ul className="flex flex-col gap-1">{item.read_result.plan.map((p, i) => { const o = typeof p === "string" ? { t: "link" as const, text: p } : p; return (<li key={i} className="flex gap-2"><span className={`shrink-0 rounded px-1.5 text-[10px] font-bold leading-5 ${o.t === "file" ? "bg-accent text-white" : "bg-line text-muted"}`}>{o.t === "file" ? "FILED" : "LINK"}</span><span>{o.text}</span></li>); })}</ul>
           {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan.replace("LINK ", "link: ")}</div>}
+        </div>
+      )}
+      {me && otherId && (
+        <div className="text-xs flex items-center gap-2 flex-wrap">
+          {assignedName && <span className="rounded-full bg-soft px-2.5 py-0.5 font-semibold">{item.assigned_to === me ? "Handed to you" : `Handed to ${assignedName}`}</span>}
+          {item.assigned_to !== otherId && <button disabled={handBusy} onClick={() => hand(otherId)} className="font-semibold text-accent min-h-8 disabled:opacity-50">Hand to {names[otherId]}</button>}
+          {item.assigned_to && item.assigned_to !== null && <button disabled={handBusy} onClick={() => hand(item.assigned_to === me ? null : me)} className="font-semibold text-accent min-h-8 disabled:opacity-50">{item.assigned_to === me ? "Hand back to anyone" : "Take it"}</button>}
         </div>
       )}
       {item.read_result?.home && <FolderFix item={item} />}

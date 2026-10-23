@@ -155,3 +155,17 @@ export async function saveFilingRule(id: string): Promise<{ ok: boolean; message
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "filing_rule_saved", subject: `${label} → ${toTemplate(home)}`, ref: id, undoable: true }).then(() => {}, () => {});
   return { ok: true, message: `Done. ${label} receipts will go to ${toTemplate(home).replace("Organized/", "").replace("{year}", "<year>")}. You can remove this rule in Settings › Filing rules.` };
 }
+
+// Hand an Inbox item to one parent (or back to "anyone"). Either parent can still answer it.
+export async function assignInboxItem(id: string, to: string | null): Promise<{ ok: boolean; error?: string }> {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (to) { const { data: p } = await sb.from("profiles").select("id").eq("id", to).maybeSingle(); if (!p) return { ok: false, error: "That person is not part of the household." }; }
+  const { data, error } = await sb.from("inbox_items").update({ assigned_to: to }).eq("id", id).eq("status", "open").select("id");
+  if (error || !data?.length) return { ok: false, error: "Could not hand it over." };
+  const { data: me } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  await sb.from("activity_log").insert({ actor: me?.display_name ?? user.email ?? "member", action: "inbox_assigned", subject: `${id}: ${to ? "handed over" : "back to anyone"}`, ref: id, undoable: false }).then(() => {}, () => {});
+  return { ok: true };
+}

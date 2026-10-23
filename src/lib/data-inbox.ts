@@ -12,6 +12,8 @@ export type InboxItem = {
   requested_by: string;        // "Always say who": "Ryan", "Melissa", "System"
   for_person: string | null;   // whom it is about, when known
   captured_at: string;
+  assigned_to?: string | null;  // handed to one parent; either may still answer
+  created_by?: string | null;
   missing: string;             // the one question, in plain words
   options: string[];           // suggested answers as buttons; free text always allowed
   thread: { at: string; who: "you" | "assistant"; text: string }[] | null; // for ask_thread items
