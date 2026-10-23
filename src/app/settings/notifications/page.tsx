@@ -10,7 +10,7 @@ export default async function NotificationsPage() {
   return (
     <>
       <H1 right={<Link href="/settings" className="font-semibold text-accent">Settings ›</Link>}>Notifications</H1>
-      <NotificationSettings viewer={viewer.name} vapidKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""} />
+      <NotificationSettings viewer={viewer.name} vapidKey={process.env.VAPID_PUBLIC_KEY ?? process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""} />
     </>
   );
 }
