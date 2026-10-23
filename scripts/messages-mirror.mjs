@@ -2,7 +2,8 @@
 // Messages mirror (F16): a window on THIS person's own Messages threads. Runs on the person's own Mac, signed in as them.
 //   node scripts/messages-mirror.mjs --list-chats     # one-time: shows your chats (identifier, message count) so you can pick the family ones
 //   node scripts/messages-mirror.mjs --dry            # reads and reports; writes nothing, sends nothing
-//   node scripts/messages-mirror.mjs                  # what launchd runs every 60 s
+//   node scripts/messages-mirror.mjs                  # one pass
+//   node scripts/messages-mirror.mjs --watch          # what launchd runs: stays up, mirrors within ~2 s of a change, sends within ~3 s
 // Each run: 1) copies ~/Library/Messages/chat.db to a private temp copy (read-only; the live database is never opened for writing),
 //           2) mirrors FAMILY THREADS ONLY (chats whose members are all in MIRROR_FAMILY_HANDLES) for the last MIRROR_DAYS days into
 //              messages_threads / messages for MIRROR_PERSON_ID, 3) sends lines queued in messages_outbox through the Messages app
@@ -13,12 +14,12 @@
 //   MIRROR_FAMILY_HANDLES="Melissa=+18015551234,Melissa=melissa@icloud.com,Child=+1801...", MIRROR_DAYS=30). Never printed.
 // Needs: Full Disk Access for the node binary that runs it (to read chat.db) and Automation permission for Messages (to send).
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
-const DRY = args.includes("--dry"), LIST = args.includes("--list-chats");
+const DRY = args.includes("--dry"), LIST = args.includes("--list-chats"), WATCH = args.includes("--watch");
 const envPath = join(homedir(), "_secrets_local_only", "family-dashboard.env");
 const env = {}; try { for (const l of readFileSync(envPath, "utf8").split("\n")) { const m = l.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, ""); } } catch { /* reported below */ }
 const URL_ = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
@@ -159,4 +160,15 @@ async function main() {
   await status(failed ? "warn" : "ok", summary);
   console.log(`${now()} ${summary}`);
 }
-main().catch(async (e) => { console.error(`${now()} messages-mirror: ${e.message}`); await status("error", `Messages mirror paused: ${String(e.message).slice(0, 200)}`); process.exit(1); });
+const fail = async (e) => { console.error(`${now()} messages-mirror: ${e.message}`); await status("error", `Messages mirror paused: ${String(e.message).slice(0, 200)}`); };
+if (!WATCH) main().catch(async (e) => { await fail(e); process.exit(1); });
+else {
+  // Always-on: a pass whenever Messages' database changes (checked every 2 s), whenever a line is waiting in the outbox
+  // (checked every 3 s), and at least once a minute. One pass at a time; an error pauses the mirror and is retried.
+  const stamp = () => ["chat.db", "chat.db-wal"].map((f) => { try { return statSync(join(homedir(), "Library", "Messages", f)).mtimeMs; } catch { return 0; } }).join("|");
+  let lastStamp = "", lastPass = 0, busy = false;
+  const run = async (why) => { if (busy) return; busy = true; try { await main(); lastPass = Date.now(); lastStamp = stamp(); } catch (e) { await fail(e); } finally { busy = false; } };
+  await run("start");
+  setInterval(() => { if (stamp() !== lastStamp) void run("messages changed"); else if (Date.now() - lastPass > 60000) void run("minute"); }, 2000);
+  setInterval(async () => { if (busy) return; try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&select=id&limit=1`); if (w.length) void run("outbox"); } catch { /* next tick */ } }, 3000);
+}
