@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { InboxItem } from "@/lib/data-inbox";
 import { readCapture } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
@@ -98,6 +98,7 @@ function InboxCard({ item, onAnswer }: { item: InboxItem; onAnswer: (a: string) 
           {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan.replace("LINK ", "link: ")}</div>}
         </div>
       )}
+      {item.read_result?.home && <FolderFix item={item} />}
       <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
       </div>
@@ -181,6 +182,42 @@ function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string
       <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
       {names.length > 0 && <div className="text-xs text-green font-semibold">{status || "Saving…"} ({names.join(", ")})</div>}
       {docId && <button onClick={() => pageRef.current?.click()} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add another page to this document{pageCount > 1 ? ` (${pageCount} so far)` : ""}</button>}
+    </div>
+  );
+}
+
+// "Is that the right folder?" Ask in words, or pick another folder. Nothing is filed until the Yes tap.
+function FolderFix({ item }: { item: InboxItem }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [choices, setChoices] = useState<string[]>([]);
+  const [words, setWords] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function toggle() {
+    const next = !open; setOpen(next); setMsg(null);
+    if (next && !choices.length) { const r = await getFolderChoices(item.id); if (r.ok && r.choices) setChoices(r.choices); }
+  }
+  async function run(input: { folder?: string; request?: string }) {
+    setBusy(true); const r = await changeFiling(item.id, input).catch(() => ({ ok: false, message: "That did not work. Try again.", changed: false })); setBusy(false);
+    setMsg(r.message); if (r.changed) { setWords(""); router.refresh(); }
+  }
+  return (
+    <div className="text-xs">
+      <button type="button" onClick={toggle} className="font-semibold text-accent min-h-8">{open ? "Hide folder options" : "Wrong folder? Ask or change it"}</button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-2 rounded-xl border border-line p-2">
+          <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) void run({ request: words }); }} className="flex gap-2">
+            <input value={words} onChange={(e) => setWords(e.target.value)} placeholder="Is this the right folder? Or: put it under Home" className="flex-1 min-h-10 rounded-xl border border-line bg-bg px-3 text-sm" />
+            <button type="submit" disabled={busy || !words.trim()} className="min-h-10 px-3 rounded-xl bg-soft text-sm font-semibold disabled:opacity-40">{busy ? "…" : "Ask"}</button>
+          </form>
+          <select value="" disabled={busy || !choices.length} onChange={(e) => { if (e.target.value) void run({ folder: e.target.value }); }} className="min-h-10 rounded-xl border border-line bg-bg px-2 text-sm">
+            <option value="">{choices.length ? "Or pick a folder…" : "Loading folders…"}</option>
+            {choices.map((c) => <option key={c} value={c}>{c.replace("Organized/", "")}</option>)}
+          </select>
+          {msg && <div className="text-sm">{msg}</div>}
+        </div>
+      )}
     </div>
   );
 }

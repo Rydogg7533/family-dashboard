@@ -3,6 +3,8 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { fileCapture } from "@/app/inbox/file";
 import { readCapture } from "@/app/inbox/read";
 import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { filingFolders } from "@/lib/filing-folders";
+import { callModel } from "@/lib/ai";
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
 export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
@@ -75,4 +77,63 @@ export async function addPage(inboxId: string, page: { path: string; mime: strin
     missing: "Reading all pages…", options: ["Receipt", "Bill", "Statement", "Form", "Something else"],
   }).eq("id", inboxId);
   return { ok: !error, pages: pages.length + 1 };
+}
+
+// Where a document will be filed can be questioned or changed before the tap. Only folders from the real structure are allowed.
+async function folderChoices(sb: Awaited<ReturnType<typeof createClient>>, row: { read_result: Record<string, unknown> | null }) {
+  const home = String(row.read_result?.home ?? "");
+  const year = home.match(/\/(20\d\d)\//)?.[1] ?? String(new Date().getFullYear());
+  const { data: vs } = await sb.from("vehicles").select("short");
+  return { home, year, choices: filingFolders(year, (vs ?? []).map((v) => String(v.short)).filter(Boolean)) };
+}
+
+export async function getFolderChoices(id: string): Promise<{ ok: boolean; current?: string; choices?: string[] }> {
+  if (!hasSupabaseEnv()) return { ok: false };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false };
+  const { data: row } = await sb.from("inbox_items").select("read_result,status").eq("id", id).maybeSingle();
+  if (!row || row.status !== "open" || !row.read_result) return { ok: false };
+  const c = await folderChoices(sb, row as { read_result: Record<string, unknown> | null });
+  return { ok: true, current: c.home, choices: c.choices };
+}
+
+function applyHome(rr: Record<string, unknown>, from: string, to: string) {
+  const plan = ((rr.plan as { t: string; text: string }[] | undefined) ?? []).map((p) => (p.t === "file" ? { ...p, text: p.text.replace(from, to) } : p));
+  return { ...rr, home: to, plan };
+}
+
+// `folder` = a direct pick from the list; `request` = free words ("is this the right place?", "put it under Home").
+export async function changeFiling(id: string, input: { folder?: string; request?: string }): Promise<{ ok: boolean; message: string; changed?: boolean }> {
+  if (!hasSupabaseEnv()) return { ok: false, message: "Not available in preview." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, message: "Not signed in." };
+  const { data: row } = await sb.from("inbox_items").select("read_result,status").eq("id", id).maybeSingle();
+  if (!row || row.status !== "open" || !row.read_result) return { ok: false, message: "This item is no longer waiting." };
+  const rr = row.read_result as Record<string, unknown>;
+  const { home, choices } = await folderChoices(sb, { read_result: rr });
+  const save = async (to: string, why: string) => {
+    await sb.from("inbox_items").update({ read_result: applyHome(rr, home, to) }).eq("id", id);
+    await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "filing_folder_changed", subject: `${id}: ${home} → ${to}`, ref: id, undoable: false }).then(() => {}, () => {});
+    return { ok: true, changed: true, message: `Changed to ${to.replace("Organized/", "")}. ${why}`.trim() };
+  };
+  if (input.folder) {
+    if (!choices.includes(input.folder)) return { ok: false, message: "That folder is not in the structure." };
+    return save(input.folder, "");
+  }
+  const request = (input.request ?? "").trim().slice(0, 300);
+  if (!request) return { ok: false, message: "Say what you want to know or change." };
+  const facts = JSON.stringify({ vendor: rr.vendor, item: rr.item, category: rr.category, amount: rr.amount, date: rr.date, kind: rr.kind });
+  const r = await callModel({
+    job: "file", maxTokens: 400, feature: "filing-folder",
+    system: `You help choose the folder for one scanned document in a household filing system. Folders are ONLY from this list (exact strings):\n${choices.join("\n")}\nRules: restaurants and takeout go to Dining; other purchase receipts to Receipts; vehicle repairs and parts to that vehicle's folder; home repairs to Home. Reply with JSON only: {"action":"answer"|"change","folder":<exact string from the list or null>,"reply":<one or two short sentences>}. Use "answer" when the person is asking whether the current folder is right (say yes or no and why); use "change" only when they tell you to move it or you must correct an obvious mistake.`,
+    messages: [{ role: "user", content: `Document facts: ${facts}\nCurrent folder: ${home}\nPerson says: ${request}` }],
+  });
+  let out: { action?: string; folder?: string | null; reply?: string } | null = null;
+  try { const m = r.text.match(/\{[\s\S]*\}/); out = m ? JSON.parse(m[0]) : null; } catch { out = null; }
+  if (!out) return { ok: false, message: "I could not work that out. Pick a folder from the list instead." };
+  if (out.action === "change" && out.folder && choices.includes(out.folder)) return save(out.folder, out.reply ?? "");
+  if (out.action === "change") return { ok: false, message: "I could not match that to a folder in the structure. Pick one from the list." };
+  return { ok: true, changed: false, message: out.reply ?? "" };
 }
