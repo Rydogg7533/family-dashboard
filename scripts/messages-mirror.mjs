@@ -59,7 +59,11 @@ function bodyText(hex, text) {
 // ---- Supabase ----
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
 async function rest(method, path, body, extra = {}) {
-  const r = await fetch(`${URL_}/rest/v1/${path}`, { method, headers: { ...H, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
+  let r;
+  for (let i = 0; ; i++) { // brief network blips ("fetch failed") retry quietly instead of flagging the mirror as paused
+    try { r = await fetch(`${URL_}/rest/v1/${path}`, { method, headers: { ...H, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) }); break; }
+    catch (e) { if (i >= 3) throw e; await new Promise((ok) => setTimeout(ok, 1500 * (i + 1))); }
+  }
   const t = await r.text(); if (!r.ok) throw new Error(`${method} ${path.split("?")[0]} → ${r.status} ${t.slice(0, 300)}`);
   return t ? JSON.parse(t) : null;
 }
