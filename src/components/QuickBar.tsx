@@ -22,7 +22,7 @@ export function QuickBar() {
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload file</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=bulk")}>Bulk drop</button>
               <div className="border-t border-line my-0.5" />
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go(`/ask?about=${encodeURIComponent(path)}`)}>Ask about this page</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/ask")}>Ask</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft text-amber" onClick={() => { setPlus(false); setReport(true); }}>Report a problem</button>
             </div>
           )}
