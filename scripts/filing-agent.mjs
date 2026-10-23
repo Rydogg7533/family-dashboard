@@ -177,7 +177,7 @@ async function writeIndexes(vehicles, log) {
   const shortOf = new Map(vehicles.map((v) => [v.id, v.short]));
   for (const f of inboxAll.filter((f) => f.filed?.vehicle_id && shortOf.has(f.filed.vehicle_id))) {
     const b = bucket("vehicle", shortOf.get(f.filed.vehicle_id)); const rc = rcById.get(f.filed.receipt_id);
-    add(b, f.filed.receipt_id || f.id, { date: f.read_result?.date || String(f.captured_at).slice(0, 10), type: f.read_result?.kind || (f.read_result?.warranty_relevant ? "warranty paper" : "document"), title: f.title, amount: rc ? Number(rc.amount) : (typeof f.read_result?.amount === "number" ? f.read_result.amount : null), card: rc?.card ?? null, file: fileOf(rc, f) , note: rc && !rc.card ? "waiting for its card" : "copy pending" });
+    add(b, f.filed.receipt_id || f.id, { date: f.read_result?.date || String(f.captured_at).slice(0, 10), type: rc ? "receipt" : (f.read_result?.kind || (f.read_result?.warranty_relevant ? "warranty paper" : "document")), title: f.title, amount: rc ? Number(rc.amount) : (typeof f.read_result?.amount === "number" ? f.read_result.amount : null), card: rc?.card ?? null, file: fileOf(rc, f) , note: rc && !rc.card ? "waiting for its card" : "copy pending" });
   }
   // (2) subjects the household tagged (any kind)
   const links = await rest("GET", "receipt_subjects?removed_at=is.null&select=receipt_id,subjects(kind,name)&limit=2000");
