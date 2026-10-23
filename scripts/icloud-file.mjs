@@ -26,6 +26,8 @@ import { suspicion, authFailed, replyDomainOf } from "./phish-lib.mjs";
 
 export const FOLDERS = { handled: "Dashboard/Handled", money: "Dashboard/Money", records: "Dashboard/Records", archive: "Dashboard/Archive older than 12 months", suspicious: "Dashboard/Suspicious" };
 
+export const PROBLEM_RE = /\b(declin\w*|fail(ed|ure)|past due|overdue|unsuccessful|insufficient|overdraft\w*|suspend\w*|final notice|returned payment|payment (problem|issue)|unable to (process|complete)|action required|urgent)\b/i;
+
 // Pure: where one message should go, or null to leave it in the inbox. m = { flagged, date (ms), subject, address, domain, listUnsubscribe, precedenceBulk, autoSubmitted }
 export function classify(m, { now = Date.now(), months = 12, keep = [] } = {}) {
   if (m.flagged) return { to: null, why: "starred" };
@@ -36,6 +38,8 @@ export function classify(m, { now = Date.now(), months = 12, keep = [] } = {}) {
   if (d.action === "money") return { to: "money", why: d.reason };
   if (d.action === "record") return { to: "records", why: d.reason };
   if (d.action === "calendar") return { to: null, why: "calendar invite" };
+  // Safety net: a free rule must never file a possible money problem as noise. These words send the message to the model step instead.
+  if (!old && (d.action === "archive" || d.action === "fyi") && PROBLEM_RE.test(m.subject || "")) return { to: null, why: "needs a person (possible problem: " + (m.subject || "").slice(0, 40) + ")" };
   if (old) return { to: "archive", why: `older than ${months} months (${d.reason})` };
   if (d.action === "archive" || d.action === "fyi") return { to: "handled", why: d.reason };
   return { to: null, why: "needs a person (triage step)" };

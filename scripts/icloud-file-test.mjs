@@ -14,4 +14,9 @@ t({ subject: "Invitation: team sync @ Tue" }, null, "calendar invites stay");
 t({}, null, "a person, recent: left for triage");
 t({ date: now - 500 * day }, "archive", "a person, old: archived");
 assert.equal(classify({ ...base, listUnsubscribe: true, domain: "tiller.com", address: "hi@tiller.com" }, { now, keep: ["tiller.com"] }).to, null, "kept sender");
+{
+  const base = { flagged: false, date: Date.now() - 5 * 86400_000, address: "alerts@notify.wellsfargo.com", domain: "notify.wellsfargo.com", name: "", listUnsubscribe: true, precedenceBulk: false, autoSubmitted: false };
+  assert.equal(classify({ ...base, subject: "Your card was declined" }).to, null, "problem words are never filed as noise");
+  assert.equal(classify({ ...base, subject: "Your balance is below $5,000.00" }).to, "handled", "plain alerts still are");
+}
 console.log("icloud-file: all checks passed");
