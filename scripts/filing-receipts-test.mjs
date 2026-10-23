@@ -1,6 +1,6 @@
 // node scripts/filing-receipts-test.mjs : pure-function checks for card/month filing and the vehicle index.
 import assert from "node:assert/strict";
-import { receiptHome, receiptFileName, vehicleIndexHtml, HOLD_DAYS } from "./filing-agent.mjs";
+import { receiptHome, receiptFileName, vehicleIndexHtml, indexKey, indexLocation, HOLD_DAYS } from "./filing-agent.mjs";
 const now = Date.parse("2026-10-23T12:00:00Z");
 const fresh = { date: "2026-10-20", created_at: "2026-10-22T10:00:00Z", card: null };
 assert.equal(receiptHome(fresh, now), null, "no card, fresh: waits");
@@ -17,4 +17,8 @@ const html = vehicleIndexHtml("Toyota Sienna", "/h/Organized/Personal/Documents/
 assert.ok(html.includes("../../Finance/2026/Amex%201004/2026-10/a%20b.jpeg"), "relative encoded link");
 assert.ok(html.includes("AAA &lt;battery&gt;") && html.indexOf("Wiper") < html.indexOf("AAA"), "escaped, newest first");
 assert.ok(html.includes("waiting for its card"));
+assert.equal(indexKey("vehicle", "Sienna"), indexKey("vehicle", "sienna"), "same subject whatever the case");
+assert.deepEqual(indexLocation("vehicle", "Sienna"), { folder: "Organized/Personal/Documents/Vehicles/Sienna/", file: "Sienna - index.html" });
+assert.deepEqual(indexLocation("trip", "Moab trip"), { folder: "Organized/Personal/Documents/Indexes/Trips and events/", file: "Moab trip - index.html" });
+assert.equal(indexLocation("hobby", "Kayak").folder, "Organized/Personal/Documents/Indexes/hobby/", "unknown kinds still get a folder");
 console.log("filing receipts: all checks passed");

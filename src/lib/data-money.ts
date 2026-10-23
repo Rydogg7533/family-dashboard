@@ -222,3 +222,10 @@ export function proofState(txId: string, proofs: Proof[]): { state: ProofState; 
   return { state: "red", have, ask: "No proof. Snap the receipt, find it in email, or explain." };
 }
 export const PROOF_LABEL: Record<Proof["kind"], string> = { digital_receipt: "digital", photo: "photo", statement_line: "statement line" };
+
+export async function getSubjects(): Promise<{ subjects: import("@/lib/subjects").Subject[]; links: { receipt_id: string; subject_id: string }[] }> {
+  if (!hasSupabaseEnv()) return { subjects: [], links: [] };
+  const sb = await createClient();
+  const [a, b] = await Promise.all([sb.from("subjects").select("id,kind,name").order("name"), sb.from("receipt_subjects").select("receipt_id,subject_id").is("removed_at", null)]);
+  return { subjects: (a.data ?? []) as { id: string; kind: string; name: string }[], links: (b.data ?? []) as { receipt_id: string; subject_id: string }[] };
+}

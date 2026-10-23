@@ -149,31 +149,74 @@ async function copyItem(it, log, over = {}) {
 }
 
 
-// One index page per vehicle, in that vehicle's own folder. The only file this agent rewrites; it is generated, not yours.
-async function writeVehicleIndexes(vehicles, log) {
-  const filed = await rest("GET", "inbox_items?status=eq.resolved&filed->>vehicle_id=not.is.null&select=id,title,read_result,filed,copied_path,captured_at&order=captured_at.desc&limit=500");
-  const claims = await rest("GET", "claims?vehicle_id=not.is.null&select=id,title,status,expected_amount,created_at,vehicle_id&order=created_at.desc&limit=200").catch(() => []);
-  const ids = [...new Set(filed.map((f) => f.filed?.receipt_id).filter(Boolean))];
-  const rcs = ids.length ? await rest("GET", `receipts?id=in.(${ids.join(",")})&select=id,card,amount,date`) : [];
-  const rcById = new Map(rcs.map((r) => [r.id, r]));
-  for (const v of vehicles) {
-    const entries = [];
-    for (const f of filed.filter((f) => f.filed.vehicle_id === v.id)) {
-      const rc = rcById.get(f.filed.receipt_id);
-      const first = f.copied_path ? String(f.copied_path).split("\n")[0] : null;
-      entries.push({ date: f.read_result?.date || String(f.captured_at).slice(0, 10), type: f.read_result?.kind || (f.read_result?.warranty_relevant ? "warranty paper" : "document"), title: f.title, amount: rc ? Number(rc.amount) : (typeof f.read_result?.amount === "number" ? f.read_result.amount : null), card: rc?.card ?? null, file: first, note: rc && !rc.card ? "waiting for its card" : "copy pending" });
-    }
-    for (const c of claims.filter((c) => c.vehicle_id === v.id)) entries.push({ date: String(c.created_at).slice(0, 10), type: `claim (${c.status})`, title: c.title, amount: c.expected_amount != null ? Number(c.expected_amount) : null, card: null, file: null, note: "see Claims in the app" });
-    if (!entries.length) continue;
-    const dir = destFolder(`Organized/Personal/Documents/Vehicles/${v.short}/`);
+// One index page per subject (a vehicle, the house, an appliance, a person, a trip, a business, a claim set...), plus a master list.
+// Vehicles' indexes sit in the vehicle's own folder; every other subject's under Documents/Indexes/<Kind>/. These generated pages are the only
+// files this agent rewrites; they are not yours. A subject of any kind appears the first time a receipt is tagged to it.
+const KIND_DIR = { vehicle: "Vehicles", home: "Home", appliance: "Appliances", person: "People", pet: "Pets", business: "Businesses", trip: "Trips and events", project: "Projects", gift: "Gifts", other: "Other", claim: "Claims" };
+export function indexKey(kind, name) { return `${kind}:${String(name).toLowerCase()}`; }
+export function indexLocation(kind, name) {
+  if (kind === "vehicle") return { folder: `Organized/Personal/Documents/Vehicles/${name}/`, file: `${safeSegment(name)} - index.html` };
+  return { folder: `Organized/Personal/Documents/Indexes/${KIND_DIR[kind] ?? safeSegment(kind) ?? "Other"}/`, file: `${safeSegment(name)} - index.html` };
+}
+
+async function writeIndexes(vehicles, log) {
+  const maps = new Map(); // key -> { kind, name, entries[] }
+  const bucket = (kind, name) => { const k = indexKey(kind, name); if (!maps.has(k)) maps.set(k, { kind, name, entries: [] }); return maps.get(k); };
+  const seen = new Set(); // key + file id, so the same receipt is listed once per subject
+  const add = (b, id, e) => { const k = `${indexKey(b.kind, b.name)}|${id}`; if (seen.has(k)) return; seen.add(k); b.entries.push(e); };
+
+  // receipts and the inbox items behind them (for the real file path and the readable name)
+  const rcAll = await rest("GET", "receipts?select=id,merchant,amount,date,card,entity,home_path&order=date.desc&limit=1000");
+  const inboxAll = await rest("GET", "inbox_items?status=eq.resolved&filed=not.is.null&select=id,title,read_result,filed,copied_path,captured_at&order=captured_at.desc&limit=1000");
+  const inboxByReceipt = new Map(inboxAll.filter((f) => f.filed?.receipt_id).map((f) => [f.filed.receipt_id, f]));
+  const rcById = new Map(rcAll.map((r) => [r.id, r]));
+  const fileOf = (rc, inbox) => rc?.home_path || (inbox?.copied_path ? String(inbox.copied_path).split("\n")[0] : null);
+  const receiptEntry = (rc) => { const inbox = inboxByReceipt.get(rc.id); return { date: rc.date, type: "receipt", title: inbox?.title || rc.merchant, amount: Number(rc.amount), card: rc.card ?? null, file: fileOf(rc, inbox), note: rc.card ? "copy pending" : "waiting for its card" }; };
+
+  // (1) vehicles, from what the app read on each filed document (any filed item with a vehicle, receipt or not)
+  const shortOf = new Map(vehicles.map((v) => [v.id, v.short]));
+  for (const f of inboxAll.filter((f) => f.filed?.vehicle_id && shortOf.has(f.filed.vehicle_id))) {
+    const b = bucket("vehicle", shortOf.get(f.filed.vehicle_id)); const rc = rcById.get(f.filed.receipt_id);
+    add(b, f.filed.receipt_id || f.id, { date: f.read_result?.date || String(f.captured_at).slice(0, 10), type: f.read_result?.kind || (f.read_result?.warranty_relevant ? "warranty paper" : "document"), title: f.title, amount: rc ? Number(rc.amount) : (typeof f.read_result?.amount === "number" ? f.read_result.amount : null), card: rc?.card ?? null, file: fileOf(rc, f) , note: rc && !rc.card ? "waiting for its card" : "copy pending" });
+  }
+  // (2) subjects the household tagged (any kind)
+  const links = await rest("GET", "receipt_subjects?removed_at=is.null&select=receipt_id,subjects(kind,name)&limit=2000");
+  for (const l of links) { const rc = rcById.get(l.receipt_id); if (!rc || !l.subjects) continue; add(bucket(l.subjects.kind, l.subjects.name), rc.id, receiptEntry(rc)); }
+  // (3) businesses, from the entity a receipt was classified to (personal spending needs no index)
+  for (const rc of rcAll) if (rc.entity && !/^(personal|)$/i.test(rc.entity)) add(bucket("business", rc.entity), rc.id, receiptEntry(rc));
+  // (4) claims: one index of every claim with its documents; a claim tied to a vehicle is also listed there
+  const claims = await rest("GET", "claims?select=id,title,status,expected_amount,created_at,vehicle_id,documents&order=created_at.desc&limit=300").catch(() => []);
+  const inboxById = new Map(inboxAll.map((f) => [f.id, f]));
+  for (const c of claims) {
+    const cb = bucket("claim", "All claims");
+    add(cb, `claim-${c.id}`, { date: String(c.created_at).slice(0, 10), type: `claim (${c.status})`, title: c.title, amount: c.expected_amount != null ? Number(c.expected_amount) : null, card: null, file: null, note: "see Claims in the app" });
+    for (const d of c.documents ?? []) { const f = d.inbox_id ? inboxById.get(d.inbox_id) : null; add(cb, `claimdoc-${c.id}-${d.inbox_id ?? d.name}`, { date: f?.read_result?.date || String(c.created_at).slice(0, 10), type: `claim document: ${d.role ?? ""}`, title: d.name ?? f?.title ?? "document", amount: null, card: null, file: f?.copied_path ? String(f.copied_path).split("\n")[0] : null, note: "not filed yet" }); }
+    if (c.vehicle_id && shortOf.has(c.vehicle_id)) add(bucket("vehicle", shortOf.get(c.vehicle_id)), `claim-${c.id}`, { date: String(c.created_at).slice(0, 10), type: `claim (${c.status})`, title: c.title, amount: c.expected_amount != null ? Number(c.expected_amount) : null, card: null, file: null, note: "see Claims in the app" });
+  }
+
+  const master = [];
+  for (const b of maps.values()) {
+    if (!b.entries.length) continue;
+    const loc = indexLocation(b.kind, b.name);
+    const dir = destFolder(loc.folder);
     if (!dir) continue;
-    const out = join(dir, `${safeSegment(v.short)} - index.html`);
-    if (DRY) { log.push(`index: would write ${out} (${entries.length} items)`); continue; }
+    const out = join(dir, loc.file);
+    master.push({ kind: b.kind, name: b.name, count: b.entries.length, out });
+    if (DRY) { log.push(`index: would write ${out} (${b.entries.length} items)`); continue; }
     mkdirSync(dir, { recursive: true });
     const tmp = out + ".tmp";
-    writeFileSync(tmp, vehicleIndexHtml(v.name || v.short, dir, entries));
+    writeFileSync(tmp, vehicleIndexHtml(b.name, dir, b.entries));
     renameSync(tmp, out);
-    log.push(`index: ${out} (${entries.length} items)`);
+    log.push(`index: ${out} (${b.entries.length} items)`);
+  }
+  if (master.length && !DRY) {
+    const dir = destFolder("Organized/Personal/Documents/Indexes/");
+    if (dir) {
+      mkdirSync(dir, { recursive: true });
+      const rows = master.sort((x, y) => x.kind.localeCompare(y.kind) || x.name.localeCompare(y.name)).map((m) => `<tr><td>${esc(m.kind)}</td><td><a href="${esc(relative(dir, m.out).split(sep).map(encodeURIComponent).join("/"))}">${esc(m.name)}</a></td><td class="r">${m.count}</td></tr>`).join("\n");
+      const html = `<!doctype html><meta charset="utf-8"><title>All indexes</title><style>body{font:15px -apple-system,system-ui,sans-serif;margin:32px auto;max-width:700px;padding:0 16px}table{border-collapse:collapse;width:100%}td,th{padding:7px 8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}a{color:#0a58ca;text-decoration:none}</style><h1>Everything with an index</h1><p>One page for each vehicle, home item, person, trip, business and claim set that has filed paperwork. Generated by the filing agent.</p><table><tr><th>Kind</th><th>Subject</th><th class="r">Items</th></tr>${rows}</table>`;
+      const out = join(dir, "All indexes.html"); const tmp = out + ".tmp"; writeFileSync(tmp, html); renameSync(tmp, out);
+    }
   }
 }
 
@@ -208,7 +251,7 @@ async function main() {
       if (!DRY) await rest("PATCH", `inbox_items?id=eq.${it.id}`, { copy_error: String(e.message).slice(0, 300) }, { Prefer: "return=minimal" }).catch(() => {});
     }
   }
-  try { await writeVehicleIndexes(vehicles ?? [], log); } catch (e) { log.push(`vehicle index: ${e.message}`); }
+  try { await writeIndexes(vehicles ?? [], log); } catch (e) { log.push(`vehicle index: ${e.message}`); }
   const summary = items.length ? `${ok} copied, ${failed} failed${waiting ? `, ${waiting} waiting for a card` : ""}` : "nothing waiting";
   if (!DRY) await rest("POST", "system_status?on_conflict=key", [{ key: "sync_filing", state: failed ? "error" : "ok", summary: `Filing agent: ${summary}`, value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});
   for (const l of log) console.log(l);

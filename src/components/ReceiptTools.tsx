@@ -2,8 +2,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Transaction, Receipt } from "@/lib/data-money";
+import { SUBJECT_KINDS, type Subject } from "@/lib/subjects";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
-import { attachProof, explainCharge, answerReceiptQuestion, setReceiptCard } from "@/app/money/actions";
+import { attachProof, explainCharge, answerReceiptQuestion, setReceiptCard, addReceiptSubject, removeReceiptSubject } from "@/app/money/actions";
 
 const money = (n: number) => "$" + n.toFixed(2);
 
@@ -120,6 +121,42 @@ export function CardPicker({ r, known }: { r: Receipt; known: string[] }) {
         <div className="flex gap-2">
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name and last four, e.g. Amex 1004" className="min-h-10 flex-1 rounded-lg border border-line bg-bg px-3 text-sm" />
           <button disabled={busy || !text.trim()} onClick={() => save(text)} className="min-h-10 px-3 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50">Save</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Belongs to": what this receipt is for. Each thing gets its own index page in the filing system, so the receipt can be
+// found from the Sienna, the house, a trip or a person without being copied anywhere.
+export function SubjectPicker({ r, subjects, linked }: { r: Receipt; subjects: Subject[]; linked: string[] }) {
+  const [mine, setMine] = useState<Subject[]>(subjects.filter((s) => linked.includes(s.id)));
+  const [all, setAll] = useState<Subject[]>(subjects);
+  const [adding, setAdding] = useState(false);
+  const [kind, setKind] = useState<string>("vehicle");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const add = async (k: string, n: string) => {
+    setBusy(true); const x = await addReceiptSubject(r.id, k, n); setBusy(false);
+    if (x.ok && "id" in x && x.id) { const s = { id: x.id, kind: k, name: n.trim() }; setMine((m) => (m.some((q) => q.id === s.id) ? m : [...m, s])); setAll((a) => (a.some((q) => q.id === s.id) ? a : [...a, s])); setAdding(false); setName(""); }
+  };
+  const drop = async (s: Subject) => { await removeReceiptSubject(r.id, s.id); setMine((m) => m.filter((q) => q.id !== s.id)); };
+  const free = all.filter((s) => !mine.some((m) => m.id === s.id));
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="text-xs text-muted">Belongs to {mine.length === 0 && <span className="text-amber font-semibold">nothing yet</span>}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {mine.map((s) => <button key={s.id} onClick={() => drop(s)} title="Tap to remove" className="min-h-9 px-3 rounded-full bg-soft text-sm font-semibold">{s.name} ×</button>)}
+        {free.slice(0, 8).map((s) => <button key={s.id} disabled={busy} onClick={() => add(s.kind, s.name)} className="min-h-9 px-3 rounded-full border border-line text-sm">+ {s.name}</button>)}
+        <button onClick={() => setAdding(true)} className="min-h-9 px-3 rounded-full border border-line text-sm font-semibold text-accent">+ New</button>
+      </div>
+      {adding && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-1">{SUBJECT_KINDS.map((k) => <button key={k.kind} onClick={() => setKind(k.kind)} className={`min-h-8 px-2.5 rounded-full text-xs font-semibold ${kind === k.kind ? "bg-accent text-white" : "border border-line"}`}>{k.label}</button>)}</div>
+          <div className="flex gap-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Sienna, Kitchen remodel, Moab trip" className="min-h-10 flex-1 rounded-lg border border-line bg-bg px-3 text-sm" />
+            <button disabled={busy || !name.trim()} onClick={() => add(kind, name)} className="min-h-10 px-3 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50">Add</button>
+          </div>
         </div>
       )}
     </div>
