@@ -188,6 +188,14 @@ async function main() {
           writeFileSync(undoFile, JSON.stringify(log)); moved += g.length; console.log(`  moved ${moved}/${todo.length}`);
         }
       }
+      // tell the app how many messages sit in Dashboard/Suspicious (a count only: no senders, no subjects)
+      try {
+        const st = await c.status(FOLDERS.suspicious, { messages: true }).catch(() => null);
+        if (st && SB && SK) {
+          const n = st.messages ?? 0;
+          await rest("POST", "system_status?on_conflict=key", [{ key: "mail_suspicious", state: "ok", summary: n ? `${n} message${n === 1 ? "" : "s"} held as suspicious. Open Mail › Dashboard › Suspicious to look. Nothing in there was opened, sent to the model, or made a task.` : "No messages held as suspicious.", value_num: n, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" });
+        }
+      } catch { /* the status line is a convenience; the move already happened */ }
       console.log(`\nDone: ${moved} moved. Undo with:\n  node scripts/icloud-file.mjs --undo ${undoFile}`);
     } finally { lock.release(); }
   } finally { try { await c.logout(); } catch { /* closed */ } }
