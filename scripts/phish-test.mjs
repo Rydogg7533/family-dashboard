@@ -7,6 +7,8 @@ assert.equal(s("applearcade@insideapple.apple.com", "Apple Arcade").length, 0);
 assert.equal(s("welcome@welcome.americanexpress.com", "American Express").length, 0);
 assert.equal(s("x@purchase.com", "Purchase Desk").length, 0, "purchase is not chase");
 assert.equal(s("x@pineapple-farms.com", "Pineapple Farms").length, 0);
+assert.equal(s("store+1@g.shopifyemail.com", "Some Store").length, 0);
+assert.equal(s("mail@mail2.wellsfargorewards.com", "Wells Fargo Rewards").length, 0);
 assert.ok(s("support@wellsfargo-secure.com", "Wells Fargo").length > 0);
 assert.ok(s("service@paypa1.com", "Service").length > 0);
 assert.ok(s("x@evilapple.com", "Apple Support").length > 0, "suffix trick");

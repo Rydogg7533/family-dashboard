@@ -90,6 +90,7 @@ async function main() {
       const fresh = eligible.filter((r) => cache[keyOf(r)]?.v !== PV);
       console.log(`${user}: ${rows.length} in the inbox; ${cands.length} in this window need a judgment (the free rules could not place them).`);
       console.log(`  suspicious (never sent to the model, never a task): ${sus.length}${sus.length ? `   e.g. ${sus.slice(0, 4).map((r) => `${r.address} (${r.cls.why})`).join(" | ")}` : ""}`);
+      if (sus.length) { const bd = {}; for (const r of sus) { const k = `${r.domain} | ${r.cls.why}`; bd[k] = (bd[k] || 0) + 1; } console.log("  flagged senders (check for real ones; they go to Dashboard/Suspicious, undoable):"); for (const [k, n] of Object.entries(bd).sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`      ${String(n).padStart(3)}  ${k.slice(0, 120)}`); }
       console.log(`  never-send list: ${neverList.length} entries; ${never.length} of these messages are kept out of the model and stay in your inbox.`);
       console.log(`  already judged (cached): ${eligible.length - fresh.length}; to ask the model: ${fresh.length}.`);
       const est = fresh.length * (950 * PRICE_IN + 350 * PRICE_OUT) / 1e6;
@@ -139,7 +140,7 @@ async function main() {
       if (!APPLY) { console.log(ASK ? "\nNothing else changed. Review the lists above; add anyone to the never-send file and re-run --ask, or run with --apply." : "\nDRY RUN: nothing sent, nothing changed. Add --ask to send the eligible ones to the model."); return; }
 
       // ---- apply: cached answers only ----
-      const todo = [...sus.map((r) => ({ r, act: "suspicious" })), ...plan.filter((p) => p.act !== "stay")].slice(0, LIMIT);
+      const todo = [...sus.map((r) => ({ r, act: "suspicious" })), ...plan.filter((p) => p.act !== "stay")].sort((a, b) => b.r.date - a.r.date).slice(0, LIMIT);   // newest first, all kinds mixed
       if (!todo.length) { console.log("\nNothing to apply (no cached answers for this slice? run with --ask first)."); return; }
       const env = readEnv(join(secrets, "family-dashboard.env"));
       const SB = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL, SK = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;

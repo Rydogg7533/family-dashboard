@@ -8,7 +8,7 @@ export const BRANDS = {
   microsoft: ["microsoft.com", "outlook.com", "live.com", "office.com", "xbox.com", "microsoftonline.com"],
   amazon: ["amazon.com", "amazon.co.uk", "amazonaws.com", "amazon.ca"],
   paypal: ["paypal.com"],
-  "wells fargo": ["wellsfargo.com", "wf.com"],
+  "wells fargo": ["wellsfargo.com", "wf.com", "wellsfargorewards.com", "wellsfargoemail.com", "wellsfargoadvisors.com"],
   "american express": ["americanexpress.com", "aexp.com"],
   amex: ["americanexpress.com", "aexp.com"],
   chase: ["chase.com", "jpmorgan.com", "jpmorganchase.com"],
@@ -28,7 +28,7 @@ export const BRANDS = {
   "state farm": ["statefarm.com", "statefarmservice.com"],
   geico: ["geico.com"],
   experian: ["experian.com"],
-  shopify: ["shopify.com"],
+  shopify: ["shopify.com", "shopifyemail.com", "myshopify.com", "shopifysvc.com"],
 };
 const onDomain = (domain, list) => list.some((d) => domain === d || domain.endsWith("." + d)); // exact or a real subdomain; "evilapple.com" does not match "apple.com"
 const FOLD = (s) => String(s || "").toLowerCase().replace(/[0|]/g, "o").replace(/[1!]/g, "l").replace(/rn/g, "m");
