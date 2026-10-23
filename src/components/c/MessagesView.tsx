@@ -71,7 +71,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
   }
 
   return (
-    <div className="flex flex-col gap-3 min-h-[calc(100dvh-var(--page-bottom)-170px)]">
+    <div className="flex flex-col gap-3 pb-16">
       <div className="text-[11px] font-bold text-muted">{thread.name.toUpperCase()} · {thread.members.length} people · today</div>
       {all.map((m) => (
         <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] ${m.mine ? "self-end items-end" : "self-start"}`}>
@@ -119,7 +119,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
         </div>
       )}
 
-      <div className="mt-auto sticky bottom-[calc(var(--bar-bottom)+var(--ask-h)+4px)] transition-[bottom] duration-200 bg-bg/95 backdrop-blur border-t border-line pt-2 pb-1 -mx-1 px-1">
+      <div className="fixed left-0 right-0 bottom-[var(--bar-bottom)] z-10 bg-bg/95 backdrop-blur border-t border-line"><div className="max-w-md mx-auto px-5 pt-2 pb-2">
         {waiting.map((w) => (
           <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80">
             <div>{w.text}</div>
@@ -132,7 +132,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
           <button className="min-h-11 px-3.5 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" disabled={!mirrorOk || !text.trim() || busy}>Send</button>
         </form>
         <div className="text-[11px] text-muted mt-1">Sent as you, from your own Mac, so it appears in Messages on every device. {!mirrorOk && <a href="messages://" className="font-semibold text-accent">Open in Messages</a>}</div>
-      </div>
+      </div></div>
       {el}
     </div>
   );
