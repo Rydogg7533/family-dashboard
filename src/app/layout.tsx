@@ -13,6 +13,7 @@ export const metadata: Metadata = {
   description: "What needs you today.",
   robots: { index: false, follow: false },
   manifest: "/manifest.webmanifest",
+  icons: { icon: "/icon-192.png", apple: "/icon-180.png" },
 };
 export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1 };
 
