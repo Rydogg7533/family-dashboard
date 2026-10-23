@@ -3,7 +3,7 @@
 //   node scripts/email-receipts.mjs --account admin@shvr.co                 # DRY RUN (default): counts only, writes nothing
 //   node scripts/email-receipts.mjs --account admin@shvr.co --apply         # records sightings, copies attachments into the app Inbox
 //   node scripts/email-receipts.mjs --account ryanrossiter@icloud.com --apply   # iCloud (IMAP) works the same way
-//   options: --months 12 (how far back; default 12)   --min-kb 20 (images smaller than this are logos, skipped)
+//   options: --months 12 (how far back; default 12)   --window 12-24 (a slice, in months ago: here the year before last year)   --min-kb 20 (images smaller than this are logos, skipped)
 // For every inbox message the free rules call "money" (receipt, order, invoice, statement) in the window:
 //   1. SIGHTING  one recurring_observations row (source 'receipt', merchant key, date, visible amount, ref = message id). Append-only; a
 //                re-run adds nothing twice. This is what Subscriptions reads to spot repeat charges.
@@ -24,7 +24,12 @@ const APPLY = args.includes("--apply");
 const account = option(args, "--account"); if (!account) { console.error("STOP: pass --account <address>"); process.exit(2); }
 const MONTHS = parseInt(option(args, "--months") || "12", 10);
 const MIN_KB = parseInt(option(args, "--min-kb") || "20", 10);
-const since = new Date(); since.setMonth(since.getMonth() - MONTHS);
+// Window, in months ago: --window 0-12 is the last year; --window 12-24 is the year before. (--months 12 = --window 0-12.)
+const WIN = (option(args, "--window") || `0-${MONTHS}`).split("-").map((x) => parseInt(x, 10));
+const [WIN_NEW, WIN_OLD] = [WIN[0] || 0, WIN[1] || MONTHS];
+const since = new Date(); since.setMonth(since.getMonth() - WIN_OLD);
+const before = WIN_NEW > 0 ? (() => { const d = new Date(); d.setMonth(d.getMonth() - WIN_NEW); return d; })() : null;
+const WIN_TXT = `${WIN_NEW}-${WIN_OLD} months ago`;
 const READABLE = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" };
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -49,10 +54,10 @@ const isIcloud = /@(icloud|me|mac)\.com$/i.test(account);
 async function* moneyMail() {
   if (!isIcloud) {
     const { api } = openGmail(["--account", account], { allowWrite: false });
-    const q = `in:inbox after:${since.toISOString().slice(0, 10).replace(/-/g, "/")}`;
+    const q = `in:inbox after:${since.toISOString().slice(0, 10).replace(/-/g, "/")}${before ? ` before:${before.toISOString().slice(0, 10).replace(/-/g, "/")}` : ""}`;
     const ids = []; let page = "";
     do { const r = await api(`/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=500${page ? `&pageToken=${page}` : ""}`); for (const m of r.messages || []) ids.push(m.id); page = r.nextPageToken || ""; } while (page);
-    console.log(`${ids.length} inbox messages in the last ${MONTHS} months`);
+    console.log(`${ids.length} inbox messages, ${WIN_TXT}`);
     let n = 0;
     for (const id of ids) {
       if (++n % 200 === 0) process.stdout.write(`\r  checked ${n}/${ids.length}`);
@@ -73,8 +78,8 @@ async function* moneyMail() {
     const lock = await c.getMailboxLock("INBOX", { readOnly: true });
     try {
       const uidv = String(c.mailbox.uidValidity);
-      const uids = await c.search({ since }, { uid: true });
-      console.log(`${uids.length} inbox messages in the last ${MONTHS} months`);
+      const uids = await c.search(before ? { since, before } : { since }, { uid: true });
+      console.log(`${uids.length} inbox messages, ${WIN_TXT}`);
       const money = [];
       for (let i = 0; i < uids.length; i += 500) {
         for await (const m of c.fetch(uids.slice(i, i + 500).join(","), { uid: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted"] }, { uid: true })) {
@@ -125,7 +130,7 @@ async function main() {
         options: ["Receipt", "Bill", "Statement", "Form", "Something else"], file_path: key, mime: f.mime, size_bytes: buf.length, sha256: hash, created_by: person, for_person: "Ryan" }], { Prefer: "return=minimal" });
     }
   }
-  console.log(`\n${APPLY ? "APPLIED" : "DRY RUN"} ${account}: ${stats.money} receipt/statement emails in ${MONTHS} months`);
+  console.log(`\n${APPLY ? "APPLIED" : "DRY RUN"} ${account}: ${stats.money} receipt/statement emails, ${WIN_TXT}`);
   console.log(`  sightings: ${stats.sightings} new${stats.seen ? `, ${stats.seen} already recorded` : ""}`);
   console.log(`  documents to the Inbox: ${stats.docs}${stats.dupes ? `, ${stats.dupes} already there` : ""}; ${stats.bodyOnly} body-only receipts (sighting only); ${stats.skipped} tiny images/logos skipped`);
   if (examples.length) { console.log("  examples:"); for (const x of examples) console.log(`    ${x}`); }

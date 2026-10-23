@@ -5,7 +5,7 @@
 //   node scripts/icloud-file.mjs --apply --limit 200      # moves the NEWEST 200 that would move (review the dry run first)
 //   node scripts/icloud-file.mjs --apply                  # moves everything the dry run showed
 //   node scripts/icloud-file.mjs --undo <file printed by the run>   # puts those messages back in the inbox
-//   options: --keep tiller.com,kalshi.com (senders to leave alone)  --months 12  --env <icloud env file>
+//   options: --keep tiller.com,kalshi.com (senders to leave alone)  --months 12  --window 0-12 (only mail this many months ago; then 12-24, 24-36 ...)  --env <icloud env file>
 //
 // What it does, and only this: MOVES mail out of INBOX into folders it creates under "Dashboard":
 //   Handled   marketing, one-time codes, automated no-reply, shipping updates          (within the last 12 months)
@@ -44,7 +44,9 @@ const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : un
 const APPLY = args.includes("--apply");
 const UNDO = opt("--undo");
 const LIMIT = opt("--limit") ? parseInt(opt("--limit"), 10) : Infinity;
-const MONTHS = parseInt(opt("--months") || "12", 10);
+const MONTHS = parseInt(opt("--months") || "12", 10); // how old counts as "old" (the Archive rule)
+const WIN = (opt("--window") || "0-9999").split("-").map((x) => parseInt(x, 10)); // only touch mail in this slice, in months ago: 0-12, then 12-24, ...
+const WIN_NEW_MS = Date.now() - (WIN[0] || 0) * 30.44 * 86400_000, WIN_OLD_MS = Date.now() - (WIN[1] || 9999) * 30.44 * 86400_000;
 const keep = (opt("--keep") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
 const readEnv = (p) => { const o = {}; if (!existsSync(p)) return o; for (const l of readFileSync(p, "utf8").split("\n")) { const m = l.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; };
 const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
@@ -75,9 +77,9 @@ async function main() {
           messageId: (m.envelope?.messageId || "").replace(/^<|>$/g, ""), listUnsubscribe: !!hdr(m.headers, "list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(hdr(m.headers, "precedence")), autoSubmitted: !!hdr(m.headers, "auto-submitted") && !/^no$/i.test(hdr(m.headers, "auto-submitted")) });
       }
       rows.sort((x, y) => y.date - x.date); // newest first
-      const plan = rows.map((r) => ({ ...r, ...classify(r, { months: MONTHS, keep }) }));
+      const plan = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, ...classify(r, { months: MONTHS, keep }) }));
       const by = (k) => plan.filter((p) => p.to === k);
-      console.log(`${user}: ${rows.length} messages in the inbox.`);
+      console.log(`${user}: ${rows.length} messages in the inbox; ${plan.length} in this window (${WIN[0] || 0}-${WIN[1] || "all"} months ago).`);
       for (const k of ["handled", "money", "records", "archive"]) { const l = by(k); console.log(`  → ${FOLDERS[k].padEnd(40)} ${String(l.length).padStart(5)}${l.length ? `   e.g. ${l.slice(0, 3).map((p) => `${p.address} "${p.subject.slice(0, 40)}"`).join(" | ")}` : ""}`); }
       const stay = plan.filter((p) => !p.to);
       const stays = {}; for (const p of stay) stays[p.why] = (stays[p.why] || 0) + 1;
