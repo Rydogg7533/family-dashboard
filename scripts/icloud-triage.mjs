@@ -26,6 +26,7 @@ const ASK = args.includes("--ask"), APPLY = args.includes("--apply");
 const MONTHS = parseInt(opt("--months") || "12", 10);
 const LIMIT = opt("--limit") ? parseInt(opt("--limit"), 10) : Infinity;
 const MODEL_LIMIT = parseInt(opt("--model-limit") || "300", 10);
+const TASK_DAYS = parseInt(opt("--task-days") || "21", 10);   // older "needs you" mail is not turned into a task; it stays in the inbox
 const INCLUDE_WHENEVER = args.includes("--include-whenever");
 const MODEL = opt("--model") || "claude-haiku-5-5";
 const API = opt("--anthropic-url") || "https://api.anthropic.com/v1/messages";
@@ -48,9 +49,10 @@ This mailbox is being sorted for a household records system, so ALSO answer thes
 export const triageSystem = (today) => systemPrompt(today) + EXTRA;
 
 // Pure: turn one cached model answer into a destination. Returns { act: "task"|"records"|"handled"|"stay", why }.
-export function decideFromAnswer(d, { includeWhenever = false } = {}) {
+export function decideFromAnswer(d, { includeWhenever = false, ageDays = 0, taskDays = 21 } = {}) {
   if (!d) return { act: "stay", why: "not judged" };
   const wantsAction = d.needs_action && ["reply", "do", "decide"].includes(d.kind);
+  if (wantsAction && ageDays > taskDays) return { act: "stay", why: `needs you, but ${Math.round(ageDays)} days old (left in the inbox)` };
   if (wantsAction && (includeWhenever || d.urgency !== "whenever")) return { act: "task", why: d.title || d.why || "" };
   if (wantsAction) return { act: "stay", why: "needs you, no deadline (left in the inbox)" };
   if (d.keep || d.subscription) return { act: "records", why: d.why || "worth keeping" };
@@ -117,7 +119,7 @@ async function main() {
 
       // ---- batch review: what the cached answers would do ----
       const cur = (r) => (cache[keyOf(r)]?.v === PV ? cache[keyOf(r)] : null);
-      const plan = eligible.map((r) => ({ r, d: cur(r), ...decideFromAnswer(cur(r), { includeWhenever: INCLUDE_WHENEVER }) }));
+      const plan = eligible.map((r) => ({ r, d: cur(r), ...decideFromAnswer(cur(r), { includeWhenever: INCLUDE_WHENEVER, ageDays: (Date.now() - r.date) / 86400_000, taskDays: TASK_DAYS }) }));
       const groups = { task: [], records: [], handled: [], stay: [] }; for (const p of plan) groups[p.act].push(p);
       if (plan.some((p) => p.d)) {
         console.log("\nBATCH REVIEW (from the saved answers):");
@@ -126,8 +128,13 @@ async function main() {
         show("KEEP FOR RECORDS → Dashboard/Records", groups.records, (p) => `${p.r.address.slice(0, 28).padEnd(28)} ${p.r.subject.slice(0, 55)}`);
         show("NOTHING TO DO → Dashboard/Handled", groups.handled, (p) => `${p.r.address.slice(0, 28).padEnd(28)} ${p.r.subject.slice(0, 55)}`);
         show("STAYS IN THE INBOX", groups.stay, (p) => `${p.r.address.slice(0, 28).padEnd(28)} ${p.why}`);
-        const subs = plan.filter((p) => p.d?.subscription?.service);
-        if (subs.length) { console.log(`\nINFERRED SUBSCRIPTIONS (check these; they are your test of the system): ${subs.length}`); for (const p of subs.slice(0, 25)) console.log(`      ${String(p.d.subscription.service).slice(0, 26).padEnd(26)} ${p.d.subscription.amount != null ? "$" + p.d.subscription.amount : "?"} ${p.d.subscription.cycle || "?"}   (${p.r.address})`); }
+        const subs = new Map();
+        for (const p of plan.filter((x) => x.d?.subscription?.service)) {
+          const sv = p.d.subscription, k = String(sv.service).toLowerCase().replace(/\(.*?\)/g, "").replace(/\s+/g, " ").trim();
+          const g = subs.get(k) || { name: String(sv.service).replace(/\s*\(.*$/, ""), n: 0, amount: null, cycle: null, from: p.r.address, last: 0 };
+          g.n++; g.amount = g.amount ?? sv.amount ?? null; g.cycle = g.cycle || sv.cycle || null; g.last = Math.max(g.last, p.r.date); subs.set(k, g);
+        }
+        if (subs.size) { console.log(`\nINFERRED SUBSCRIPTIONS, grouped (${subs.size} services; your test of the system):`); for (const g of [...subs.values()].sort((a, b) => b.n - a.n).slice(0, 45)) console.log(`      ${g.name.slice(0, 30).padEnd(30)} ${String(g.n).padStart(3)}x  ${g.amount != null ? "$" + g.amount : "$?"}  ${g.cycle || "?"}   last ${new Date(g.last).toISOString().slice(0, 10)}  (${g.from})`); }
       }
       if (!APPLY) { console.log(ASK ? "\nNothing else changed. Review the lists above; add anyone to the never-send file and re-run --ask, or run with --apply." : "\nDRY RUN: nothing sent, nothing changed. Add --ask to send the eligible ones to the model."); return; }
 
