@@ -94,7 +94,7 @@ async function main() {
   for (const c of family) {
     const members = [...new Set(c.handles.split("|").map(nameOf))].sort();
     const kind = c.style === 43 ? "group" : "direct";
-    const id = `${kind}:${members.join("+")}`.replace(/[^\w:+@.-]+/g, "_");
+    const id = `${kind}-${members.join("-")}`.toLowerCase().replace(/[^a-z0-9-]+/g, "_"); // plain slug: safe in a URL
     if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [] });
     const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name;
   }
@@ -127,6 +127,13 @@ async function main() {
   // write (upsert; a re-run changes nothing that is already the same)
   for (let i = 0; i < threadRows.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", threadRows.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
+  // mirror copies only: drop threads that no longer exist under these ids (renamed or no longer family) and lines past the window
+  const ids = threadRows.map((t) => t.id);
+  if (ids.length) {
+    const inList = `(${ids.map((x) => `"${x}"`).join(",")})`;
+    await rest("DELETE", `messages?person=eq.${PERSON}&thread_id=not.in.${inList}`, undefined, { Prefer: "return=minimal" });
+    await rest("DELETE", `messages_threads?person=eq.${PERSON}&id=not.in.${inList}`, undefined, { Prefer: "return=minimal" });
+  }
   const cutoff = new Date(Date.now() - DAYS * 86400e3).toISOString();
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
 
