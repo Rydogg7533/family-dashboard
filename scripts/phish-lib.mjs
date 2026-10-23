@@ -3,10 +3,10 @@
 // and never has its attachments copied. It is moved to Dashboard/Suspicious (undoable) so a person can look.
 // Not perfect: a false positive just lands in that folder; a miss is still possible, so tasks also never carry email links.
 export const BRANDS = {
-  apple: ["apple.com", "icloud.com", "me.com", "insideapple.apple", "id.apple.com", "post.gs-savings.apple"],
-  google: ["google.com", "gmail.com", "youtube.com", "googlemail.com"],
+  apple: ["apple", "apple.com", "icloud.com", "me.com", "insideapple.apple", "id.apple.com", "post.gs-savings.apple"],
+  google: ["fitbit.com", "google.com", "gmail.com", "youtube.com", "googlemail.com"],
   microsoft: ["microsoft.com", "outlook.com", "live.com", "office.com", "xbox.com", "microsoftonline.com"],
-  amazon: ["amazon.com", "amazon.co.uk", "amazonaws.com", "amazon.ca"],
+  amazon: ["aws.com", "amazon.com", "amazon.co.uk", "amazonaws.com", "amazon.ca"],
   paypal: ["paypal.com"],
   "wells fargo": ["wellsfargo.com", "wf.com", "wellsfargorewards.com", "wellsfargoemail.com", "wellsfargoadvisors.com"],
   "american express": ["americanexpress.com", "aexp.com"],
@@ -14,8 +14,8 @@ export const BRANDS = {
   chase: ["chase.com", "jpmorgan.com", "jpmorganchase.com"],
   "us bank": ["usbank.com"],
   "u.s. bank": ["usbank.com"],
-  comcast: ["comcast.com", "comcast.net", "xfinity.com"],
-  xfinity: ["comcast.com", "comcast.net", "xfinity.com"],
+  comcast: ["comcastbusiness.com", "comcast.com", "comcast.net", "xfinity.com"],
+  xfinity: ["comcastbusiness.com", "comcast.com", "comcast.net", "xfinity.com"],
   verizon: ["verizon.com", "verizonwireless.com", "vzw.com"],
   docusign: ["docusign.net", "docusign.com"],
   coinbase: ["coinbase.com"],
@@ -30,7 +30,7 @@ export const BRANDS = {
   experian: ["experian.com"],
   shopify: ["shopify.com", "shopifyemail.com", "myshopify.com", "shopifysvc.com"],
 };
-const onDomain = (domain, list) => list.some((d) => domain === d || domain.endsWith("." + d)); // exact or a real subdomain; "evilapple.com" does not match "apple.com"
+const onDomain = (domain, list) => list.some((d) => domain === d || domain.endsWith("." + d));   // "apple" matches anything ending in .apple // exact or a real subdomain; "evilapple.com" does not match "apple.com"
 const FOLD = (s) => String(s || "").toLowerCase().replace(/[0|]/g, "o").replace(/[1!]/g, "l").replace(/rn/g, "m");
 const words = (s) => ` ${String(s || "").toLowerCase().replace(/[^a-z0-9. ]+/g, " ")} `;
 
@@ -52,7 +52,7 @@ export function suspicion(e) {
       if (pieces.some((p) => p === token || (p.startsWith(token) && p.length <= token.length + 6))) { why.push(`domain ${domain} imitates ${brand}`); break; }
     }
   }
-  if (e.replyDomain && domain && !onDomain(e.replyDomain, [domain.split(".").slice(-2).join(".")]) && /urgent|verify|suspend|locked|unusual|confirm your|action required|password/i.test(e.subject || "")) why.push(`urgent wording and replies go to ${e.replyDomain}`);
+  if (e.replyDomain && domain && !onDomain(e.replyDomain, [domain.split(".").slice(-2).join(".")]) && /verify|suspend|locked|unusual activity|password/i.test(e.subject || "")) why.push(`urgent wording and replies go to ${e.replyDomain}`);
   return why;
 }
 // Authentication-Results can fold over several lines; fail anywhere means the sender is not who it claims.

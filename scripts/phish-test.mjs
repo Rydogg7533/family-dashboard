@@ -9,6 +9,10 @@ assert.equal(s("x@purchase.com", "Purchase Desk").length, 0, "purchase is not ch
 assert.equal(s("x@pineapple-farms.com", "Pineapple Farms").length, 0);
 assert.equal(s("store+1@g.shopifyemail.com", "Some Store").length, 0);
 assert.equal(s("mail@mail2.wellsfargorewards.com", "Wells Fargo Rewards").length, 0);
+for (const [a, n] of [["no_reply@post.applecard.apple", "Apple Card"], ["cloudwatch@aws.com", "Amazon Web Services"], ["x@e.fitbit.com", "Google Fitbit"], ["x@notifications.comcastbusiness.com", "Comcast Business"]]) assert.equal(s(a, n).length, 0, a);
+assert.ok(s("a@wh.commufa.jp", "DocuSign").length > 0);
+assert.ok(s("a@privatetoursmallorca.com", "Coinbase").length > 0);
+assert.equal(s("a@e.smithsfdsmail.com", "Smiths", "Urgent: weekend deals", { replyDomain: "e.krogermail.com" }).length, 0);
 assert.ok(s("support@wellsfargo-secure.com", "Wells Fargo").length > 0);
 assert.ok(s("service@paypa1.com", "Service").length > 0);
 assert.ok(s("x@evilapple.com", "Apple Support").length > 0, "suffix trick");
