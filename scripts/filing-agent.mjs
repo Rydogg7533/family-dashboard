@@ -73,18 +73,18 @@ export function pickName(dir, base, ext, hash, exists = existsSync, readHash = (
 export const HOLD_DAYS = 14;
 const ym = (iso) => String(iso ?? "").slice(0, 7);
 
-// Where a receipt's single file goes, or null while it waits for its card.
+// Where a receipt's single file goes, or null while it waits. Filing is one-way (never moved), so it waits until the card is firm:
+// a tap or a statement/alert line (high) files at once; a card seen only on the receipt, or sources that disagree, wait out the hold.
 export function receiptHome(rc, now = Date.now()) {
   const when = rc.date || String(rc.created_at ?? "").slice(0, 10);
   const year = String(when).slice(0, 4), month = ym(when);
   if (!/^\d{4}$/.test(year) || !/^\d{4}-\d{2}$/.test(month)) return null;
+  const age = (now - new Date(rc.created_at ?? now).getTime()) / 86400_000;
   const card = safeSegment(rc.card);
-  if (!card) {
-    const age = (now - new Date(rc.created_at ?? now).getTime()) / 86400_000;
-    if (age < HOLD_DAYS) return null; // still waiting for the card
-    return `Organized/Personal/Documents/Finance/${year}/Unplaced/${month}/`;
-  }
-  return `Organized/Personal/Documents/Finance/${year}/${card}/${month}/`;
+  const firm = !!card && rc.card_confidence !== "medium" && !rc.card_conflict;
+  if (firm) return `Organized/Personal/Documents/Finance/${year}/${card}/${month}/`;
+  if (age < HOLD_DAYS) return null; // still waiting for a firm card
+  return card ? `Organized/Personal/Documents/Finance/${year}/${card}/${month}/` : `Organized/Personal/Documents/Finance/${year}/Unplaced/${month}/`;
 }
 
 // "2026-10-20 AAA Toyota Sienna battery replacement $242.88" : the vehicle and the amount in the name, so a search finds it anywhere.
@@ -232,7 +232,7 @@ async function main() {
     try {
       let over = {}, rc = null;
       if (it.filed?.receipt_id) {
-        const rows = await rest("GET", `receipts?id=eq.${it.filed.receipt_id}&select=id,merchant,amount,date,card,created_at`);
+        const rows = await rest("GET", `receipts?id=eq.${it.filed.receipt_id}&select=id,merchant,amount,date,card,card_confidence,card_conflict,created_at`);
         rc = rows?.[0] ?? null;
         if (rc) {
           const home = receiptHome(rc);

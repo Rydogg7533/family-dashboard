@@ -10,7 +10,7 @@ import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
-type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean };
+type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();
@@ -39,6 +39,13 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
       const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
     }
+  }
+
+  // 1b. The card printed on the receipt is one vote for which card paid (medium confidence; a tap or a statement outranks it).
+  if (filed.receipt_id && r.card_last4 && /^\d{4}$/.test(String(r.card_last4))) {
+    const rows = await sb.from("receipts").select("card").not("card", "is", null).limit(200);
+    const known = ((rows.data ?? []) as { card: string }[]).map((x) => x.card).find((c) => c.replace(/\D/g, "").slice(-4) === r.card_last4);
+    await sb.rpc("record_card_vote", { p_receipt: filed.receipt_id as string, p_source: "receipt_text", p_card: known ?? `${r.card_brand && r.card_brand !== "null" ? r.card_brand : "Card"} ${r.card_last4}`, p_conf: "medium" });
   }
 
   // 2. The vehicle: service history and any warranty the paper states.

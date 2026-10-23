@@ -17,6 +17,7 @@ item: short plain description of what was bought or done (e.g. "car battery repl
 category: one of "vehicle","home","appliance_electronics","health","grocery_food","dining","fuel","other"
 for_vehicle_hint: any vehicle named or implied (make/model/year/plate last digits)|null
 warranty_relevant: true if this is a repair, part, appliance, electronics, tool or home-system purchase, or it states a warranty/return/claim window
+card_last4: the last four digits of the card paid with if printed (e.g. "1004"), else null; card_brand: "Visa"|"Mastercard"|"Amex"|"Discover"|null
 warranty_note: warranty or claim terms stated on it (e.g. "36-month free replacement")|null
 reimbursement_hint: true if it mentions reimbursement or a claim being owed back
 suggested_name: "YYYY-MM-DD Vendor what-it-is" in plain words, max 70 chars, no slashes

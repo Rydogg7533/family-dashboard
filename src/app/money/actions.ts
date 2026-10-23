@@ -42,7 +42,7 @@ export async function setReceiptCard(receiptId: string, card: string) {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false };
-  const { error } = await sb.from("receipts").update({ card: c }).eq("id", receiptId);
+  const { error } = await sb.rpc("record_card_vote", { p_receipt: receiptId, p_source: "you", p_card: c, p_conf: "high" });
   if (!error) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "receipt_card", subject: `${c}`, ref: receiptId, undoable: false }).then(() => {}, () => {});
   return { ok: !error };
 }

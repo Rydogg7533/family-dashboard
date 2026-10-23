@@ -107,8 +107,17 @@ export function CardPicker({ r, known }: { r: Receipt; known: string[] }) {
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const save = async (c: string) => { setBusy(true); const x = await setReceiptCard(r.id, c); setBusy(false); if (x.ok) { setCard(c.trim()); setTyping(false); } };
-  if (card && !typing) return <div className="text-xs text-muted">Charged to <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></div>;
+  const [confirmed, setConfirmed] = useState(false);
+  const save = async (c: string) => { setBusy(true); const x = await setReceiptCard(r.id, c); setBusy(false); if (x.ok) { setCard(c.trim()); setConfirmed(true); setTyping(false); } };
+  if (card && !typing) {
+    const weak = r.card_confidence === "medium" && !confirmed;
+    return (
+      <div className="text-xs text-muted">
+        {r.card_conflict && <span className="text-amber font-semibold">Sources disagree about the card. </span>}
+        {weak ? <>The receipt shows <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={async () => { const x = await setReceiptCard(r.id, card); if (x.ok) setConfirmed(true); }}>that&apos;s right</button> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></> : <>Charged to <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></>}
+      </div>
+    );
+  }
   const chips = Array.from(new Set([...known, "Cash"]));
   return (
     <div className="flex flex-col gap-1.5">

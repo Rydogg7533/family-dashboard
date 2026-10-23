@@ -4,9 +4,12 @@ import { receiptHome, receiptFileName, vehicleIndexHtml, indexKey, indexLocation
 const now = Date.parse("2026-10-23T12:00:00Z");
 const fresh = { date: "2026-10-20", created_at: "2026-10-22T10:00:00Z", card: null };
 assert.equal(receiptHome(fresh, now), null, "no card, fresh: waits");
-assert.equal(receiptHome({ ...fresh, card: "Amex 1004" }, now), "Organized/Personal/Documents/Finance/2026/Amex 1004/2026-10/");
+assert.equal(receiptHome({ ...fresh, card: "Amex 1004", card_confidence: "medium" }, now), null, "card only from the receipt waits");
+assert.equal(receiptHome({ ...fresh, card: "Amex 1004", card_confidence: "high", card_conflict: true }, now), null, "conflict waits");
+assert.equal(receiptHome({ ...fresh, card: "Amex 1004", card_confidence: "medium", created_at: "2026-10-01T10:00:00Z" }, now), "Organized/Personal/Documents/Finance/2026/Amex 1004/2026-10/", "weak card files after the hold");
+assert.equal(receiptHome({ ...fresh, card: "Amex 1004", card_confidence: "high" }, now), "Organized/Personal/Documents/Finance/2026/Amex 1004/2026-10/");
 assert.equal(receiptHome({ ...fresh, created_at: "2026-10-01T10:00:00Z" }, now), "Organized/Personal/Documents/Finance/2026/Unplaced/2026-10/", `no card after ${HOLD_DAYS} days`);
-assert.equal(receiptHome({ ...fresh, card: "../../etc" }, now), "Organized/Personal/Documents/Finance/2026/etc/2026-10/", "path tricks are neutralised");
+assert.equal(receiptHome({ ...fresh, card: "../../etc", card_confidence: "high" }, now), "Organized/Personal/Documents/Finance/2026/etc/2026-10/", "path tricks are neutralised");
 assert.equal(receiptHome({ date: null, created_at: null, card: "X" }, now), null);
 assert.equal(receiptFileName("2026-10-20 AAA battery", 242.88, "Sienna"), "2026-10-20 AAA battery Sienna $242.88");
 assert.equal(receiptFileName("2026-10-20 AAA Sienna battery $242.88", 242.88, "Sienna"), "2026-10-20 AAA Sienna battery $242.88", "no double add");
