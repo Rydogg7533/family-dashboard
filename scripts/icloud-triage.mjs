@@ -88,7 +88,8 @@ async function main() {
       const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => (r.cls.to === null && /needs a person/.test(r.cls.why)) || r.cls.to === "suspicious");
       const sus = cands.filter((r) => r.cls.to === "suspicious"), never = cands.filter((r) => r.cls.to !== "suspicious" && isNever(r)), eligible = cands.filter((r) => r.cls.to !== "suspicious" && !isNever(r));
       const cache = loadCache(`icloud-${user}`);
-      const isStale = (d) => !d || d.v !== PV || (d.unclear && !d.retried);   // an answer that said "preview unclear" gets one more try with the better preview
+      const UNCLEAR = /preview|unclear|too short|cut off|only html|css|markup|empty/i;
+      const isStale = (d) => !d || d.v !== PV || (!d.retried && UNCLEAR.test(`${d.why || ""} ${d.title || ""}`));   // an answer that said "preview unclear" gets one more try with the better preview
       const fresh = eligible.filter((r) => isStale(cache[keyOf(r)]));
       console.log(`${user}: ${rows.length} in the inbox; ${cands.length} in this window need a judgment (the free rules could not place them).`);
       console.log(`  suspicious (never sent to the model, never a task): ${sus.length}${sus.length ? `   e.g. ${sus.slice(0, 4).map((r) => `${r.address} (${r.cls.why})`).join(" | ")}` : ""}`);
