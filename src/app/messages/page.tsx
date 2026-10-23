@@ -26,6 +26,12 @@ export default async function Messages() {
         </section>
       )}
 
+      {threads.length === 0 && (
+        <Card className="mb-4 text-sm">
+          <div className="font-semibold mb-1">Not connected to Messages yet</div>
+          <div className="text-muted text-xs">Your family threads appear here once the Messages mirror runs on the Mac mini. Typing here then sends through Messages as you, so it shows on your phone and Melissa&apos;s like any other text. Until then, use the Messages app.</div>
+        </Card>
+      )}
       <div className="flex flex-col gap-1.5 mb-4">
         {threads.map((t) => (
           <Link key={t.id} href={`/messages/${t.id}`} className={`card flex justify-between items-center gap-2 min-h-14 !py-2.5 ${t.kind === "group" ? "!border-accent !border-2" : ""}`}>
