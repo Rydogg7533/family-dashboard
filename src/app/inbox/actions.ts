@@ -60,6 +60,14 @@ export async function recordCapture(kind: "photo" | "file" | "bulk", files: Capt
   });
   const { data: inserted, error } = await sb.from("inbox_items").insert(rows).select("id,file_path");
   const ids = (inserted ?? []).filter((r) => r.file_path).map((r) => r.id as string);
+  // Uploaded to a claim: show it on the claim right away (filing later updates this entry, never duplicates it).
+  if (claimId && !error && inserted?.length) {
+    const { data: cl } = await sb.from("claims").select("documents").eq("id", claimId).maybeSingle();
+    if (cl) {
+      const docs = [...((cl.documents as unknown[]) ?? []), ...inserted.filter((r) => r.file_path).map((r, i) => ({ role: "supporting document", inbox_id: r.id, path: r.file_path, name: files.filter((f) => f.path)[i]?.name ?? "Upload" }))];
+      await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", claimId);
+    }
+  }
   return { ok: !error, ids, created: rows.length, stored: files.filter((f) => f.path).length, duplicates, failed: files.filter((f) => !f.path).map((f) => f.name) };
 }
 

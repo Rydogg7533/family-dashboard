@@ -74,7 +74,9 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     const { data: cl } = await sb.from("claims").select("documents,created_at").eq("id", claimId).maybeSingle();
     if (cl) {
       const older = r.date && r.date < String(cl.created_at).slice(0, 10);
-      const docs = [...((cl.documents as unknown[]) ?? []), { role: older ? "original purchase" : "supporting document", inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name }];
+      const entry = { role: older ? "original purchase" : "supporting document", inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name };
+      const prior = ((cl.documents as Array<{ inbox_id?: string }>) ?? []);
+      const docs = prior.some((d) => d.inbox_id === inboxId) ? prior.map((d) => (d.inbox_id === inboxId ? entry : d)) : [...prior, entry];
       const { error } = await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", claimId);
       if (!error) { filed.claim_id = claimId; done.push(`added to the claim as ${older ? "the original purchase" : "a supporting document"}`); }
     }
