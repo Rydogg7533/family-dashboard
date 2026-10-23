@@ -110,7 +110,9 @@ async function main() {
   if (!tok.refresh_token) throw new Error("Google returned no refresh token. Revoke this app at myaccount.google.com/permissions and run again.");
 
   const granted = String(tok.scope || "").split(/\s+/);
-  const missing = SCOPES.filter((s) => !granted.includes(s));
+  // Google reports the short OpenID scopes under their long names ("email" comes back as .../auth/userinfo.email).
+  const has = (s) => granted.includes(s) || (s === "email" && granted.includes("https://www.googleapis.com/auth/userinfo.email")) || (s === "openid" && granted.includes("openid"));
+  const missing = SCOPES.filter((s) => !has(s));
   if (missing.length) throw new Error(`not all permissions were granted; missing: ${missing.map((s) => s.split("/").pop()).join(", ")}. Run again and tick every box. Nothing saved.`);
 
   const get = async (url) => { const x = await fetch(url, { headers: { Authorization: `Bearer ${tok.access_token}` } }); if (!x.ok) throw new Error(`${url.split("?")[0]} → ${x.status}`); return x.json(); };
