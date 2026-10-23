@@ -119,7 +119,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
         </div>
       )}
 
-      <div className="fixed left-0 right-0 bottom-[var(--bar-bottom)] z-10 bg-bg/95 backdrop-blur border-t border-line"><div className="max-w-md mx-auto px-5 pt-2 pb-2">
+      <div className="fixed left-0 right-0 bottom-[calc(var(--bar-bottom)-1px)] z-10 bg-bg backdrop-blur border-t border-line"><div className="max-w-md mx-auto px-5 pt-2 pb-2">
         {waiting.map((w) => (
           <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80 break-words [overflow-wrap:anywhere]">
             <div>{w.text}</div>

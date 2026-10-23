@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const items = [
   { href: "/", label: "Today" },
@@ -15,6 +15,7 @@ const moreRoots = ["/more", "/family", "/vehicles", "/messages", "/inbox", "/cal
 export function Nav() {
   const path = usePathname();
   const [handed, setHanded] = useState(0);
+  const navRef = useRef<HTMLElement>(null);
   const hidden = path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms";
   useEffect(() => {
     if (hidden) return;
@@ -22,9 +23,19 @@ export function Nav() {
     fetch("/api/badges", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (live && j) setHanded(Number(j.inboxHanded) || 0); }).catch(() => {});
     return () => { live = false; };
   }, [path, hidden]);
+  useEffect(() => {
+    // Keep fixed elements (compose bar, + button) flush with the real tab bar height.
+    const el = navRef.current;
+    if (!el) return;
+    const set = () => document.documentElement.style.setProperty("--bar-bottom", `${Math.round(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hidden]);
   if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms") return null;
   return (
-    <nav className="fixed bottom-0 inset-x-0 border-t border-line bg-bg/95 backdrop-blur">
+    <nav ref={navRef} className="fixed bottom-0 inset-x-0 border-t border-line bg-bg/95 backdrop-blur">
       <div className="max-w-md mx-auto flex justify-around px-1 pt-2 pb-[max(18px,env(safe-area-inset-bottom))] text-[11px] font-semibold">
         {items.map((it) => {
           const active = it.href === "/" ? path === "/" : it.href === "/more" ? moreRoots.some((r) => path.startsWith(r)) : path.startsWith(it.href);
