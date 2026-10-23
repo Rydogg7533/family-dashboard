@@ -38,7 +38,9 @@ const neverList = [...(existsSync(neverFile) ? readFileSync(neverFile, "utf8").s
 export const isNever = (m) => neverList.some((k) => m.address === k || m.domain === k || m.domain.endsWith("." + k));
 
 export const FOLDERS = { waiting: "Dashboard/Waiting", records: "Dashboard/Records", handled: "Dashboard/Handled" };
+const PV = 2;   // prompt version: answers saved under an older prompt are asked again
 const EXTRA = `
+TASK RULE (strict, the household hates unnecessary tasks): needs_action is true ONLY when a real person is waiting for Ryan's reply, money is due or has failed (declined card, past-due bill, payment failed), a form, signature or deadline comes from a known organization, or a decision has a real deadline. Automated notices are NOT tasks: sign-in alerts, "was this you" checks, password or app-password confirmations, balance or spending alerts, progress reports, newsletters, document-signing notices, invitations to a portal. For those answer needs_action false, kind "fyi", urgency "whenever", and set keep true only if the information is worth filing.
 This mailbox is being sorted for a household records system, so ALSO answer these two extra fields in the same JSON object:
 "keep": true|false  (true when the email holds information the household may need later even if nothing must be done now: a confirmation, booking, warranty, policy or account detail, school, medical, tax, legal or insurance document, a statement notice, a one-off purchase. false for marketing, newsletters, social notifications, codes and noise)
 "subscription": null or {"service": "<name>", "amount": <number or null>, "cycle": "weekly"|"monthly"|"yearly"|null}  (only when the email shows a recurring paid service: a renewal, a recurring receipt, a plan change, a trial ending, a price change. null otherwise)`;
@@ -82,11 +84,11 @@ async function main() {
       const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => r.cls.to === null && /needs a person/.test(r.cls.why));
       const never = cands.filter(isNever), eligible = cands.filter((r) => !isNever(r));
       const cache = loadCache(`icloud-${user}`);
-      const fresh = eligible.filter((r) => !cache[keyOf(r)]);
+      const fresh = eligible.filter((r) => cache[keyOf(r)]?.v !== PV);
       console.log(`${user}: ${rows.length} in the inbox; ${cands.length} in this window need a judgment (the free rules could not place them).`);
       console.log(`  never-send list: ${neverList.length} entries; ${never.length} of these messages are kept out of the model and stay in your inbox.`);
       console.log(`  already judged (cached): ${eligible.length - fresh.length}; to ask the model: ${fresh.length}.`);
-      const est = fresh.length * (480 * PRICE_IN + 90 * PRICE_OUT) / 1e6;
+      const est = fresh.length * (950 * PRICE_IN + 350 * PRICE_OUT) / 1e6;
       console.log(`  estimated cost for those: about $${est.toFixed(3)} (Haiku 5.5, sender + subject + date + ~220-character preview each).`);
       if (!ASK && !APPLY) {
         const by = {}; for (const r of fresh) by[r.domain] = (by[r.domain] || 0) + 1;
@@ -103,7 +105,7 @@ async function main() {
         for (const r of batch) {                                        // previews are fetched one at a time on the open connection
           const snippet = await preview(c, r.uid);
           const a = await ask({ name: "", address: r.address, date: new Date(r.date).toISOString().slice(0, 10), subject: r.subject, snippet }, { key, api: API, model: MODEL, today, system: triageSystem(today) }).catch(() => null);
-          if (a?.out) { inTok += a.inTok; outTok += a.outTok; cache[keyOf(r)] = { ...a.out, topic: String(a.out.topic || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40), at: today, from: r.address, subject: r.subject.slice(0, 120) }; }
+          if (a?.out) { inTok += a.inTok; outTok += a.outTok; cache[keyOf(r)] = { ...a.out, topic: String(a.out.topic || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40), v: PV, at: today, from: r.address, subject: r.subject.slice(0, 120) }; }
           else bad++;
           if (++i % 25 === 0) { saveCache(`icloud-${user}`, cache); console.log(`  asked ${i}/${batch.length}`); }
         }
@@ -112,7 +114,8 @@ async function main() {
       }
 
       // ---- batch review: what the cached answers would do ----
-      const plan = eligible.map((r) => ({ r, d: cache[keyOf(r)], ...decideFromAnswer(cache[keyOf(r)], { includeWhenever: INCLUDE_WHENEVER }) }));
+      const cur = (r) => (cache[keyOf(r)]?.v === PV ? cache[keyOf(r)] : null);
+      const plan = eligible.map((r) => ({ r, d: cur(r), ...decideFromAnswer(cur(r), { includeWhenever: INCLUDE_WHENEVER }) }));
       const groups = { task: [], records: [], handled: [], stay: [] }; for (const p of plan) groups[p.act].push(p);
       if (plan.some((p) => p.d)) {
         console.log("\nBATCH REVIEW (from the saved answers):");
