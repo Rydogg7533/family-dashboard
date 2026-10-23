@@ -88,27 +88,40 @@ async function main() {
   const family = chats.filter((c) => c.handles && c.handles.split("|").every((h) => FAMILY.has(h)));
   const nameOf = (h) => FAMILY.get((h || "").toLowerCase()) || h || "?";
   const sinceNs = (Date.now() / 1000 - DAYS * 86400 - APPLE_EPOCH) * 1e9;
-  let msgCount = 0; const threadRows = [], msgRows = [];
+  // Messages keeps several chats for one person (iMessage vs SMS, number vs email). The app shows ONE thread per set of people:
+  // thread id = kind + member names; lines are sent into whichever of its chats spoke most recently.
+  const groups = new Map(); // thread id -> { kind, members, chats: [] }
   for (const c of family) {
-    const members = [...new Set(c.handles.split("|").map(nameOf))];
-    const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender,
+    const members = [...new Set(c.handles.split("|").map(nameOf))].sort();
+    const kind = c.style === 43 ? "group" : "direct";
+    const id = `${kind}:${members.join("+")}`.replace(/[^\w:+@.-]+/g, "_");
+    if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [] });
+    const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name;
+  }
+  let msgCount = 0; const threadRows = [], msgRows = [], sendTarget = new Map();
+  for (const g of groups.values()) {
+    const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes
       from message m join chat_message_join cm on cm.message_id = m.ROWID left join handle h on h.ROWID = m.handle_id
-      where cm.chat_id = ${c.id} and m.date > ${Math.floor(sinceNs)} and (m.item_type = 0 or m.item_type is null) order by m.date`);
-    let last = null;
+      where cm.chat_id in (${g.chats.map((c) => c.id).join(",")}) and m.date > ${Math.floor(sinceNs)} and (m.item_type = 0 or m.item_type is null) order by m.date`);
+    let last = null, lastChat = null;
     for (const m of rows) {
       const text = bodyText(m.body, m.text);
       const mime = (m.mimes || "").split(",")[0];
       const attachment = m.att ? { kind: /^image\//.test(mime) ? "photo" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "file", label: mime ? mime.split("/")[1] : "attachment" } : null;
+      lastChat = m.chat;
       if (!text && !attachment) continue;
-      const row = { id: m.guid, thread_id: c.guid, person: PERSON, sender: m.me ? ME : nameOf(m.sender), is_me: !!m.me, at: toIso(m.date), text: text || null, attachment };
+      const row = { id: m.guid, thread_id: g.id, person: PERSON, sender: m.me ? ME : nameOf(m.sender), is_me: !!m.me, at: toIso(m.date), text: text || null, attachment };
       msgRows.push(row); last = row; msgCount++;
     }
+    // where a new line goes: the chat that spoke most recently, else the iMessage chat with the most messages
+    const target = g.chats.find((c) => c.id === lastChat) || g.chats.filter((c) => c.guid.startsWith("iMessage")).sort((x, y) => y.n - x.n)[0] || g.chats[0];
+    sendTarget.set(g.id, target.guid);
     const unread = rows.filter((m) => !m.me && !m.read).length;
-    threadRows.push({ id: c.guid, person: PERSON, kind: c.style === 43 ? "group" : "direct", name: c.name || members.filter((x) => x !== ME).join(", ") || c.ident, members: [ME, ...members.filter((x) => x !== ME)],
+    threadRows.push({ id: g.id, person: PERSON, kind: g.kind, name: g.name || g.members.filter((x) => x !== ME).join(", "), members: [ME, ...g.members.filter((x) => x !== ME)],
       last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME });
   }
-  console.log(`${now()} ${family.length} family chats, ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
+  console.log(`${now()} ${threadRows.length} family threads (${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }
 
   // write (upsert; a re-run changes nothing that is already the same)
@@ -121,12 +134,13 @@ async function main() {
   const queued = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`);
   let sent = 0, failed = 0;
   for (const o of queued) {
-    if (!family.some((c) => c.guid === o.thread_id)) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); continue; }
-    try { sendViaMessages(o.thread_id, o.text); sent++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "sent", sent_at: now() }, { Prefer: "return=minimal" }); }
+    const guid = sendTarget.get(o.thread_id);
+    if (!guid) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); continue; }
+    try { sendViaMessages(guid, o.text); sent++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "sent", sent_at: now() }, { Prefer: "return=minimal" }); }
     catch (e) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: String(e.message).slice(0, 300) }, { Prefer: "return=minimal" }); }
   }
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "numeric", minute: "2-digit" }).format(new Date());
-  const summary = `Messages: ${family.length} family threads, ${msgCount} messages in ${DAYS} days${sent ? `, sent ${sent}` : ""}${failed ? `, ${failed} not sent` : ""} · ${time}`;
+  const summary = `Messages: ${threadRows.length} family threads, ${msgCount} messages in ${DAYS} days${sent ? `, sent ${sent}` : ""}${failed ? `, ${failed} not sent` : ""} · ${time}`;
   await status(failed ? "warn" : "ok", summary);
   console.log(`${now()} ${summary}`);
 }
