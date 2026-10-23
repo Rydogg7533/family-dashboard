@@ -14,6 +14,7 @@ export const MORE_GROUPS: MoreGroup[] = [
 
 export const MORE_LINKS: MoreLink[] = [
   // Daily
+  { href: "/assistant", label: "Assistant", group: "daily", icon: "zap" },
   { href: "/inbox", label: "Inbox", group: "daily", icon: "inbox" },
   { href: "/money/receipts", label: "Receipts", group: "daily", icon: "receipt" },
   { href: "/day", label: "Today's schedule", group: "daily", icon: "clock" },

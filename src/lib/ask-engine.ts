@@ -13,6 +13,7 @@ export type Tier = 1 | 2 | 3;
 export type EventDraft = { title: string | null; date: string | null; endDate: string | null; allDay: boolean; start: string | null; end: string | null; location: string | null; reminders: number[] | null; guests: string[] };
 export type AskReply = {
   kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm" | "event_conflict" | "event_move";
+  feedId?: string | null;                               // this proposal's row in the Assistant feed
   draft?: EventDraft;
   move?: { calendarId: string; id: string; title: string; date: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string };   // an existing event to move first                                   // an event waiting for the person's Add tap
   text: string;

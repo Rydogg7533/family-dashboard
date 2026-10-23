@@ -56,7 +56,7 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     if (!d || busy) return;
     setBusy(true);
     const mv = bubbles[i].reply?.move;
-    const r = await (mv ? confirmMoveAndAdd(mv, d) : confirmAskEvent(d)).catch((e) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) }));
+    const r = await (mv ? confirmMoveAndAdd(mv, d, bubbles[i].reply?.feedId) : confirmAskEvent(d, bubbles[i].reply?.feedId)).catch((e) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) }));
     setBubbles((bs) => bs.map((x, j) => (j === i ? { ...x, eventResult: r.ok ? { ok: true, text: r.summary, href: r.href } : { ok: false, text: r.error } } : x)));
     setBusy(false);
   }
