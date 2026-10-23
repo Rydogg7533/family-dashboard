@@ -38,14 +38,23 @@ const env = readEnv(join(homedir(), "_secrets_local_only", "family-dashboard.env
 const URL_ = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
 if (!URL_ || !KEY) { console.error("STOP: SUPABASE_URL / SUPABASE_SERVICE_KEY missing"); process.exit(2); }
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
+// A dropped connection ("fetch failed") is retried quietly. If the first try actually reached the server, the retry meets a
+// duplicate (409 / "already exists"), which counts as done: every write here is keyed so it can only exist once.
+async function netFetch(url, init) {
+  for (let i = 1; ; i++) {
+    try { const r = await fetch(url, init); return { r, retried: i > 1 }; }
+    catch (e) { if (i >= 5) throw e; await new Promise((ok) => setTimeout(ok, 1500 * i)); }
+  }
+}
 async function rest(method, path, body, extra = {}) {
-  const r = await fetch(`${URL_}/rest/v1/${path}`, { method, headers: { ...H, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const t = await r.text(); if (!r.ok) throw new Error(`${method} ${path.split("?")[0]} → ${r.status} ${t.slice(0, 300)}`);
+  const { r, retried } = await netFetch(`${URL_}/rest/v1/${path}`, { method, headers: { ...H, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const t = await r.text();
+  if (!r.ok) { if (retried && r.status === 409) return null; throw new Error(`${method} ${path.split("?")[0]} → ${r.status} ${t.slice(0, 300)}`); }
   return t ? JSON.parse(t) : null;
 }
 async function upload(key, mime, buf) {
-  const r = await fetch(`${URL_}/storage/v1/object/captures/${key.split("/").map(encodeURIComponent).join("/")}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": mime, "x-upsert": "false" }, body: buf });
-  if (!r.ok) throw new Error(`upload ${key} → ${r.status} ${(await r.text()).slice(0, 200)}`);
+  const { r, retried } = await netFetch(`${URL_}/storage/v1/object/captures/${key.split("/").map(encodeURIComponent).join("/")}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": mime, "x-upsert": "false" }, body: buf });
+  if (!r.ok) { const t = (await r.text()).slice(0, 200); if (retried && /duplicate|exists|409/i.test(`${r.status} ${t}`)) return; throw new Error(`upload ${key} → ${r.status} ${t}`); }
 }
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const isIcloud = /@(icloud|me|mac)\.com$/i.test(account);
