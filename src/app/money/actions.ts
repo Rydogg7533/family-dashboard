@@ -32,3 +32,17 @@ export async function answerReceiptQuestion(receiptId: string, answer: string) {
   const { error } = await sb.from("receipts").update({ status: "unmatched", question: null, entity: answer }).eq("id", receiptId);
   return { ok: !error };
 }
+
+// Which card a filed receipt was charged to. The filing agent holds the file until this is known (or two weeks pass),
+// then files the single copy under Finance/<year>/<card>/<month>/.
+export async function setReceiptCard(receiptId: string, card: string) {
+  const c = card.replace(/\s+/g, " ").trim().slice(0, 40);
+  if (!c) return { ok: false };
+  if (!hasSupabaseEnv()) return { ok: true, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false };
+  const { error } = await sb.from("receipts").update({ card: c }).eq("id", receiptId);
+  if (!error) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "receipt_card", subject: `${c}`, ref: receiptId, undoable: false }).then(() => {}, () => {});
+  return { ok: !error };
+}

@@ -17,7 +17,7 @@ export type Transaction = {
 export type Receipt = {
   id: string; merchant: string; amount: number; date: string; source: "email" | "camera" | "upload" | "bulk" | "organized";
   file_path: string | null; transaction_id: string | null; status: "matched" | "expecting_charge" | "unmatched" | "needs_info";
-  question: string | null; thumbnail: string | null; entity: string | null; captured_by: string;
+  question: string | null; thumbnail: string | null; entity: string | null; captured_by: string; card?: string | null; home_path?: string | null;
 };
 export type Reconciliation = {
   id: string; account_id: string; period: string; kind: "card" | "debit"; status: "open" | "done" | "exceptions";

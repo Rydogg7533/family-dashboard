@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section, OpenIn, TxCard, ProofDot } from "@/components/money";
-import { ChargeResolver, ReceiptAsk, BulkDrop } from "@/components/ReceiptTools";
+import { ChargeResolver, ReceiptAsk, BulkDrop, CardPicker } from "@/components/ReceiptTools";
 import { getAccounts, getTransactions, getReceipts, getProofs, proofState, money, shortDate } from "@/lib/data-money";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
   const asks = receipts.filter((r) => r.status === "needs_info");
   const queue = tx.filter((t) => proofState(t.id, proofs).state !== "green" && t.status !== "transfer");
   const expecting = receipts.filter((r) => r.status === "expecting_charge");
+  const knownCards = Array.from(new Set(receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")));
   const matched = receipts.filter((r) => r.status === "matched");
   const resolved = matched.length, total = matched.length + asks.length + expecting.length + queue.length;
 
@@ -53,7 +54,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
       <Section title="Expecting a charge" right={`${expecting.length}`}>
         {expecting.length === 0 ? <div className="card text-muted text-sm">No receipts waiting for their charge.</div> : (
           <div className="flex flex-col gap-2">{expecting.map((r) => (
-            <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives; asks &ldquo;paid another way?&rdquo; after 10 days · <OpenIn label="Files" /></div></div>
+            <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives{r.home_path ? <> · filed at {r.home_path.replace(/^.*\/Organized\//, "Organized/")}</> : " · filed by card and month once you say which card"}</div><CardPicker r={r} known={knownCards} /></div>
           ))}</div>
         )}
       </Section>

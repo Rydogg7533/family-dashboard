@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Transaction, Receipt } from "@/lib/data-money";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
-import { attachProof, explainCharge, answerReceiptQuestion } from "@/app/money/actions";
+import { attachProof, explainCharge, answerReceiptQuestion, setReceiptCard } from "@/app/money/actions";
 
 const money = (n: number) => "$" + n.toFixed(2);
 
@@ -95,6 +95,33 @@ export function BulkDrop() {
       </div>
       <input ref={ref} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => setNames(Array.from(e.target.files ?? []).map((f) => f.name))} />
       {names.length > 0 && <div className="text-xs text-green font-semibold">{names.length} received. Each is read (local OCR), identified, matched to a charge and filed; anything unclear becomes one question above.</div>}
+    </div>
+  );
+}
+
+// "Which card?" for a filed receipt waiting on its charge. Cards you have used before are chips; a new one is typed once
+// (name and last four, e.g. Amex 1004). The filing agent files the single copy by card and month once this is set.
+export function CardPicker({ r, known }: { r: Receipt; known: string[] }) {
+  const [card, setCard] = useState<string | null>(r.card ?? null);
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async (c: string) => { setBusy(true); const x = await setReceiptCard(r.id, c); setBusy(false); if (x.ok) { setCard(c.trim()); setTyping(false); } };
+  if (card && !typing) return <div className="text-xs text-muted">Charged to <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></div>;
+  const chips = Array.from(new Set([...known, "Cash"]));
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="text-xs font-semibold text-amber">Which card was this charged to?</div>
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((c) => <button key={c} disabled={busy} onClick={() => save(c)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{c}</button>)}
+        <button onClick={() => setTyping(true)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold text-accent">Another card</button>
+      </div>
+      {typing && (
+        <div className="flex gap-2">
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name and last four, e.g. Amex 1004" className="min-h-10 flex-1 rounded-lg border border-line bg-bg px-3 text-sm" />
+          <button disabled={busy || !text.trim()} onClick={() => save(text)} className="min-h-10 px-3 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50">Save</button>
+        </div>
+      )}
     </div>
   );
 }
