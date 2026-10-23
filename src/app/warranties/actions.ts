@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { syncWarrantyTasks } from "@/lib/warranties";
 
 export type WarrantyInput = { item: string; provider?: string; for_who?: string; start?: string; end?: string; terms?: string; attachments?: { path: string; name: string; role: "receipt" | "warranty info" }[] };
 
@@ -19,7 +20,8 @@ export async function addWarranty(input: WarrantyInput): Promise<{ ok: boolean; 
   const { error } = await sb.from("warranties").insert({ item: item.slice(0, 200), provider: input.provider?.trim().slice(0, 120) || null, for_who: input.for_who?.trim().slice(0, 80) || null, start_date: d(input.start), end_date: d(input.end), terms: input.terms?.trim().slice(0, 600) || null, attachments: cleanFiles(input.attachments, user.id), added_by: user.email ?? "member" });
   if (error) return { ok: false, error: error.message };
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "warranty_added", subject: item.slice(0, 80), undoable: false }).then(() => {}, () => {});
-  revalidatePath("/warranties");
+  await syncWarrantyTasks(sb, user.id).catch(() => null);
+  revalidatePath("/warranties"); revalidatePath("/tasks");
   return { ok: true };
 }
 
@@ -42,6 +44,7 @@ export async function updateWarranty(id: string, input: WarrantyInput): Promise<
   const { error } = await sb.from("warranties").update({ item: item.slice(0, 200), provider: input.provider?.trim().slice(0, 120) || null, for_who: input.for_who?.trim().slice(0, 80) || null, start_date: d(input.start), end_date: d(input.end), terms: input.terms?.trim().slice(0, 600) || null, attachments: cleanFiles(input.attachments, user.id), updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "warranty_edited", subject: item.slice(0, 80), ref: id, undoable: false }).then(() => {}, () => {});
-  revalidatePath("/warranties");
+  await syncWarrantyTasks(sb, user.id).catch(() => null);
+  revalidatePath("/warranties"); revalidatePath("/tasks");
   return { ok: true };
 }

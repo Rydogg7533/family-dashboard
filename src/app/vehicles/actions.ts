@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { syncWarrantyTasks } from "@/lib/warranties";
 import { EXPIRY_KEYS, type ServiceEntry, type Warranty } from "@/lib/vehicle-fields";
 
 export type VehicleInput = {
@@ -51,6 +52,7 @@ export async function saveVehicle(id: string | null, v: VehicleInput): Promise<{
     id = data.id as string;
   }
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "vehicle_saved", subject: name, ref: id, undoable: false }).then(() => {}, () => {});
-  revalidatePath("/vehicles");
+  await syncWarrantyTasks(sb, user.id).catch(() => null);
+  revalidatePath("/vehicles"); revalidatePath("/tasks"); revalidatePath("/warranties");
   return { ok: true, id: id! };
 }

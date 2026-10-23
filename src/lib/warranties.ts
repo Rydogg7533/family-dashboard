@@ -54,3 +54,33 @@ export async function ensureReminders(sb: Sb, userId: string, rows: WarrantyRow[
     await sb.from("tasks").insert({ person: userId, kind: "decide", title: `${w.item} (${w.who}) warranty ends ${w.end}: extend or let it lapse`, summary: w.terms ?? null, origin_kind: "warranty", origin_ref: ref, due_at: dueAt.toISOString(), tier: 2 }).then(() => {}, () => {});
   }
 }
+
+// A warranty with no end date gets ONE task until the date is added (task completes itself) or the person dismisses it.
+// Done or dismissed tasks are never recreated.
+export async function ensureEndDateTasks(sb: Sb, userId: string, rows: WarrantyRow[]) {
+  const suffix = "@needs_end";
+  const needs = rows.filter((w) => !w.end);
+  const { data: all } = await sb.from("tasks").select("id,origin_ref,status").eq("origin_kind", "warranty").like("origin_ref", `%${suffix}`);
+  const byRef = new Map((all ?? []).map((t) => [t.origin_ref as string, t]));
+  for (const w of needs) {
+    const ref = `${w.key}${suffix}`;
+    if (byRef.has(ref)) continue;
+    await sb.from("tasks").insert({ person: userId, kind: "do", title: `Add the end date for the ${w.item} warranty (${w.who})`, summary: w.source === "vehicle" ? "The paper didn’t give an end date. Open the vehicle, Edit details, Warranties." : "No end date yet. Open Warranties and add it, or dismiss this if it has none.", origin_kind: "warranty", origin_ref: ref, due_at: new Date().toISOString(), tier: 2 }).then(() => {}, () => {});
+  }
+  // Finished: the date is now there, or the warranty no longer exists.
+  const haveEnd = new Set(rows.filter((w) => w.end).map((w) => w.key));
+  const known = new Set(rows.map((w) => w.key));
+  for (const t of all ?? []) {
+    if (t.status !== "open" && t.status !== "snoozed") continue;
+    const key = String(t.origin_ref).slice(0, -suffix.length);
+    if (haveEnd.has(key)) await sb.from("tasks").update({ status: "done", updated_at: new Date().toISOString() }).eq("id", t.id).then(() => {}, () => {});
+    else if (!known.has(key)) await sb.from("tasks").update({ status: "dismissed", updated_at: new Date().toISOString() }).eq("id", t.id).then(() => {}, () => {});
+  }
+}
+
+export async function syncWarrantyTasks(sb: Sb, userId: string) {
+  const rows = await collectWarranties(sb);
+  await ensureReminders(sb, userId, rows);
+  await ensureEndDateTasks(sb, userId, rows);
+  return rows;
+}

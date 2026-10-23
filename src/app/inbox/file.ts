@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean };
@@ -58,6 +59,8 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     const { error } = await sb.from("vehicles").update({ details: d, updated_by: who, updated_at: new Date().toISOString() }).eq("id", vehicle.id);
     if (!error) { filed.vehicle_id = vehicle.id; done.push(`${vehicle.short} service history`); }
   } else if (r.for_vehicle_hint) done.push(`(could not tell which vehicle "${r.for_vehicle_hint}" is; not added to a service history)`);
+
+  await syncWarrantyTasks(sb, user.id).catch(() => null);
 
   // 2b. Attach to the claim this upload was added for, or to an open claim for the same vehicle that it predates
   //     (the original purchase behind a warranty claim).

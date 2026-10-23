@@ -3,14 +3,14 @@ import { Card, H1 } from "@/components/ui";
 import { SectionTitle } from "@/components/registers";
 import { AddWarranty } from "@/components/AddWarranty";
 import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
-import { collectWarranties, ensureReminders, stateOf, type WarrantyRow, type WState } from "@/lib/warranties";
+import { syncWarrantyTasks, stateOf, type WarrantyRow, type WState } from "@/lib/warranties";
 import { fmtDate } from "@/lib/a-shared";
 
 export const dynamic = "force-dynamic";
 
 const GROUPS: { id: WState; title: string; note: string }[] = [
   { id: "soon", title: "Ending soon", note: "A reminder task is created about 30 days before: extend or let it lapse." },
-  { id: "needs_end", title: "Needs an end date", note: "The paper didn’t say, or it hasn’t been entered. Open the item and add it." },
+  { id: "needs_end", title: "Needs an end date", note: "The paper didn’t say, or it hasn’t been entered. Each one has a task in your list until you add the date or dismiss it." },
   { id: "active", title: "Active", note: "" },
   { id: "expired", title: "Expired", note: "Kept for the record." },
 ];
@@ -21,8 +21,7 @@ export default async function Warranties() {
   if (hasSupabaseEnv()) {
     const sb = await createClient();
     const user = await getRequestUser();
-    rows = await collectWarranties(sb);
-    if (user) await ensureReminders(sb, user.id, rows);
+    rows = user ? await syncWarrantyTasks(sb, user.id) : [];
   }
   const by = (s: WState) => rows.filter((w) => stateOf(w) === s).sort((a, b) => (a.end ?? "9999").localeCompare(b.end ?? "9999"));
   return (
