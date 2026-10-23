@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { pendingLines, sendLine } from "@/app/messages/actions";
 import { useRouter } from "next/navigation";
 import type { Confirmation, Message, Thread } from "@/lib/data-messages";
 import { clock } from "@/lib/c-shared";
@@ -38,19 +39,33 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
   const router = useRouter();
   const [text, setText] = useState("");
   const [sent, setSent] = useState<Message[]>([]);
+  const [waiting, setWaiting] = useState<{ id: string; text: string; status: string; error: string | null }[]>([]);
+  const [busy, start] = useTransition();
   const [menu, setMenu] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, string>>({});
   const { show, el } = useToast();
   const all = [...messages, ...sent];
   const isAssistant = thread.kind === "assistant";
 
+  // Lines queued here show as "sending…" until the Mac has sent them through Messages and the mirror has read them back.
+  useEffect(() => {
+    let on = true;
+    const tick = async () => { try { const w = await pendingLines(thread.id); if (on) setWaiting(w); } catch { /* keep the last state */ } };
+    void tick();
+    const t = setInterval(() => { if (document.visibilityState === "visible") { void tick(); router.refresh(); } }, 10000);
+    return () => { on = false; clearInterval(t); };
+  }, [thread.id, router]);
+
   function send(e: React.FormEvent) {
-    e.preventDefault(); if (!text.trim()) return;
-    const m: Message = { id: `s${Date.now()}`, thread_id: thread.id, sender: "Ryan", mine: true, at: new Date().toISOString(), text: text.trim(), assistant_kind: isAssistant ? "command" : null };
-    setSent((s) => [...s, m]); setText("");
-    const reply = isAssistant && /^(y|yes)$/i.test(m.text) ? "Done. Task created: pick up [Child 1] at 4 tomorrow. Logged." : isAssistant && /^(n|no)$/i.test(m.text) ? "OK, nothing created." : null;
-    if (reply) setTimeout(() => setSent((s) => [...s, { id: `r${Date.now()}`, thread_id: thread.id, sender: "Assistant", mine: false, at: new Date().toISOString(), text: reply, assistant_kind: "notice" }]), 500);
-    show(isAssistant ? "Sent to the assistant via Messages" : `Sent to ${thread.name} via Messages`);
+    e.preventDefault(); const t = text.trim(); if (!t) return;
+    start(async () => {
+      const r = await sendLine(thread.id, t);
+      if (!r.ok) { show(r.error ?? "Could not send"); return; }
+      setText("");
+      if (r.sample) { setSent((s) => [...s, { id: r.id ?? `s${Date.now()}`, thread_id: thread.id, sender: "Ryan", mine: true, at: new Date().toISOString(), text: t, assistant_kind: isAssistant ? "command" : null }]); show("Sample mode: not sent"); return; }
+      setWaiting((w) => [...w, { id: r.id ?? `q${Date.now()}`, text: t, status: "queued", error: null }]);
+      show(`Queued · your Mac sends it to ${thread.name} through Messages`);
+    });
   }
 
   return (
@@ -103,10 +118,16 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
       )}
 
       <div className="sticky bottom-[136px] bg-bg/95 backdrop-blur border-t border-line pt-2 -mx-1 px-1 mb-16">
+        {waiting.map((w) => (
+          <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80">
+            <div>{w.text}</div>
+            <div className="text-[11px] text-muted">{w.status === "failed" ? `Not sent: ${w.error ?? "the Mac could not send it"}` : "Sending through Messages…"}</div>
+          </div>
+        ))}
         <form onSubmit={send} className="flex gap-2 items-center">
           <label htmlFor="msg" className="sr-only">Message {thread.name}</label>
           <input id="msg" value={text} onChange={(e) => setText(e.target.value)} placeholder={mirrorOk ? `Message ${thread.name} (sends via Messages)` : "Mirror paused · open Messages to send"} disabled={!mirrorOk} className="flex-1 min-h-11 rounded-xl border border-line bg-bg px-3.5 text-sm disabled:opacity-60" />
-          <button className="min-h-11 px-3.5 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" disabled={!mirrorOk || !text.trim()}>Send</button>
+          <button className="min-h-11 px-3.5 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" disabled={!mirrorOk || !text.trim() || busy}>Send</button>
         </form>
         <div className="text-[11px] text-muted mt-1">Sent as you, from your own Mac, so it appears in Messages on every device. {!mirrorOk && <a href="messages://" className="font-semibold text-accent">Open in Messages</a>}</div>
       </div>
