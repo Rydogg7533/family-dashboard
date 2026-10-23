@@ -10,7 +10,9 @@ export default async function EventPage({ params, searchParams }: PageProps<"/ca
   const { cal, id } = await params;
   const sp = await searchParams;
   if (!hasGoogleCal()) return <><H1>Event</H1><Card>Google Calendar is not connected to the app.</Card></>;
-  const calendars = await listCalendars();
+  let calendars;
+  try { calendars = await listCalendars(); }
+  catch (e) { return <><H1>Event</H1><Card>Google Calendar did not answer: {(e as Error).message.slice(0, 300)}</Card></>; }
   let event; try { event = await getEvent(decodeURIComponent(cal), decodeURIComponent(id), calendars); } catch { event = null; }
   if (!event) return <><H1>Event</H1><Card>This event is no longer in Google Calendar. <Link href="/calendar" className="font-semibold text-accent">Back to the calendar</Link></Card></>;
   const edit = sp.edit === "1";

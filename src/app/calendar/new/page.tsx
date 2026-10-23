@@ -9,7 +9,9 @@ export default async function NewEvent({ searchParams }: PageProps<"/calendar/ne
   const sp = await searchParams;
   const s = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
   if (!hasGoogleCal()) return <><H1>New event</H1><Card>Google Calendar is not connected to the app yet. Run the calendar sign-in on the Mac mini and add the GOOGLE_CAL settings to Vercel.</Card></>;
-  const calendars = await listCalendars();
+  let calendars;
+  try { calendars = await listCalendars(); }
+  catch (e) { return <><H1>New event</H1><Card>Google Calendar did not answer: {(e as Error).message.slice(0, 300)}</Card></>; }
   return (
     <>
       <H1>New event</H1>
