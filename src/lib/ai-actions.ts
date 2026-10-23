@@ -1,7 +1,9 @@
 "use server";
 // Server-action wrappers around the AI layer so client components never hold the key.
 import { callModel, type Job, type Message, type ModelResult } from "@/lib/ai";
-import { answerAsk, type AskReply, type Turn } from "@/lib/ask-engine";
+import { answerAsk, type AskReply, type EventDraft, type Turn } from "@/lib/ask-engine";
+import { listCalendars } from "@/lib/google-calendar";
+import { saveEvent } from "@/app/calendar/actions";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export async function callModelAction(args: { job: Job; messages: Message[]; system?: string; feature?: string }): Promise<ModelResult> {
@@ -24,6 +26,21 @@ export async function confirmInstruction(summary: string, target: string, tier: 
   if (!user) return { ok: false };
   const { error } = await sb.from("activity_log").insert({ actor: user.email ?? "member", action: `ask_instruction_tier${tier}`, subject: `${summary} → ${target}`, undoable: true });
   return { ok: !error };
+}
+
+// The tap on "Add to Google Calendar" in Ask. Goes through the same saveEvent as the form: validated, written to Google,
+// re-read from Google, logged with "from Ask". The person's own tap is the confirmation.
+export async function confirmAskEvent(d: EventDraft): Promise<{ ok: true; summary: string; href: string } | { ok: false; error: string }> {
+  if (!d.title || !d.date) return { ok: false, error: "The event is missing a title or a date." };
+  const cals = await listCalendars().catch(() => null);
+  if (!cals) return { ok: false, error: "Google Calendar did not answer." };
+  const cal = cals.find((c) => c.primary && c.canWrite) ?? cals.find((c) => c.canWrite);
+  if (!cal) return { ok: false, error: "No writable calendar found." };
+  const r = await saveEvent({ title: d.title, calendarId: cal.id, allDay: d.allDay, date: d.date, endDate: d.allDay ? d.endDate ?? undefined : d.endDate ?? undefined, start: d.allDay ? null : d.start, end: d.allDay ? null : d.end, location: d.location ?? "", description: "",
+    reminders: d.reminders?.length ? d.reminders.map((minutes) => ({ method: "popup" as const, minutes })) : d.reminders ? [] : null, recurrence: null, attendees: d.guests, origin: { kind: "ask", ref: null, label: "Ask" } });
+  if (!r.ok) return { ok: false, error: r.error };
+  const e = r.event;
+  return { ok: true, summary: `${e.title} · ${e.date}${e.allDay ? " (all day)" : ` ${e.start}${e.end ? `–${e.end}` : ""}`} · ${e.reminders.useDefault ? "calendar default reminder" : e.reminders.overrides.length ? `${e.reminders.overrides.length} reminder${e.reminders.overrides.length > 1 ? "s" : ""}` : "no reminder"}`, href: `/calendar/e/${encodeURIComponent(e.calendarId)}/${encodeURIComponent(e.id)}` };
 }
 
 // An unanswered thread becomes an Inbox item with the whole conversation attached (F4).

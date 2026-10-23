@@ -5,11 +5,15 @@
 // keyword matching so the page feels real in preview.
 import { callModel, formatCost, isStructuredInput, hasAiKey, SCOPE_SYSTEM_PROMPT, type Message } from "@/lib/ai";
 import { getOpenTasks } from "@/lib/data";
+import { eventTurn } from "@/lib/ask-calendar";
+import { getCalendarEvents } from "@/lib/data-day";
 import { sampleTransactions, sampleRecurring, sampleReconciliations, money, shortDate } from "@/lib/data-money";
 
 export type Tier = 1 | 2 | 3;
+export type EventDraft = { title: string | null; date: string | null; endDate: string | null; allDay: boolean; start: string | null; end: string | null; location: string | null; reminders: number[] | null; guests: string[] };
 export type AskReply = {
-  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured";
+  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm";
+  draft?: EventDraft;                                   // an event waiting for the person's Add tap
   text: string;
   source?: { label: string; href: string };            // "Open in …"
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
@@ -39,6 +43,10 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
     return { kind: "answer", text: r.sample ? `Got it, treating this as part of ${q.replace(/^(yes|it'?s)\s*/i, "")}. ${sampleGeneral(original)}` : r.text, scopeRule: rule, source: { label: "Settings › Assistant › Scope rules", href: "/settings" }, chips: ["Thanks", "Remove that rule"], ...costOf(r) };
   }
 
+  // An event is being put together: every reply in the thread (an answer, a chip, "change the time") goes back to it.
+  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm") && !/^(no|n|nope|never ?mind|cancel|forget it)$/i.test(q)) return eventTurn(thread);
+  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm")) return { kind: "answer", text: "Okay, I won't add it.", cost: 0, costText: "no model used", model: "none", sample: false };
+
   // 1) Local, no model: short structured input.
   if (isStructuredInput(q) && !/\badd\b.*\b(medication|meds|melatonin|dentist|contact|birthday)\b/i.test(q)) {
     return structured(q);
@@ -47,8 +55,9 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
   if (!hasAiKey()) return sampleRoute(thread, q);
 
   // 2) Haiku decides what kind of input this is (one small call).
-  const cls = await callModel({ job: "classify", feature: "ask-intent", maxTokens: 60, messages: [{ role: "user", content: `Classify this input to a family-management assistant. Reply with one word: question, instruction, clarify_reply, or offscope. Input: """${q}"""` }], system: SCOPE_SYSTEM_PROMPT });
+  const cls = await callModel({ job: "classify", feature: "ask-intent", maxTokens: 60, messages: [{ role: "user", content: `Classify this input to a family-management assistant. Reply with one word: question, instruction, clarify_reply, offscope, or event. Use event when the person wants something put on the calendar (an appointment, meeting, trip, reminder at a time, "remind me", "schedule", "put X on Friday"). Input: """${q}"""` }], system: SCOPE_SYSTEM_PROMPT });
   const intent = cls.text.trim().toLowerCase();
+  if (intent.startsWith("event")) return eventTurn(thread);
   if (intent.startsWith("offscope")) return { kind: "scope_check", text: "Is this related to the family management system? If so, how?", chips: ["No, never mind"], ...costOf(cls) };
 
   // 3) Sonnet writes the answer or the confirmation line with only the relevant records.
@@ -107,6 +116,12 @@ async function relevantRecords(q: string): Promise<string> {
   if (/task|today|need|due|email|reply/i.test(q)) {
     const tasks = await getOpenTasks();
     lines.push("Open tasks: " + tasks.map((t) => `${t.kind}: ${t.title}${t.due_at ? ` (due ${shortDate(t.due_at.slice(0, 10))})` : ""}`).join("; "));
+  }
+  if (/calendar|schedule|appointment|meeting|today|tomorrow|week|weekend|free|busy|when|what'?s on|coming up|saturday|sunday|monday|tuesday|wednesday|thursday|friday/i.test(q)) {
+    try {
+      const evs = await getCalendarEvents(undefined, 14);   // real events, live from Google (D72)
+      lines.push("Calendar, next 14 days (live from Google): " + (evs.length ? evs.map((e) => `${e.date}${e.allDay ? " all day" : e.start ? ` ${e.start}${e.end ? `–${e.end}` : ""}` : ""} ${e.title}${e.place ? ` @ ${e.place}` : ""} [${e.person}]`).join("; ") : "nothing scheduled"));
+    } catch { /* the answer just won't have calendar facts */ }
   }
   if (/pay|paid|cost|spent|spend|charge|receipt|money|card|amex|visa|bill|subscription/i.test(q)) {
     lines.push("Recent charges: " + sampleTransactions.slice(0, 6).map((t) => `${t.merchant} ${money(t.amount)} ${shortDate(t.date)} (${t.status})`).join("; "));

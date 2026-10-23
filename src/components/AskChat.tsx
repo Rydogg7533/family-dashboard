@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { askAction, confirmInstruction, parkThreadInInbox } from "@/lib/ai-actions";
+import { askAction, confirmAskEvent, confirmInstruction, parkThreadInInbox } from "@/lib/ai-actions";
 import type { AskReply, Turn } from "@/lib/ask-engine";
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed" };
+type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; eventResult?: { ok: boolean; text: string; href?: string } };
 
 export function AskChat({ prefill, sample, who }: { prefill: string; sample: boolean; who: string }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -51,6 +51,15 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     setToast({ text: `Saved to ${b.reply.confirm.target}. Logged with your words as the source.` });
   }
 
+  async function addEvent(i: number) {
+    const d = bubbles[i]?.reply?.draft;
+    if (!d || busy) return;
+    setBusy(true);
+    const r = await confirmAskEvent(d).catch((e) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) }));
+    setBubbles((bs) => bs.map((x, j) => (j === i ? { ...x, eventResult: r.ok ? { ok: true, text: r.summary, href: r.href } : { ok: false, text: r.error } } : x)));
+    setBusy(false);
+  }
+
   const last = bubbles[bubbles.length - 1];
   const chips = last?.reply?.chips ?? (bubbles.length === 0 ? SUGGESTED : []);
 
@@ -72,6 +81,14 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
           <div key={i} className="self-start max-w-[92%] flex flex-col gap-1.5">
             <div className={`card text-sm whitespace-pre-wrap ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
             {b.reply?.kind === "instruction" && b.reply.confirm && <ConfirmCard b={b} who={who} onConfirm={() => confirm(i)} onChange={() => setInput(b.reply!.confirm!.summary)} />}
+            {b.reply?.kind === "event_confirm" && b.reply.draft && (i === bubbles.length - 1 || b.eventResult) && (
+              b.eventResult?.ok
+                ? <div className="card text-sm border-accent"><div className="text-[11px] font-bold tracking-wide text-accent">SAVED TO GOOGLE CALENDAR</div><div>{b.eventResult.text}</div><Link href={b.eventResult.href!} className="text-xs font-semibold text-accent">Open the event</Link></div>
+                : <div className="flex flex-col gap-1">
+                    {b.eventResult && !b.eventResult.ok && <div className="text-xs text-red px-1">{b.eventResult.text}</div>}
+                    <button disabled={busy} onClick={() => addEvent(i)} className="min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50">Add to Google Calendar</button>
+                  </div>
+            )}
             {b.reply?.scopeRule && <div className="text-xs text-muted px-1">Scope rule saved: &ldquo;{b.reply.scopeRule}&rdquo; · remove it in Settings › Assistant</div>}
             {b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
             <div className="text-[11px] text-muted px-1 flex flex-wrap gap-x-2">
