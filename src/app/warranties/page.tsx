@@ -27,8 +27,9 @@ export default async function Warranties() {
   const by = (s: WState) => rows.filter((w) => stateOf(w) === s).sort((a, b) => (a.end ?? "9999").localeCompare(b.end ?? "9999"));
   return (
     <>
-      <H1 right={<AddWarranty />}>Warranties</H1>
+      <H1>Warranties</H1>
       <p className="text-sm text-muted mb-2">Everything with a warranty or protection plan, in one list: vehicles, devices, and anything you add here. Receipts filed in the Inbox add to the vehicle list automatically.</p>
+      <div className="mb-3"><AddWarranty /></div>
       {rows.length === 0 && <Card className="text-sm text-muted">No warranties yet. File a receipt in the Inbox, add a device with a warranty end, or tap Add warranty.</Card>}
       {GROUPS.map((g) => { const list = by(g.id); if (!list.length) return null; return (
         <section key={g.id}>
@@ -43,6 +44,8 @@ export default async function Warranties() {
               <div className="text-xs text-muted">{SRC[w.source]} · {w.who}{w.provider ? ` · ${w.provider}` : ""}{w.start ? ` · from ${fmtDate(w.start)}` : ""}</div>
               {w.terms && <div className="text-xs">{w.terms}</div>}
               {w.proof && <div className="text-xs text-muted">Proof: {w.proof}</div>}
+              {w.attachments && w.attachments.length > 0 && <div className="text-xs flex flex-wrap gap-x-3 gap-y-1">{w.attachments.map((a, n) => <a key={n} href={`/api/warranty-file/${w.id}/${n}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">{a.role === "receipt" ? "Receipt" : "Warranty info"}: {a.name.length > 28 ? a.name.slice(0, 26) + "…" : a.name}</a>)}</div>}
+              {w.source === "other" && w.id && <div><AddWarranty initial={{ id: w.id, item: w.item, provider: w.provider ?? "", for_who: w.who === "Household" ? "" : w.who, start: w.start ?? "", end: w.end ?? "", terms: w.terms ?? "", attachments: w.attachments ?? [] }} /></div>}
               <div className="text-xs"><Link href={w.href} className="font-semibold text-accent">{w.source === "vehicle" ? "Open vehicle to edit" : w.source === "device" ? "Open in Devices" : ""}</Link></div>
             </Card>))}
           </div>

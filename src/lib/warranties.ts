@@ -2,8 +2,9 @@ import type { createClient } from "@/lib/supabase/server";
 
 export type WarrantyRow = {
   key: string; source: "vehicle" | "device" | "other"; item: string; who: string; provider: string | null;
-  start: string | null; end: string | null; terms: string | null; proof: string | null; href: string; id?: string;
+  start: string | null; end: string | null; terms: string | null; proof: string | null; href: string; id?: string; attachments?: Attachment[];
 };
+export type Attachment = { path: string; name: string; role: "receipt" | "warranty info" };
 export type WState = "needs_end" | "soon" | "active" | "expired";
 export const SOON_DAYS = 45;
 const iso = (d: unknown) => (typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null);
@@ -36,7 +37,7 @@ export async function collectWarranties(sb: Sb): Promise<WarrantyRow[]> {
     if (d.warranty_end) out.push({ key: `dev:${d.id}:w`, source: "device", item: `${d.name} warranty`, who, provider: (d.make as string) || null, start: null, end: iso(d.warranty_end), terms: null, proof: null, href: "/devices" });
     if (d.plan_name && d.plan_end) out.push({ key: `dev:${d.id}:p`, source: "device", item: `${d.name}: ${d.plan_name}`, who, provider: null, start: null, end: iso(d.plan_end), terms: null, proof: null, href: "/devices" });
   }
-  for (const w of ws ?? []) out.push({ key: `own:${w.id}`, source: "other", id: w.id as string, item: w.item as string, who: (w.for_who as string) || "Household", provider: (w.provider as string) || null, start: iso(w.start_date), end: iso(w.end_date), terms: (w.terms as string) || null, proof: (w.proof as string) || null, href: "/warranties" });
+  for (const w of ws ?? []) out.push({ key: `own:${w.id}`, source: "other", id: w.id as string, item: w.item as string, who: (w.for_who as string) || "Household", provider: (w.provider as string) || null, start: iso(w.start_date), end: iso(w.end_date), terms: (w.terms as string) || null, proof: (w.proof as string) || null, href: "/warranties", attachments: (w.attachments as Attachment[] | null) ?? [] });
   return out;
 }
 
