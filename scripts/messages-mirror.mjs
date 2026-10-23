@@ -145,8 +145,14 @@ async function main() {
   for (const o of queued) {
     const guid = sendTarget.get(o.thread_id);
     if (!guid) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); continue; }
-    try { sendViaMessages(guid, o.text); sent++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "sent", sent_at: now() }, { Prefer: "return=minimal" }); }
-    catch (e) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: String(e.message).slice(0, 300) }, { Prefer: "return=minimal" }); }
+    let err = null;
+    try { sendViaMessages(guid, o.text); } catch (e) { err = String(e.message).slice(0, 300); }
+    // Messages sometimes reports an error after the line has already gone out: believe the database, not the error.
+    if (err) { await new Promise((r) => setTimeout(r, 4000)); snapshot(); const esc = o.text.replace(/'/g, "''");
+      const hit = q(`select count(*) as n from message m join chat_message_join cm on cm.message_id = m.ROWID where cm.chat_id in (${family.filter((c) => sendTarget.get(o.thread_id) === c.guid || groups.get(o.thread_id)?.chats.some((x) => x.id === c.id)).map((c) => c.id).join(",") || 0}) and m.is_from_me = 1 and m.text = '${esc}' and m.date > ${Math.floor((Date.now() / 1000 - 300 - APPLE_EPOCH) * 1e9)}`);
+      if (hit[0]?.n > 0) err = null; }
+    if (!err) { sent++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "sent", sent_at: now() }, { Prefer: "return=minimal" }); }
+    else { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: err }, { Prefer: "return=minimal" }); }
   }
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "numeric", minute: "2-digit" }).format(new Date());
   const summary = `Messages: ${threadRows.length} family threads, ${msgCount} messages in ${DAYS} days${sent ? `, sent ${sent}` : ""}${failed ? `, ${failed} not sent` : ""} · ${time}`;

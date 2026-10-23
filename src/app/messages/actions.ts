@@ -22,6 +22,6 @@ export async function sendLine(threadId: string, text: string) {
 export async function pendingLines(threadId: string) {
   if (!hasSupabaseEnv()) return [] as { id: string; text: string; status: string; error: string | null; queued_at: string }[];
   const sb = await createClient();
-  const { data } = await sb.from("messages_outbox").select("id,text,status,error,queued_at").eq("thread_id", threadId).neq("status", "sent").order("queued_at");
+  const { data } = await sb.from("messages_outbox").select("id,text,status,error,queued_at").eq("thread_id", threadId).neq("status", "sent").gte("queued_at", new Date(Date.now() - 10 * 60_000).toISOString()).order("queued_at"); // a failure note shows for 10 minutes, then the thread speaks for itself
   return (data ?? []) as { id: string; text: string; status: string; error: string | null; queued_at: string }[];
 }
