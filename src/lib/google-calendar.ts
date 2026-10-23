@@ -149,3 +149,11 @@ export async function moveEvent(fromCalendar: string, id: string, toCalendar: st
   const r = await g<RawEvent>(`/calendars/${encodeURIComponent(fromCalendar)}/events/${encodeURIComponent(id)}/move?destination=${encodeURIComponent(toCalendar)}`, { method: "POST" });
   return getEvent(toCalendar, r.id);
 }
+
+// Moves one event to a new time on one day. Touches ONLY start and end (title, notes, reminders, guests stay as they are), and
+// sends no invitation updates; the caller refuses events that have guests. Re-reads the event so "moved" means Google has it.
+export async function rescheduleEvent(calendarId: string, id: string, date: string, start: string, end: string): Promise<GEvent> {
+  await g<RawEvent>(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}?sendUpdates=none`, { method: "PATCH",
+    body: JSON.stringify({ start: { dateTime: localToIso(date, start), timeZone: HOUSEHOLD_TZ }, end: { dateTime: localToIso(date, end), timeZone: HOUSEHOLD_TZ } }) });
+  return getEvent(calendarId, id);
+}

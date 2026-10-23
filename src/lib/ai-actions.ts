@@ -3,7 +3,7 @@
 import { callModel, type Job, type Message, type ModelResult } from "@/lib/ai";
 import { answerAsk, type AskReply, type EventDraft, type Turn } from "@/lib/ask-engine";
 import { listCalendars } from "@/lib/google-calendar";
-import { saveEvent } from "@/app/calendar/actions";
+import { saveEvent, moveEventTime } from "@/app/calendar/actions";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export async function callModelAction(args: { job: Job; messages: Message[]; system?: string; feature?: string }): Promise<ModelResult> {
@@ -41,6 +41,15 @@ export async function confirmAskEvent(d: EventDraft): Promise<{ ok: true; summar
   if (!r.ok) return { ok: false, error: r.error };
   const e = r.event;
   return { ok: true, summary: `${e.title} · ${e.date}${e.allDay ? " (all day)" : ` ${e.start}${e.end ? `–${e.end}` : ""}`} · ${e.reminders.useDefault ? "calendar default reminder" : e.reminders.overrides.length ? `${e.reminders.overrides.length} reminder${e.reminders.overrides.length > 1 ? "s" : ""}` : "no reminder"}`, href: `/calendar/e/${encodeURIComponent(e.calendarId)}/${encodeURIComponent(e.id)}` };
+}
+
+// "Move X, then add mine": the other event is moved first and read back; if that fails nothing is added.
+export async function confirmMoveAndAdd(m: NonNullable<AskReply["move"]>, d: EventDraft) {
+  const moved = await moveEventTime({ calendarId: m.calendarId, id: m.id, date: m.date, oldStart: m.oldStart, newStart: m.newStart, newEnd: m.newEnd });
+  if (!moved.ok) return moved;
+  const added = await confirmAskEvent(d);
+  if (!added.ok) return { ok: false as const, error: `“${m.title}” was moved to ${m.newStart}, but adding yours failed: ${added.error}` };
+  return { ...added, summary: `Moved “${m.title}” to ${m.newStart}. Added: ${added.summary}` };
 }
 
 // An unanswered thread becomes an Inbox item with the whole conversation attached (F4).

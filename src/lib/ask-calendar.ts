@@ -5,6 +5,7 @@ import "server-only";
 import { callModel, formatCost } from "@/lib/ai";
 import { HOUSEHOLD_TZ, hasGoogleCal } from "@/lib/google-calendar";
 import type { AskReply, EventDraft, Turn } from "@/lib/ask-engine";
+import { checkDay, freeSlots, fromMin, movable, short, to12, to24, toMin, whyNot } from "@/lib/ask-conflicts";
 
 const todayParts = () => {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: HOUSEHOLD_TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map((x) => [x.type, x.value]));
@@ -45,7 +46,13 @@ export const describe = (d: EventDraft) => `${d.title} · ${d.date}${d.allDay ? 
 export async function eventTurn(thread: Turn[]): Promise<AskReply> {
   const base = (cost: number, model: string) => ({ cost, costText: `this answer ~${formatCost(cost)}`, model, sample: false });
   if (!hasGoogleCal()) return { kind: "answer", text: "Google Calendar isn't connected to the app yet, so I can't add events.", ...base(0, "none") };
-  const { draft: d, cost, model } = await extractDraft(thread);
+  // The conflict chips carry their meaning in code, so they are read here and never shown to the model as new wishes.
+  const last = thread[thread.length - 1]?.text ?? "";
+  const keep = /^Keep this time anyway$/i.test(last);
+  const mv = /^Move .+ to \d{1,2}:\d{2} [ap]m$/i.test(last);
+  const use = last.match(/^Use (\d{1,2}:\d{2} [ap]m)–(\d{1,2}:\d{2} [ap]m)$/i);
+  const { draft: d, cost, model } = await extractDraft(keep || mv || use ? thread.slice(0, -1) : thread);
+  if (use) { d.start = to24(use[1]); d.end = to24(use[2]); }
   const ask = (text: string, chips?: string[]): AskReply => ({ kind: "event_clarify", text, chips, ...base(cost, model) });
   // One question at a time, in the order a person would ask.
   if (!d.title) return ask("What should I call the event?");
@@ -53,6 +60,35 @@ export async function eventTurn(thread: Turn[]): Promise<AskReply> {
   if (!d.allDay && !d.start) return ask(`What time does “${d.title}” start?`, ["All day", "9:00 am", "12:00 pm", "3:00 pm"]);
   if (!d.allDay && !d.end && d.start) d.end = plusHour(d.start);   // Google's own default is one hour; stated in the card so it can be changed
   if (d.reminders === null) return ask("Do you want to set a notification for that?", ["10 min before", "1 hour before", "1 day before", "1 hour and 1 day before", "No reminder"]);
+
+  let note = "";
+  if (!d.allDay && d.start && d.end && !keep) {
+    try {
+      const { all, conflicts, len, near } = await checkDay(d.date, d.start, d.end);
+      if (conflicts.length) {
+        const mine = { s: toMin(d.start), e: toMin(d.end) };
+        const list = conflicts.map((c) => `“${c.ev.title}” ${to12(c.ev.start!)}–${to12(c.ev.end ?? "23:59")} (${c.ev.calendarName})`).join("; ");
+        // Moving the other event: only plain one-off events without guests, into a window that is free for it and clear of the new one.
+        const moves = conflicts.filter((c) => movable(c.ev)).map((c) => ({ c, slots: freeSlots([...all.filter((b) => b.ev.id !== c.ev.id), { s: mine.s, e: mine.e, ev: c.ev }], c.e - c.s, c.s, 2) }));
+        const stuck = conflicts.filter((c) => !movable(c.ev)).map((c) => `“${c.ev.title}” can't be moved from here because ${whyNot(c.ev)}`);
+        const slots = freeSlots(all, len, near);
+        const chips = [
+          ...slots.map((x) => `Use ${to12(fromMin(x.s))}–${to12(fromMin(x.e))}`),
+          ...moves.flatMap(({ c, slots: sl }) => sl.map((x) => `Move ${short(c.ev.title)} to ${to12(fromMin(x.s))}`)),
+          "Keep this time anyway",
+        ];
+        if (mv) {
+          const hit = moves.flatMap(({ c, slots: sl }) => sl.map((x) => ({ c, x }))).find(({ c, x }) => last === `Move ${short(c.ev.title)} to ${to12(fromMin(x.s))}`);
+          if (hit) {
+            const ns = fromMin(hit.x.s), ne = fromMin(hit.x.e);
+            return { kind: "event_move", draft: d, move: { calendarId: hit.c.ev.calendarId, id: hit.c.ev.id, title: hit.c.ev.title, date: d.date, oldStart: hit.c.ev.start!, oldEnd: hit.c.ev.end ?? "", newStart: ns, newEnd: ne },
+              text: `I'll move “${hit.c.ev.title}” from ${to12(hit.c.ev.start!)} to ${to12(ns)}–${to12(ne)}, then add:\n${describe(d)}\n\nNothing changes until you tap the button.`, ...base(cost, model) };
+          }
+        }
+        return { kind: "event_conflict", draft: d, text: `That overlaps ${list}.${slots.length ? ` Same length, free that day: ${slots.map((x) => `${to12(fromMin(x.s))}–${to12(fromMin(x.e))}`).join(", ")}.` : " Nothing else is free that day between 8 am and 6 pm."}${stuck.length ? ` ${stuck.join("; ")}.` : ""}\n\nPick a new time for yours, move the other event, or keep both.`, chips, ...base(cost, model) };
+      }
+    } catch { note = " I couldn't check your calendar for conflicts just now."; }
+  }
   const missingWhere = !d.location ? " No location set." : "";
-  return { kind: "event_confirm", text: `Here is what I'll add to Google Calendar:\n${describe(d)}${missingWhere}\n\nTap Add, or tell me what to change (for example “at the library”, “add a reminder 1 day before”, “make it 3 pm”).`, draft: d, ...base(cost, model) };
+  return { kind: "event_confirm", text: `Here is what I'll add to Google Calendar:\n${describe(d)}${missingWhere}${keep ? "\nYou chose to keep this time although it overlaps." : ""}${note}\n\nTap Add, or tell me what to change (for example “at the library”, “add a reminder 1 day before”, “make it 3 pm”).`, draft: d, ...base(cost, model) };
 }

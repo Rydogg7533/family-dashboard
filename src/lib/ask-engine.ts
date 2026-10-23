@@ -12,8 +12,9 @@ import { sampleTransactions, sampleRecurring, sampleReconciliations, money, shor
 export type Tier = 1 | 2 | 3;
 export type EventDraft = { title: string | null; date: string | null; endDate: string | null; allDay: boolean; start: string | null; end: string | null; location: string | null; reminders: number[] | null; guests: string[] };
 export type AskReply = {
-  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm";
-  draft?: EventDraft;                                   // an event waiting for the person's Add tap
+  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm" | "event_conflict" | "event_move";
+  draft?: EventDraft;
+  move?: { calendarId: string; id: string; title: string; date: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string };   // an existing event to move first                                   // an event waiting for the person's Add tap
   text: string;
   source?: { label: string; href: string };            // "Open in …"
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
@@ -44,8 +45,8 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
   }
 
   // An event is being put together: every reply in the thread (an answer, a chip, "change the time") goes back to it.
-  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm") && !/^(no|n|nope|never ?mind|cancel|forget it)$/i.test(q)) return eventTurn(thread);
-  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm")) return { kind: "answer", text: "Okay, I won't add it.", cost: 0, costText: "no model used", model: "none", sample: false };
+  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm" || prev?.kind === "event_conflict" || prev?.kind === "event_move") && !/^(no|n|nope|never ?mind|cancel|forget it)$/i.test(q)) return eventTurn(thread);
+  if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm" || prev?.kind === "event_conflict" || prev?.kind === "event_move")) return { kind: "answer", text: "Okay, I won't add it.", cost: 0, costText: "no model used", model: "none", sample: false };
 
   // 1) Local, no model: short structured input.
   if (isStructuredInput(q) && !/\badd\b.*\b(medication|meds|melatonin|dentist|contact|birthday)\b/i.test(q)) {

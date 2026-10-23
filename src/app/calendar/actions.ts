@@ -3,7 +3,7 @@
 // before reporting success, so "saved" means Google has it. Nothing is cached in the app.
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { hasGoogleCal, insertEvent, updateEvent, deleteEvent, type EventInput, type GEvent } from "@/lib/google-calendar";
+import { hasGoogleCal, insertEvent, updateEvent, deleteEvent, getEvent, listEvents, rescheduleEvent, type EventInput, type GEvent } from "@/lib/google-calendar";
 
 export type EventForm = EventInput & { id?: string; fromMessage?: string | null; origin?: { kind: string; ref: string | null; label: string } | null };
 
@@ -50,5 +50,26 @@ export async function removeEvent(calendarId: string, id: string, title: string)
     if (sb) await sb.from("activity_log").insert({ actor: actor!, action: "event_deleted", subject: title, ref: `${calendarId}|${id}`, undoable: false }).then(() => {}, () => {});
     revalidatePath("/calendar"); revalidatePath("/day"); revalidatePath("/");
     return { ok: true };
+  } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200) }; }
+}
+
+// Moves one existing event to a new time on its own day, only from the person's tap in Ask. It re-checks everything at the
+// moment of the move: the event is still where we saw it, has no guests and no repeat, and the new window is still free.
+export async function moveEventTime(m: { calendarId: string; id: string; date: string; oldStart: string; newStart: string; newEnd: string }, origin = "Ask"): Promise<{ ok: true; event: GEvent } | { ok: false; error: string }> {
+  if (!hasGoogleCal()) return { ok: false, error: "Google Calendar is not connected." };
+  if (!TIME.test(m.newStart) || !TIME.test(m.newEnd) || m.newEnd <= m.newStart) return { ok: false, error: "The new time is not valid." };
+  const { sb, actor } = await who();
+  if (sb && !actor) return { ok: false, error: "Not signed in." };
+  try {
+    const cur = await getEvent(m.calendarId, m.id);
+    if (cur.allDay || cur.attendees.length || cur.recurringEventId || cur.recurrence?.length) return { ok: false, error: "That event has guests or repeats, so I won't move it from here." };
+    if (cur.date !== m.date || cur.start !== m.oldStart) return { ok: false, error: "That event changed since I looked. Nothing was moved." };
+    const clash = (await listEvents(m.date, m.date)).filter((e) => !e.allDay && e.start && e.end && e.date === m.date && e.endDate === m.date && !(e.id === m.id && e.calendarId === m.calendarId) && m.newStart < e.end && e.start < m.newEnd);
+    if (clash.length) return { ok: false, error: `That window is no longer free (“${clash[0].title}”). Nothing was moved.` };
+    const event = await rescheduleEvent(m.calendarId, m.id, m.date, m.newStart, m.newEnd);
+    if (event.start !== m.newStart) return { ok: false, error: "Google did not keep the new time. Check the event." };
+    if (sb) await sb.from("activity_log").insert({ actor: actor!, action: "event_updated", subject: `${event.title} · moved ${m.oldStart} → ${m.newStart} on ${m.date} · ${event.calendarName} · from ${origin}`, ref: `${event.calendarId}|${event.id}`, undoable: true }).then(() => {}, () => {});
+    revalidatePath("/calendar"); revalidatePath("/day"); revalidatePath("/");
+    return { ok: true, event };
   } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200) }; }
 }
