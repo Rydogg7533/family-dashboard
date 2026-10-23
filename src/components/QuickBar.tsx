@@ -5,15 +5,22 @@ import { ReportIssueSheet } from "@/components/ReportIssue";
 
 // Floating "+" on every working page: capture, ask about this page, report a problem. Ask itself is the Ask tab (one tap).
 export function QuickBar() {
-  const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false);
-  useEffect(() => { setPlus(false); }, [path]);
+  const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false); const [away, setAway] = useState(false);
+  useEffect(() => { setPlus(false); setAway(false); }, [path]);
+  // Slides out of the way when you scroll down (so it never covers a button); a little scroll up, or the top of the page, brings it back.
+  useEffect(() => {
+    let last = window.scrollY;
+    const on = () => { const y = window.scrollY; if (y > last + 8 && y > 80) setAway(true); else if (y < last - 8 || y <= 80) setAway(false); last = y; };
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, []);
   // No + on a conversation: the compose bar owns the bottom edge there.
   if (["/login", "/ask", "/tv", "/kid", "/privacy", "/terms"].some((p) => path.startsWith(p)) || /^\/messages\/[^/]+$/.test(path)) return null;
   const go = (href: string) => { setPlus(false); router.push(href); };
   return (
     <>
     <ReportIssueSheet open={report} onClose={() => setReport(false)} />
-    <div className="fixed left-0 right-0 bottom-[calc(var(--bar-bottom)+12px)] pointer-events-none z-20">
+    <div className={`fixed left-0 right-0 bottom-[calc(var(--bar-bottom)+12px)] pointer-events-none z-20 transition-transform duration-200 ${away && !plus ? "translate-y-24" : ""}`}>
       <div className="max-w-md mx-auto px-5 flex justify-end pointer-events-auto">
         <div className="relative">
           {plus && (

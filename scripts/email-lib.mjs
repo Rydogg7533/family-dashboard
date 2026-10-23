@@ -21,8 +21,12 @@ export function openGmail(args, { allowWrite }) {
   try { const j = JSON.parse(readFileSync(option(args, "--client") || join(dir, "google-oauth-client.json"), "utf8")); client = j.installed || j.web; } catch (e) { die(`cannot read the OAuth client file: ${e.message}`); }
   try { tok = JSON.parse(readFileSync(join(dir, `google-${account}.json`), "utf8")); } catch { die(`no saved sign-in for ${account}. Run scripts/google-auth.mjs --account ${account} first.`); }
   let accessToken = null;
+  // A dropped connection ("fetch failed") is retried quietly; only a real answer from Google (or four failures in a row) counts as an error.
+  async function netFetch(url, init) {
+    for (let i = 1; ; i++) { try { return await fetch(url, init); } catch (e) { if (i >= 4) throw e; await sleep(1500 * i); } }
+  }
   async function refresh() {
-    const r = await fetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    const r = await netFetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: client.client_id, client_secret: client.client_secret, refresh_token: tok.refresh_token, grant_type: "refresh_token" }) });
     const j = await r.json();
     if (!r.ok) throw new Error(`could not refresh the Google login (${j.error || r.status}${j.error === "invalid_grant" ? ": access was revoked or expired; run google-auth.mjs again" : ""})`);
@@ -32,7 +36,7 @@ export function openGmail(args, { allowWrite }) {
     if (method !== "GET" && !allowWrite) throw new Error(`read-only script tried a ${method} call: refused`);
     if (!accessToken) await refresh();
     for (let attempt = 1; attempt <= 8; attempt++) {
-      const r = await fetch(BASE + path, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+      const r = await netFetch(BASE + path, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
       if (r.ok) { const t = await r.text(); return t ? JSON.parse(t) : {}; }
       if (r.status === 401 && attempt < 3) { await refresh(); continue; }
       let reason = "", detail = "";
