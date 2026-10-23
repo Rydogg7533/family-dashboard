@@ -47,7 +47,7 @@ export function NotificationSettings({ viewer, vapidKey }: { viewer: string; vap
       const json = s.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
       const r = await saveSubscription(json, navigator.userAgent.slice(0, 80));
       if (r.ok) { setSub("on"); setSubNote(""); show(`This device will receive push · ${viewer}`); } else setSubNote(r.error ?? "Could not save the subscription.");
-    } catch (e) { setSubNote(`Could not subscribe: ${(e as Error).message}`); }
+    } catch (e) { setSubNote(`Could not subscribe: ${(e as Error).message} (key seen by the app: ${vapidKey.length} characters, starts ${vapidKey.slice(0, 6)}, ends ${vapidKey.slice(-4)}; it should be 87, BP2uaH, RYkg)`); }
   });
 
   const test = () => start(async () => {
