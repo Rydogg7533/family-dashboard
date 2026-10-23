@@ -13,7 +13,7 @@ Return ONLY a JSON object with these keys:
 kind: "receipt" | "bill" | "statement" | "form" | "warranty" | "service_report" | "other". A document showing payment made (paid, charged, card approved, balance $0, thank you for your payment) is a "receipt" even if titled invoice; "bill" only when money is still owed
 vendor: string|null; amount: number|null (total, dollars); date: "YYYY-MM-DD"|null
 item: short plain description of what was bought or done (e.g. "car battery replacement")|null
-category: one of "vehicle","home","appliance_electronics","health","grocery_food","fuel","other"
+category: one of "vehicle","home","appliance_electronics","health","grocery_food","dining","fuel","other"
 for_vehicle_hint: any vehicle named or implied (make/model/year/plate last digits)|null
 warranty_relevant: true if this is a repair, part, appliance, electronics, tool or home-system purchase, or it states a warranty/return/claim window
 warranty_note: warranty or claim terms stated on it (e.g. "36-month free replacement")|null
@@ -72,7 +72,7 @@ export async function readCapture(inboxId: string) {
   // The plan: ONE place the file lives (FILE), and every other place that only points at it (LINK).
   const plan: { t: "file" | "link"; text: string }[] = [];
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
-  const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/Receipts/`);
+  const home = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
   plan.push({ t: "file", text: `${name ?? "this document"} → kept in the app; a copy goes to ${home} when the Mac mini filing agent is running` });
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
     const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
