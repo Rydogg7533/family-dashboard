@@ -163,7 +163,7 @@ export async function assignInboxItem(id: string, to: string | null): Promise<{ 
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
   if (to) { const { data: p } = await sb.from("profiles").select("id").eq("id", to).maybeSingle(); if (!p) return { ok: false, error: "That person is not part of the household." }; }
-  const { data, error } = await sb.from("inbox_items").update({ assigned_to: to }).eq("id", id).eq("status", "open").select("id");
+  const { data, error } = await sb.from("inbox_items").update({ assigned_to: to, assigned_by: to ? user.id : null }).eq("id", id).eq("status", "open").select("id");
   if (error || !data?.length) return { ok: false, error: "Could not hand it over." };
   const { data: me } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
   await sb.from("activity_log").insert({ actor: me?.display_name ?? user.email ?? "member", action: "inbox_assigned", subject: `${id}: ${to ? "handed over" : "back to anyone"}`, ref: id, undoable: false }).then(() => {}, () => {});

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getDisplayName, getOpenTasks, getPeopleNames, getStatus, overall } from "@/lib/data";
-import { getRequestUser } from "@/lib/supabase/server";
+import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
 import { splitTasks } from "@/lib/tasks-view";
 import { Banner, Card, H1 } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
@@ -12,6 +12,14 @@ export default async function Today() {
   const [name, status, allTasks, names, user] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser()]);
   const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;
+  let handed = 0, handedBy = "";
+  if (me && hasSupabaseEnv()) {
+    const sb = await createClient();
+    const { data: hs } = await sb.from("inbox_items").select("assigned_by").eq("status", "open").eq("assigned_to", me);
+    handed = hs?.length ?? 0;
+    const from = [...new Set((hs ?? []).map((r) => r.assigned_by as string | null).filter((x): x is string => !!x && x !== me))].map((id) => names[id]).filter(Boolean);
+    handedBy = from.length === 1 ? from[0] : "";
+  }
   const o = overall(status);
   const top = tasks.filter((t) => t.kind !== "fyi").slice(0, 5);
   const more = tasks.filter((t) => t.kind !== "fyi").length - top.length;
@@ -23,6 +31,7 @@ export default async function Today() {
       <H1 right={name}>{today}</H1>
       <Link href="/health" className="block mb-4"><Banner level={o.level} text={o.level === "ok" ? "System: all good" : `System: ${o.text}`} /></Link>
 
+      {handed > 0 && <Link href="/inbox" className="block mb-4"><div className="card border-accent text-sm font-semibold">{handedBy ? `${handedBy} handed you` : "Handed to you:"} {handed} item{handed === 1 ? "" : "s"} in the Inbox. <span className="text-accent">Open</span></div></Link>}
       <section className="mb-5">
         <div className="flex items-baseline justify-between mb-2">
           <h2 className="text-base">Needs you</h2>
