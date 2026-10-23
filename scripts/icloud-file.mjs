@@ -48,11 +48,11 @@ const MONTHS = parseInt(opt("--months") || "12", 10); // how old counts as "old"
 const WIN = (opt("--window") || "0-9999").split("-").map((x) => parseInt(x, 10)); // only touch mail in this slice, in months ago: 0-12, then 12-24, ...
 const WIN_NEW_MS = Date.now() - (WIN[0] || 0) * 30.44 * 86400_000, WIN_OLD_MS = Date.now() - (WIN[1] || 9999) * 30.44 * 86400_000;
 const keep = (opt("--keep") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-const readEnv = (p) => { const o = {}; if (!existsSync(p)) return o; for (const l of readFileSync(p, "utf8").split("\n")) { const m = l.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; };
-const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+export const readEnv = (p) => { const o = {}; if (!existsSync(p)) return o; for (const l of readFileSync(p, "utf8").split("\n")) { const m = l.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; };
+export const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 const hdr = (buf, name) => { const m = String(buf || "").match(new RegExp(`^${name}:\\s*(.*)$`, "im")); return m ? m[1].trim() : ""; };
 
-async function connect() {
+export async function connect() {
   const envPath = (opt("--env") || join(homedir(), "_secrets_local_only", "email-agent", "icloud-ryan.env")).replace(/^~/, homedir());
   const e = readEnv(envPath);
   if (!e.ICLOUD_MAIL_USER || !e.ICLOUD_MAIL_APP_PASSWORD) { console.error(`STOP: ICLOUD_MAIL_USER / ICLOUD_MAIL_APP_PASSWORD not found in ${envPath}`); process.exit(1); }
@@ -60,7 +60,20 @@ async function connect() {
   await c.connect();
   return { c, user: e.ICLOUD_MAIL_USER };
 }
-async function ensureFolder(c, path) { try { await c.mailboxCreate(path); } catch (e) { if (!/exist/i.test(String(e.responseText || e.message || e))) { /* some servers say ALREADYEXISTS differently; the move will fail loudly if it is really missing */ } } }
+export async function ensureFolder(c, path) { try { await c.mailboxCreate(path); } catch (e) { if (!/exist/i.test(String(e.responseText || e.message || e))) { /* some servers say ALREADYEXISTS differently; the move will fail loudly if it is really missing */ } } }
+
+// Reads headers of every INBOX message (BODY.PEEK, nothing is marked read). The caller must hold the INBOX lock. Newest first.
+export async function scanInbox(c) {
+  const uids = c.mailbox.exists ? await c.search({ all: true }, { uid: true }) : [];
+  const rows = [];
+  for (const g of chunks(uids, 400)) for await (const m of c.fetch(g.join(","), { uid: true, flags: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted"] }, { uid: true })) {
+    const a = (m.envelope?.from?.[0]?.address || "").toLowerCase();
+    rows.push({ uid: m.uid, flagged: m.flags?.has("\\Flagged"), date: new Date(m.envelope?.date || m.internalDate).getTime(), subject: m.envelope?.subject || "", address: a, domain: a.split("@")[1] || "",
+      messageId: (m.envelope?.messageId || "").replace(/^<|>$/g, ""), listUnsubscribe: !!hdr(m.headers, "list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(hdr(m.headers, "precedence")), autoSubmitted: !!hdr(m.headers, "auto-submitted") && !/^no$/i.test(hdr(m.headers, "auto-submitted")) });
+  }
+  rows.sort((x, y) => y.date - x.date);
+  return rows;
+}
 
 async function main() {
   const undoDir = join(homedir(), "_secrets_local_only", "email-agent", "undo"); mkdirSync(undoDir, { recursive: true });
@@ -69,14 +82,7 @@ async function main() {
     if (UNDO) return await undo(c, UNDO);
     const lock = await c.getMailboxLock("INBOX");
     try {
-      const uids = c.mailbox.exists ? await c.search({ all: true }, { uid: true }) : [];
-      const rows = [];
-      for (const g of chunks(uids, 400)) for await (const m of c.fetch(g.join(","), { uid: true, flags: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted"] }, { uid: true })) {
-        const a = (m.envelope?.from?.[0]?.address || "").toLowerCase();
-        rows.push({ uid: m.uid, flagged: m.flags?.has("\\Flagged"), date: new Date(m.envelope?.date || m.internalDate).getTime(), subject: m.envelope?.subject || "", address: a, domain: a.split("@")[1] || "",
-          messageId: (m.envelope?.messageId || "").replace(/^<|>$/g, ""), listUnsubscribe: !!hdr(m.headers, "list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(hdr(m.headers, "precedence")), autoSubmitted: !!hdr(m.headers, "auto-submitted") && !/^no$/i.test(hdr(m.headers, "auto-submitted")) });
-      }
-      rows.sort((x, y) => y.date - x.date); // newest first
+      const rows = await scanInbox(c);
       const plan = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, ...classify(r, { months: MONTHS, keep }) }));
       const by = (k) => plan.filter((p) => p.to === k);
       console.log(`${user}: ${rows.length} messages in the inbox; ${plan.length} in this window (${WIN[0] || 0}-${WIN[1] || "all"} months ago).`);

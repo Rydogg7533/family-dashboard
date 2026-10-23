@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { decideFromAnswer, triageSystem } from "./icloud-triage.mjs";
+const t = (d, o) => decideFromAnswer(d, o).act;
+assert.equal(t(null), "stay");
+assert.equal(t({ needs_action: true, kind: "do", urgency: "now" }), "task");
+assert.equal(t({ needs_action: true, kind: "reply", urgency: "soon" }), "task");
+assert.equal(t({ needs_action: true, kind: "do", urgency: "whenever" }), "stay");
+assert.equal(t({ needs_action: true, kind: "do", urgency: "whenever" }, { includeWhenever: true }), "task");
+assert.equal(t({ needs_action: false, kind: "fyi", keep: true }), "records");
+assert.equal(t({ needs_action: false, kind: "ignore", subscription: { service: "X" } }), "records");
+assert.equal(t({ needs_action: false, kind: "ignore", keep: false }), "handled");
+assert.ok(/subscription/.test(triageSystem("2026-10-23")));
+console.log("icloud-triage: all checks passed");

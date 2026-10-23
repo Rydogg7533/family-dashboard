@@ -26,11 +26,11 @@ export function loadKey(envFile) {
 }
 
 // One model call per message; one extra try when the answer is not valid JSON. Returns { out, raw, inTok, outTok }.
-export async function ask(r, { key, api, model, today }) {
+export async function ask(r, { key, api, model, today, system }) {
   let retried = false, inTok = 0, outTok = 0;
   for (let attempt = 1; attempt <= 5; attempt++) {
     const res = await fetch(api, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model, max_tokens: 700, system: systemPrompt(today), messages: [{ role: "user", content: userText(r) }] }) });
+      body: JSON.stringify({ model, max_tokens: 700, system: system || systemPrompt(today), messages: [{ role: "user", content: userText(r) }] }) });
     if (res.status === 429 || res.status >= 500) { await sleep(1500 * attempt); continue; }
     const j = await res.json();
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${j?.error?.message || "error"}`);
