@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { connect, scanInbox, classify, ensureFolder, chunks, readEnv } from "./icloud-file.mjs";
+import { suspicion } from "./phish-lib.mjs";
 import { systemPrompt, loadKey, ask, loadCache, saveCache } from "./email-triage-lib.mjs";
 
 const args = process.argv.slice(2);
@@ -37,7 +38,7 @@ const neverFile = join(secrets, "email-agent", "never-send.txt");
 const neverList = [...(existsSync(neverFile) ? readFileSync(neverFile, "utf8").split("\n") : []), ...(opt("--never") || "").split(",")].map((l) => l.replace(/#.*/, "").trim().toLowerCase()).filter(Boolean);
 export const isNever = (m) => neverList.some((k) => m.address === k || m.domain === k || m.domain.endsWith("." + k));
 
-export const FOLDERS = { waiting: "Dashboard/Waiting", records: "Dashboard/Records", handled: "Dashboard/Handled" };
+export const FOLDERS = { suspicious: "Dashboard/Suspicious", waiting: "Dashboard/Waiting", records: "Dashboard/Records", handled: "Dashboard/Handled" };
 const PV = 2;   // prompt version: answers saved under an older prompt are asked again
 const EXTRA = `
 TASK RULE (strict, the household hates unnecessary tasks): needs_action is true ONLY when a real person is waiting for Ryan's reply, money is due or has failed (declined card, past-due bill, payment failed), a form, signature or deadline comes from a known organization, or a decision has a real deadline. Automated notices are NOT tasks: sign-in alerts, "was this you" checks, password or app-password confirmations, balance or spending alerts, progress reports, newsletters, document-signing notices, invitations to a portal. For those answer needs_action false, kind "fyi", urgency "whenever", and set keep true only if the information is worth filing.
@@ -81,11 +82,12 @@ async function main() {
     const lock = await c.getMailboxLock("INBOX");
     try {
       const rows = await scanInbox(c);
-      const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => r.cls.to === null && /needs a person/.test(r.cls.why));
-      const never = cands.filter(isNever), eligible = cands.filter((r) => !isNever(r));
+      const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => (r.cls.to === null && /needs a person/.test(r.cls.why)) || r.cls.to === "suspicious");
+      const sus = cands.filter((r) => r.cls.to === "suspicious"), never = cands.filter((r) => r.cls.to !== "suspicious" && isNever(r)), eligible = cands.filter((r) => r.cls.to !== "suspicious" && !isNever(r));
       const cache = loadCache(`icloud-${user}`);
       const fresh = eligible.filter((r) => cache[keyOf(r)]?.v !== PV);
       console.log(`${user}: ${rows.length} in the inbox; ${cands.length} in this window need a judgment (the free rules could not place them).`);
+      console.log(`  suspicious (never sent to the model, never a task): ${sus.length}${sus.length ? `   e.g. ${sus.slice(0, 4).map((r) => `${r.address} (${r.cls.why})`).join(" | ")}` : ""}`);
       console.log(`  never-send list: ${neverList.length} entries; ${never.length} of these messages are kept out of the model and stay in your inbox.`);
       console.log(`  already judged (cached): ${eligible.length - fresh.length}; to ask the model: ${fresh.length}.`);
       const est = fresh.length * (950 * PRICE_IN + 350 * PRICE_OUT) / 1e6;
@@ -130,7 +132,7 @@ async function main() {
       if (!APPLY) { console.log(ASK ? "\nNothing else changed. Review the lists above; add anyone to the never-send file and re-run --ask, or run with --apply." : "\nDRY RUN: nothing sent, nothing changed. Add --ask to send the eligible ones to the model."); return; }
 
       // ---- apply: cached answers only ----
-      const todo = plan.filter((p) => p.act !== "stay").slice(0, LIMIT);
+      const todo = [...sus.map((r) => ({ r, act: "suspicious" })), ...plan.filter((p) => p.act !== "stay")].slice(0, LIMIT);
       if (!todo.length) { console.log("\nNothing to apply (no cached answers for this slice? run with --ask first)."); return; }
       const env = readEnv(join(secrets, "family-dashboard.env"));
       const SB = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL, SK = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
@@ -156,7 +158,7 @@ async function main() {
         if (!ex.length) {
           const due = d.urgency === "now" ? new Date().toISOString() : new Date(Date.now() + 3 * 86400_000).toISOString();
           const row = await rest("POST", "tasks", { merge_key: mk, kind: d.kind, tier: 2, origin_kind: "email", origin_ref: null, due_at: due, person,
-            title: `${String(d.title || r.subject || "(no subject)").slice(0, 80)}${n > 1 ? ` (×${n})` : ""}`, summary: `${d.why || ""} (${r.address}, ${new Date(r.date).toISOString().slice(0, 10)}; moved to Waiting in iCloud Mail)`.slice(0, 300),
+            title: `${String(d.title || r.subject || "(no subject)").slice(0, 80)}${n > 1 ? ` (×${n})` : ""}`, summary: `${d.why || ""} (from ${r.address} · no links kept from the email, open it in Mail yourself; ${new Date(r.date).toISOString().slice(0, 10)}; moved to Waiting in iCloud Mail)`.slice(0, 300),
             origins: list.slice(0, 50).map((x) => ({ kind: "email", account: user, messageId: x.r.messageId, date: new Date(x.r.date).toISOString() })) }, { Prefer: "return=representation" });
           await rest("POST", "activity_log", { actor: "icloud-triage", action: "task_suggested", subject: String(d.title || r.subject).slice(0, 200), ref: row[0].id, undoable: false });
           made++;
@@ -168,7 +170,7 @@ async function main() {
       const undoFile = join(undoDir, `icloud-triage-${stamp}.json`);
       const log = { account: user, at: new Date().toISOString(), moves: [] };
       writeFileSync(undoFile, JSON.stringify(log));
-      const dest = (p) => (p.act === "task" ? FOLDERS.waiting : p.act === "records" ? FOLDERS.records : FOLDERS.handled);
+      const dest = (p) => (p.act === "suspicious" ? FOLDERS.suspicious : p.act === "task" ? FOLDERS.waiting : p.act === "records" ? FOLDERS.records : FOLDERS.handled);
       for (const f of new Set(todo.map(dest))) await ensureFolder(c, f);
       let moved = 0;
       for (const f of new Set(todo.map(dest))) {

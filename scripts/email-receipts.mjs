@@ -13,6 +13,7 @@
 // The MAILBOX IS NEVER CHANGED: Gmail is opened read-only (any write call throws); iCloud folders are opened EXAMINE with BODY.PEEK.
 // Nothing is deleted, nothing is sent, no model is called. Secrets: ~/_secrets_local_only/family-dashboard.env (Supabase) and
 // ~/_secrets_local_only/email-agent/ (Gmail tokens, icloud-ryan.env). Never printed.
+import { suspicion, authFailed, replyDomainOf } from "./phish-lib.mjs";
 import { readFileSync, existsSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -21,6 +22,7 @@ import { dir, option, openGmail, parse, decide, merchantKey, amountOf } from "./
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
+let skippedSus = 0;   // money-looking mail that failed the phishing screen: no sighting, no attachment copied
 const account = option(args, "--account"); if (!account) { console.error("STOP: pass --account <address>"); process.exit(2); }
 const MONTHS = parseInt(option(args, "--months") || "12", 10);
 const MIN_KB = parseInt(option(args, "--min-kb") || "20", 10);
@@ -91,11 +93,11 @@ async function* moneyMail() {
       console.log(`${uids.length} inbox messages, ${WIN_TXT}`);
       const money = [];
       for (let i = 0; i < uids.length; i += 500) {
-        for await (const m of c.fetch(uids.slice(i, i + 500).join(","), { uid: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted"] }, { uid: true })) {
+        for await (const m of c.fetch(uids.slice(i, i + 500).join(","), { uid: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted", "authentication-results", "reply-to"] }, { uid: true })) {
           const hv = String(m.headers || ""); const h = (n) => (hv.match(new RegExp(`^${n}:[ \\t]*(.*)`, "im")) || [])[1] || "";
           const ev = m.envelope || {}; const f = ev.from?.[0] || {}; const address = (f.address || "").toLowerCase();
           const e = { subject: ev.subject || "", snippet: "", folder: "inbox", address, name: f.name || "", domain: address.split("@")[1] || "", listUnsubscribe: !!h("list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(h("precedence")), autoSubmitted: !!h("auto-submitted") && !/^no$/i.test(h("auto-submitted")), date: new Date(ev.date || m.internalDate).toISOString().slice(0, 10) };
-          if (decide(e).action === "money") money.push({ uid: m.uid, e });
+          if (decide(e).action === "money") { if (suspicion({ ...e, authFail: authFailed(hv), replyDomain: replyDomainOf(hv) }).length) { skippedSus++; continue; } money.push({ uid: m.uid, e }); }
         }
         process.stdout.write(`\r  checked ${Math.min(i + 500, uids.length)}/${uids.length}`);
       }
@@ -147,6 +149,7 @@ async function main() {
     const rows = (await rest("GET", `inbox_items?origin=eq.Email&origin_label=eq.${encodeURIComponent(account)}&select=id`)).length;
     const obs = (await rest("GET", `recurring_observations?mailbox=eq.${encodeURIComponent(account)}&source=eq.receipt&select=id`)).length;
     console.log(`  verified in the database: ${rows} Email documents in the Inbox for this account, ${obs} receipt sightings. Mailbox unchanged.`);
+    if (skippedSus) console.log(`  skipped as suspicious (not recorded, attachments not copied): ${skippedSus}.`);
     await rest("POST", "activity_log", { actor: "email-agent", action: "email_receipts", subject: `${account}: ${stats.docs} receipt documents added to the Inbox, ${stats.sightings} sightings recorded`, ref: account, undoable: false }).catch(() => {});
   } else console.log("  Nothing was changed. Run again with --apply to do it.");
 }

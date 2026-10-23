@@ -22,12 +22,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ImapFlow } from "imapflow";
 import { decide } from "./email-lib.mjs";
+import { suspicion, authFailed, replyDomainOf } from "./phish-lib.mjs";
 
-export const FOLDERS = { handled: "Dashboard/Handled", money: "Dashboard/Money", records: "Dashboard/Records", archive: "Dashboard/Archive older than 12 months" };
+export const FOLDERS = { handled: "Dashboard/Handled", money: "Dashboard/Money", records: "Dashboard/Records", archive: "Dashboard/Archive older than 12 months", suspicious: "Dashboard/Suspicious" };
 
 // Pure: where one message should go, or null to leave it in the inbox. m = { flagged, date (ms), subject, address, domain, listUnsubscribe, precedenceBulk, autoSubmitted }
 export function classify(m, { now = Date.now(), months = 12, keep = [] } = {}) {
   if (m.flagged) return { to: null, why: "starred" };
+  const sus = suspicion(m); if (sus.length) return { to: "suspicious", why: sus[0] };
   if (keep.some((k) => m.address === k || m.domain === k || m.domain.endsWith("." + k))) return { to: null, why: "sender you keep" };
   const old = m.date && m.date < now - months * 30.44 * 86400_000;
   const d = decide({ folder: "inbox", subject: m.subject || "", snippet: "", address: m.address || "", listUnsubscribe: !!m.listUnsubscribe, precedenceBulk: !!m.precedenceBulk, autoSubmitted: !!m.autoSubmitted });
@@ -66,9 +68,9 @@ export async function ensureFolder(c, path) { try { await c.mailboxCreate(path);
 export async function scanInbox(c) {
   const uids = c.mailbox.exists ? await c.search({ all: true }, { uid: true }) : [];
   const rows = [];
-  for (const g of chunks(uids, 400)) for await (const m of c.fetch(g.join(","), { uid: true, flags: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted"] }, { uid: true })) {
+  for (const g of chunks(uids, 400)) for await (const m of c.fetch(g.join(","), { uid: true, flags: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted", "authentication-results", "reply-to"] }, { uid: true })) {
     const a = (m.envelope?.from?.[0]?.address || "").toLowerCase();
-    rows.push({ uid: m.uid, flagged: m.flags?.has("\\Flagged"), date: new Date(m.envelope?.date || m.internalDate).getTime(), subject: m.envelope?.subject || "", address: a, domain: a.split("@")[1] || "",
+    rows.push({ uid: m.uid, flagged: m.flags?.has("\\Flagged"), date: new Date(m.envelope?.date || m.internalDate).getTime(), subject: m.envelope?.subject || "", address: a, name: m.envelope?.from?.[0]?.name || "", domain: a.split("@")[1] || "", authFail: authFailed(m.headers), replyDomain: replyDomainOf(m.headers),
       messageId: (m.envelope?.messageId || "").replace(/^<|>$/g, ""), listUnsubscribe: !!hdr(m.headers, "list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(hdr(m.headers, "precedence")), autoSubmitted: !!hdr(m.headers, "auto-submitted") && !/^no$/i.test(hdr(m.headers, "auto-submitted")) });
   }
   rows.sort((x, y) => y.date - x.date);
@@ -86,7 +88,7 @@ async function main() {
       const plan = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, ...classify(r, { months: MONTHS, keep }) }));
       const by = (k) => plan.filter((p) => p.to === k);
       console.log(`${user}: ${rows.length} messages in the inbox; ${plan.length} in this window (${WIN[0] || 0}-${WIN[1] || "all"} months ago).`);
-      for (const k of ["handled", "money", "records", "archive"]) { const l = by(k); console.log(`  → ${FOLDERS[k].padEnd(40)} ${String(l.length).padStart(5)}${l.length ? `   e.g. ${l.slice(0, 3).map((p) => `${p.address} "${p.subject.slice(0, 40)}"`).join(" | ")}` : ""}`); }
+      for (const k of ["handled", "money", "records", "archive", "suspicious"]) { const l = by(k); console.log(`  → ${FOLDERS[k].padEnd(40)} ${String(l.length).padStart(5)}${l.length ? `   e.g. ${l.slice(0, 3).map((p) => `${p.address} "${p.subject.slice(0, 40)}"`).join(" | ")}` : ""}`); }
       const stay = plan.filter((p) => !p.to);
       const stays = {}; for (const p of stay) stays[p.why] = (stays[p.why] || 0) + 1;
       console.log(`  stays in the inbox ${String(stay.length).padStart(5)}   (${Object.entries(stays).map(([k, v]) => `${v} ${k}`).join(", ")})`);
@@ -97,9 +99,9 @@ async function main() {
       const undoFile = join(undoDir, `icloud-${stamp}.json`);
       const log = { account: user, at: new Date().toISOString(), moves: [] };
       writeFileSync(undoFile, JSON.stringify(log));
-      for (const k of ["handled", "money", "records", "archive"]) if (todo.some((p) => p.to === k)) await ensureFolder(c, FOLDERS[k]);
+      for (const k of ["handled", "money", "records", "archive", "suspicious"]) if (todo.some((p) => p.to === k)) await ensureFolder(c, FOLDERS[k]);
       let moved = 0;
-      for (const k of ["handled", "money", "records", "archive"]) {
+      for (const k of ["handled", "money", "records", "archive", "suspicious"]) {
         const group = todo.filter((p) => p.to === k);
         for (const g of chunks(group, 100)) {
           const res = await c.messageMove(g.map((p) => p.uid).join(","), FOLDERS[k], { uid: true });
