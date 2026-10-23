@@ -12,8 +12,8 @@
 // Secrets and settings: ~/_secrets_local_only/family-dashboard.env  (SUPABASE_URL, SUPABASE_SERVICE_KEY, MIRROR_PERSON_ID,
 //   MIRROR_FAMILY_HANDLES="Melissa=+18015551234,Melissa=melissa@icloud.com,Child=+1801...", MIRROR_DAYS=30). Never printed.
 // Needs: Full Disk Access for the node binary that runs it (to read chat.db) and Automation permission for Messages (to send).
-import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,8 +34,9 @@ const COPY = join(TMP, "chat.db");
 function snapshot() {
   if (!existsSync(DB)) throw new Error(`Messages database not found at ${DB}`);
   for (const f of ["chat.db", "chat.db-wal", "chat.db-shm"]) rmSync(join(TMP, f), { force: true });
-  const r = spawnSync("sqlite3", [`file:${DB}?mode=ro`, `.backup '${COPY}'`], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(/unable to open|authorization denied|permission/i.test(r.stderr) ? "cannot read chat.db: give Full Disk Access to the node binary (System Settings › Privacy & Security › Full Disk Access)" : (r.stderr || "sqlite3 backup failed").trim());
+  // Copy the database files (read-only on the source); the live file is never opened for writing.
+  try { copyFileSync(DB, COPY); for (const x of ["-wal", "-shm"]) if (existsSync(DB + x)) copyFileSync(DB + x, COPY + x); }
+  catch (e) { throw new Error(/EPERM|EACCES|not permitted/i.test(String(e)) ? "cannot read chat.db: give Full Disk Access to the node binary and to Terminal (System Settings › Privacy & Security › Full Disk Access)" : `cannot copy chat.db: ${e.message}`); }
 }
 const q = (sql) => { const r = spawnSync("sqlite3", ["-json", "-readonly", COPY, sql], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error((r.stderr || "query failed").trim()); return r.stdout.trim() ? JSON.parse(r.stdout) : []; };
 const APPLE_EPOCH = 978307200;
