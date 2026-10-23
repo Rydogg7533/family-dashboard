@@ -207,6 +207,7 @@ function FolderFix({ item }: { item: InboxItem }) {
       <button type="button" onClick={toggle} className="font-semibold text-accent min-h-8">{open ? "Hide folder options" : "Wrong folder? Ask or change it"}</button>
       {open && (
         <div className="mt-1 flex flex-col gap-2 rounded-xl border border-line p-2">
+          <button type="button" disabled={busy} onClick={() => void run({ request: "Check whether this folder is correct for this document. If it is clearly wrong, move it to the right one." })} className="min-h-10 rounded-xl bg-accent text-white text-sm font-semibold disabled:opacity-40">{busy ? "Checking…" : "Check this folder for me"}</button>
           <form onSubmit={(e) => { e.preventDefault(); if (words.trim()) void run({ request: words }); }} className="flex gap-2">
             <input value={words} onChange={(e) => setWords(e.target.value)} placeholder="Is this the right folder? Or: put it under Home" className="flex-1 min-h-10 rounded-xl border border-line bg-bg px-3 text-sm" />
             <button type="submit" disabled={busy || !words.trim()} className="min-h-10 px-3 rounded-xl bg-soft text-sm font-semibold disabled:opacity-40">{busy ? "…" : "Ask"}</button>
