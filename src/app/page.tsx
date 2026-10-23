@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { getDisplayName, getOpenTasks, getStatus, overall } from "@/lib/data";
+import { getDisplayName, getOpenTasks, getPeopleNames, getStatus, overall } from "@/lib/data";
+import { getRequestUser } from "@/lib/supabase/server";
+import { splitTasks } from "@/lib/tasks-view";
 import { Banner, Card, H1 } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
 
@@ -7,7 +9,9 @@ import { TaskRow } from "@/components/TaskRow";
 export const dynamic = "force-dynamic";
 
 export default async function Today() {
-  const [name, status, tasks] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks()]);
+  const [name, status, allTasks, names, user] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser()]);
+  const me = user?.id ?? null;
+  const tasks = splitTasks(allTasks, me).mine;
   const o = overall(status);
   const top = tasks.filter((t) => t.kind !== "fyi").slice(0, 5);
   const more = tasks.filter((t) => t.kind !== "fyi").length - top.length;
@@ -28,7 +32,7 @@ export default async function Today() {
           <Card className="text-muted">Nothing needs you right now.</Card>
         ) : (
           <div className="flex flex-col gap-2">
-            {top.map((t) => <TaskRow key={t.id} task={t} />)}
+            {top.map((t) => <TaskRow key={t.id} task={t} me={me} names={names} />)}
             {more > 0 && <Link href="/tasks" className="text-sm font-semibold text-accent px-1">and {more} more</Link>}
           </div>
         )}

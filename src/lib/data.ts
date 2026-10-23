@@ -99,3 +99,10 @@ export function ago(iso: string | null) {
   if (hrs < 48) return `${hrs} h ago`;
   return `${Math.round(hrs / 24)} d ago`;
 }
+
+export async function getPeopleNames(): Promise<Record<string, string>> {
+  if (!hasSupabaseEnv()) return {};
+  const sb = await createClient();
+  const { data } = await sb.from("profiles").select("id,display_name");
+  return Object.fromEntries((data ?? []).map((p) => [p.id as string, String(p.display_name ?? "")]));
+}

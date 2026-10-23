@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
@@ -90,7 +91,8 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     }).select("id").single();
     if (!error && claim) {
       filed.claim_id = claim.id;
-      const { data: task } = await sb.from("tasks").insert({ person: user.id, kind: "do", title: `Check for the ${r.vendor ?? "vendor"} reimbursement${r.amount != null ? ` ($${r.amount.toFixed(2)})` : ""}`, summary: `Claim opened ${new Date().toISOString().slice(0, 10)}; they said up to four weeks.`, origin_kind: "claim", origin_ref: claim.id, due_at: new Date(checkBy + "T17:00:00").toISOString(), tier: 2 }).select("id").single();
+      const assign = await defaultAssignment(sb, user.id, vehicle?.id ?? null);
+      const { data: task } = await sb.from("tasks").insert({ person: assign.person, audience: assign.audience, fyi: assign.fyi, kind: "do", title: `Check for the ${r.vendor ?? "vendor"} reimbursement${r.amount != null ? ` ($${r.amount.toFixed(2)})` : ""}`, summary: `Claim opened ${new Date().toISOString().slice(0, 10)}; they said up to four weeks.`, origin_kind: "claim", origin_ref: claim.id, due_at: new Date(checkBy + "T17:00:00").toISOString(), tier: 2 }).select("id").single();
       if (task) filed.task_id = task.id;
       done.push(`claim opened, reminder set for ${checkBy}`);
     }

@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { defaultAssignment } from "@/lib/task-defaults";
 
 export type WarrantyRow = {
   key: string; source: "vehicle" | "device" | "other"; item: string; who: string; provider: string | null;
@@ -18,6 +19,7 @@ export function stateOf(w: WarrantyRow): WState {
 }
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
+const vehicleOf = (key: string) => (key.startsWith("veh:") ? key.split(":")[1] : null);
 
 export async function collectWarranties(sb: Sb): Promise<WarrantyRow[]> {
   const out: WarrantyRow[] = [];
@@ -51,7 +53,8 @@ export async function ensureReminders(sb: Sb, userId: string, rows: WarrantyRow[
     const ref = `${w.key}@${w.end}`;
     if (seen.has(ref)) continue;
     const dueAt = new Date(Math.max(Date.now(), Date.parse(w.end!) - 30 * 86400_000));
-    await sb.from("tasks").insert({ person: userId, kind: "decide", title: `${w.item} (${w.who}) warranty ends ${w.end}: extend or let it lapse`, summary: w.terms ?? null, origin_kind: "warranty", origin_ref: ref, due_at: dueAt.toISOString(), tier: 2 }).then(() => {}, () => {});
+    const a = await defaultAssignment(sb, userId, vehicleOf(w.key));
+    await sb.from("tasks").insert({ person: a.person, audience: a.audience, fyi: a.fyi, kind: "decide", title: `${w.item} (${w.who}) warranty ends ${w.end}: extend or let it lapse`, summary: w.terms ?? null, origin_kind: "warranty", origin_ref: ref, due_at: dueAt.toISOString(), tier: 2 }).then(() => {}, () => {});
   }
 }
 
@@ -65,7 +68,8 @@ export async function ensureEndDateTasks(sb: Sb, userId: string, rows: WarrantyR
   for (const w of needs) {
     const ref = `${w.key}${suffix}`;
     if (byRef.has(ref)) continue;
-    await sb.from("tasks").insert({ person: userId, kind: "do", title: `Add the end date for the ${w.item} warranty (${w.who})`, summary: w.source === "vehicle" ? "The paper didn’t give an end date. Open the vehicle, Edit details, Warranties." : "No end date yet. Open Warranties and add it, or dismiss this if it has none.", origin_kind: "warranty", origin_ref: ref, due_at: new Date().toISOString(), tier: 2 }).then(() => {}, () => {});
+    const a = await defaultAssignment(sb, userId, vehicleOf(w.key));
+    await sb.from("tasks").insert({ person: a.person, audience: a.audience, fyi: a.fyi, kind: "do", title: `Add the end date for the ${w.item} warranty (${w.who})`, summary: w.source === "vehicle" ? "The paper didn’t give an end date. Open the vehicle, Edit details, Warranties." : "No end date yet. Open Warranties and add it, or dismiss this if it has none.", origin_kind: "warranty", origin_ref: ref, due_at: new Date().toISOString(), tier: 2 }).then(() => {}, () => {});
   }
   // Finished: the date is now there, or the warranty no longer exists.
   const haveEnd = new Set(rows.filter((w) => w.end).map((w) => w.key));
