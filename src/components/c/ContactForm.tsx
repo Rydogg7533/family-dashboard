@@ -84,7 +84,7 @@ export default function ContactForm({ card, onDone }: { card?: ContactCard; onDo
       {card?.provider === "google" && (confirmDel
         ? <div className="rounded-xl border border-line p-3 flex flex-col gap-2">
             <div className="font-semibold">Delete {card.fullName} from Google Contacts?</div>
-            <div className="text-xs text-muted">A full copy is saved first. It also leaves your phone’s contacts.</div>
+            <div className="text-xs text-muted">A full copy is saved first, and Google keeps it in Trash for 30 days. It also leaves your phone’s contacts.</div>
             <div className="flex gap-2">
               <button type="button" disabled={busy} onClick={remove} className="flex-1 min-h-11 rounded-xl bg-red text-white font-semibold disabled:opacity-60">{busy ? "Working…" : "Yes, delete"}</button>
               <button type="button" disabled={busy} onClick={() => setConfirmDel(false)} className="min-h-11 px-4 rounded-xl bg-soft font-semibold">Keep</button>
