@@ -12,31 +12,34 @@ const ALPHA = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
 // Apple-style index: run a finger up and down the letters and the list follows; letters with no contacts jump to the next one.
 function IndexRail({ present, stickTop }: { present: string[]; stickTop: number }) {
   const ref = useRef<HTMLElement>(null);
-  const [bubble, setBubble] = useState<string | null>(null);
+  const [pos, setPos] = useState<number | null>(null);   // finger position in letter slots (fractional); drives the Dock-style magnify
   const last = useRef<string | null>(null);
   const tickLabel = useRef<HTMLLabelElement>(null);   // hidden iOS switch that gives the haptic tick (see src/lib/haptics.ts)
   const go = (clientY: number) => {
     const r = ref.current?.getBoundingClientRect(); if (!r || !present.length) return;
+    setPos(Math.max(0, Math.min(ALPHA.length - 1, ((clientY - r.top - 4) / (r.height - 8)) * (ALPHA.length - 1))));
     const i = Math.max(0, Math.min(ALPHA.length - 1, Math.floor(((clientY - r.top) / r.height) * ALPHA.length)));
     const hit = ALPHA.slice(i).find((l) => present.includes(l)) ?? [...present].reverse().find((l) => ALPHA.indexOf(l) <= i) ?? present[present.length - 1];
     if (hit === last.current) return;
-    last.current = hit; setBubble(hit);
+    last.current = hit;
     const sec = document.getElementById(`g-${hit}`);
     if (sec) window.scrollTo(0, Math.max(0, sec.getBoundingClientRect().top + window.scrollY - (stickTop - 1)));   // measured, not assumed: the letter lands flush under the pinned bar
     tick(tickLabel.current);
   };
-  const end = () => { last.current = null; setBubble(null); };
+  const end = () => { last.current = null; setPos(null); };
   return (
     <>
       <nav ref={ref} aria-label="Jump to letter" onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); go(e.clientY); }} onPointerMove={(e) => { if (e.buttons || e.pointerType === "touch") go(e.clientY); }} onPointerUp={end} onPointerCancel={end}
         className="fixed right-0 z-20 w-8 flex flex-col justify-between items-center touch-none select-none text-[10px] font-bold text-accent leading-none py-1"
         style={{ top: "calc(150px + env(safe-area-inset-top))", bottom: "calc(132px + env(safe-area-inset-bottom))" }}>
-        {ALPHA.map((l) => <span key={l} className={present.includes(l) ? "" : "opacity-30"}>{l}</span>)}
+        {ALPHA.map((l, k) => {
+          const d = pos === null ? 9 : k - pos, s = 1 + 1.6 * Math.exp(-(d * d) / (2 * 1.2 * 1.2));   // Gaussian swell around the finger, like Dock magnification
+          return <span key={l} className={present.includes(l) ? "" : "opacity-30"} style={{ display: "block", transformOrigin: "right center", transform: `translateX(${-(s - 1) * 12}px) scale(${s})`, transition: pos === null ? "transform 150ms ease-out" : "transform 40ms linear" }}>{l}</span>;
+        })}
       </nav>
       <label ref={tickLabel} aria-hidden className="fixed left-0 top-0 size-px opacity-0 pointer-events-none overflow-hidden">
         <input type="checkbox" tabIndex={-1} {...({ switch: "" } as Record<string, string>)} />
       </label>
-      {bubble && <div aria-hidden className="fixed right-12 top-1/2 -translate-y-1/2 z-30 w-16 h-16 rounded-2xl bg-fg text-bg grid place-items-center text-3xl font-bold shadow-lg">{bubble}</div>}
     </>
   );
 }
