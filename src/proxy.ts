@@ -17,6 +17,8 @@ export async function proxy(request: NextRequest) {
   if (p === "/privacy" || p === "/terms") return NextResponse.next();
   // First run: /setup works before anyone can sign in. The page itself refuses once a profile exists.
   if (p === "/setup" || p.startsWith("/setup/")) return NextResponse.next();
+  // Password reset: the email link lands on /auth/callback signed out; /forgot-password is for signed-out people.
+  if (p === "/auth/callback" || p === "/forgot-password") return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
@@ -34,6 +36,8 @@ export async function proxy(request: NextRequest) {
   const { data: claimsData } = await supabase.auth.getClaims();
   const user = claimsData?.claims ?? null;
   const isLogin = request.nextUrl.pathname.startsWith("/login");
+  // /reset-password needs the session the callback just set; a signed-out visitor is sent to ask for a new link.
+  if (!user && request.nextUrl.pathname === "/reset-password") { const to = request.nextUrl.clone(); to.pathname = "/forgot-password"; return NextResponse.redirect(to); }
   if (!user && !isLogin) {
     const to = request.nextUrl.clone();
     to.pathname = "/login";
