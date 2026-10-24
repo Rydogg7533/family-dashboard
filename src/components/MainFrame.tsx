@@ -7,6 +7,6 @@ import { isAuthScreen } from "@/lib/frameless";
 export function MainFrame({ children }: { children: React.ReactNode }) {
   const frameless = isAuthScreen(usePathname());
   return (
-    <main className={`flex-1 w-full max-w-md mx-auto px-5 ${frameless ? "pt-[env(safe-area-inset-top)] pb-8" : "pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-[var(--page-bottom)]"}`}>{children}</main>
+    <main className={`flex-1 w-full max-w-md mx-auto px-5 ${frameless ? "pt-[calc(env(safe-area-inset-top)+96px)] pb-8" : "pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-[var(--page-bottom)]"}`}>{children}</main>
   );
 }
