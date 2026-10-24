@@ -38,7 +38,7 @@ export default function Login() {
   }
   return (
     <div className="pt-16">
-      <h1 className="text-3xl mb-1">Family Dashboard</h1>
+      <h1 className="text-5xl mb-1" style={{ fontFamily: "'Dancing Script', cursive", color: "var(--accent)" }}>StewardOS</h1>
       <p className="text-muted mb-6">Sign in to see what needs you.</p>
       <form onSubmit={submit} className="flex flex-col gap-3">
         <label className="text-sm font-semibold">Email<input className={input} type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>

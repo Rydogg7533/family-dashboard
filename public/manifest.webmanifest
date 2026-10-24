@@ -1,6 +1,6 @@
 {
-  "name": "Family Dashboard",
-  "short_name": "Family",
+  "name": "StewardOS",
+  "short_name": "StewardOS",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FFFFFF",
