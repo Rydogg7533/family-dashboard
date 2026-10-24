@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Mac mini → app Mail (stage 1: read-only Inbox + Drafts). Node 20+, no dependencies.
 //   node scripts/mail-sync.mjs --dry            # look only, write nothing
-//   node scripts/mail-sync.mjs                  # sync every saved Google account (what launchd runs every 5 minutes)
-//   node scripts/mail-sync.mjs --account a@b.com --person Ryan
+//   node scripts/mail-sync.mjs                  # sync every saved Google account that has an owner (what launchd runs every 5 minutes)
+//   node scripts/mail-sync.mjs --account a@b.com --person Melissa   # first run for a new mailbox: --person says whose it is
+// Whose mailbox is it: an account already in mail_accounts keeps its owner. A new account is only set up with --person; without it
+// the account is skipped (never assumed to be Ryan's), so one person's mail can never be filed under another.
 // Safety: the Gmail session is opened with allowWrite:false, so any non-GET call throws. It cannot send, label, archive or
 // delete. Mail that leaves the inbox is marked left_inbox_at in the database, never deleted. Message text is stored as
 // plain text only (HTML is flattened), in the household's own Supabase project, readable only by the mailbox owner.
@@ -15,7 +17,7 @@ import { parseGmailFull } from "./mail-lib.mjs";
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry");
 const MAX = parseInt(option(args, "--max") || "300", 10);
-const personName = option(args, "--person") || "Ryan";
+const personName = option(args, "--person");
 
 const envPath = join(homedir(), "_secrets_local_only", "family-dashboard.env");
 const env = {};
@@ -28,6 +30,9 @@ async function rest(method, path, body, extra = {}) {
   return t ? JSON.parse(t) : null;
 }
 const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+
+// Sign-in files for other purposes (google-<address>.contacts.json, .calendar.json, .sheets.json) are not mailboxes.
+export const isMailboxToken = (file) => { const m = file.match(/^google-(.+@.+)\.json$/); return m && !/\.(contacts|calendar|sheets)$/.test(m[1]) ? m[1] : null; };
 
 async function syncAccount(account, person, log) {
   const { api } = openGmail(["--account", account], { allowWrite: false });
@@ -69,12 +74,16 @@ async function syncAccount(account, person, log) {
 async function main() {
   if (!URL_ || !KEY) { console.error(`SUPABASE_URL / SUPABASE_SERVICE_KEY not set (looked in ${envPath})`); process.exit(1); }
   const named = option(args, "--account");
-  const accounts = named ? [named] : readdirSync(dir).map((f) => f.match(/^google-(.+@.+)\.json$/)?.[1]).filter(Boolean);
+  const accounts = named ? [named.toLowerCase()] : readdirSync(dir).map(isMailboxToken).filter(Boolean);
   if (!accounts.length) { console.error(`no saved Google sign-ins in ${dir}`); process.exit(1); }
-  const person = DRY ? "dry" : (await rest("GET", `profiles?display_name=ilike.${encodeURIComponent(personName)}&select=id`))[0]?.id;
-  if (!person) { console.error(`no profile named ${personName}`); process.exit(1); }
+  const named_person = personName && !DRY ? (await rest("GET", `profiles?display_name=ilike.${encodeURIComponent(personName)}&select=id`))[0]?.id : null;
+  if (personName && !DRY && !named_person) { console.error(`no profile named ${personName}`); process.exit(1); }
+  const owners = new Map(DRY ? [] : (await rest("GET", "mail_accounts?kind=eq.gmail&select=person,address")).map((r) => [r.address, r.person]));
   const log = []; let state = "ok";
   for (const a of accounts) {
+    const person = DRY ? "dry" : named_person || owners.get(a);
+    if (!person) { log.push(`${a}: SKIPPED, no owner yet (first run: node scripts/mail-sync.mjs --account ${a} --person <name>)`); continue; }
+    if (!DRY && named_person && owners.get(a) && owners.get(a) !== named_person) { state = "error"; log.push(`${a}: STOPPED, this mailbox already belongs to someone else`); continue; }
     try { await syncAccount(a, person, log); }
     catch (e) { state = "error"; log.push(`${a}: ERROR ${e.message}`); if (!DRY) await rest("PATCH", `mail_accounts?person=eq.${person}&address=eq.${encodeURIComponent(a)}`, { last_error: String(e.message).slice(0, 300) }, { Prefer: "return=minimal" }).catch(() => {}); }
   }
@@ -83,4 +92,4 @@ async function main() {
   console.log(`${new Date().toISOString()} ${DRY ? "(dry) " : ""}${summary}`);
   if (state === "error") process.exit(1);
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1] && process.argv[1].endsWith("mail-sync.mjs")) main().catch((e) => { console.error(e); process.exit(1); });

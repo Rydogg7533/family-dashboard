@@ -18,3 +18,13 @@ const only = parseGmailFull({ id: "m2", payload: { headers: [], mimeType: "text/
 assert.equal(only.body_text, "Only html"); assert.equal(only.sent_at, null);
 assert.deepEqual(parseAddressList('A <a@x.com>, "B, C" <b@x.com>, plain@x.com').map((x) => x.addr), ["a@x.com", "b@x.com", "plain@x.com"]);
 console.log("PASS: mail parsing (headers, addresses with commas, plain/HTML bodies, attachments, no tracking content)");
+
+// Mail sync only treats real Gmail sign-ins as mailboxes: contacts / calendar / sheets sign-ins are other purposes.
+{
+  const { isMailboxToken } = await import("./mail-sync.mjs");
+  const assert2 = (await import("node:assert/strict")).default;
+  assert2.equal(isMailboxToken("google-admin@shvr.co.json"), "admin@shvr.co");
+  assert2.equal(isMailboxToken("google-melissarossiter1@gmail.com.json"), "melissarossiter1@gmail.com");
+  for (const f of ["google-melissarossiter1@gmail.com.contacts.json", "google-rross15253@gmail.com.calendar.json", "google-admin@shvr.co.sheets.json", "google-oauth-client.json", "icloud-ryan.env", "google-admin@shvr.co.calendar.env"]) assert2.equal(isMailboxToken(f), null, f);
+  console.log("PASS: mail sync token files (only real Gmail sign-ins are mailboxes)");
+}
