@@ -23,7 +23,7 @@ export default function Login() {
         {err && <div className="text-red text-sm">{err}</div>}
         <button className="min-h-12 rounded-xl bg-accent text-white font-semibold disabled:opacity-50" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>
-      <p className="text-xs text-muted mt-6">No sign-up. Accounts are created by Ryan.</p>
+      <p className="text-xs text-muted mt-6">No sign-up here. Parents are created when the household is set up; children are added by a parent.</p>
     </div>
   );
 }

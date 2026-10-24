@@ -15,6 +15,8 @@ export async function proxy(request: NextRequest) {
   if (p.startsWith("/api/location/") || p === "/tv" || p.startsWith("/tv/")) return NextResponse.next();
   // Public legal pages (Google's OAuth consent screen links here): no login, no data, static text.
   if (p === "/privacy" || p === "/terms") return NextResponse.next();
+  // First run: /setup works before anyone can sign in. The page itself refuses once a profile exists.
+  if (p === "/setup" || p.startsWith("/setup/")) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
