@@ -18,12 +18,21 @@ begin
   -- 1. Generalize the live schema's singleton `household` table (id always 1) into a real,
   --    multi-row tenant table. Household 1 stays reserved for a possible real household on this
   --    project, but the demo project is expected to hold only demo households.
+  --    `create table if not exists` guards a brand-new project that hasn't run the live migrations
+  --    at all yet; `drop constraint if exists` removes the old `check (id = 1)` singleton guard,
+  --    found on the live table, that would otherwise block every row after the first.
+  create table if not exists public.household (id int primary key default 1);
+  alter table public.household drop constraint if exists household_id_check;
   alter table public.household alter column id drop default;
   create sequence if not exists public.household_id_seq owned by public.household.id;
-  perform setval('public.household_id_seq', (select max(id) from public.household));
+  perform setval('public.household_id_seq', coalesce((select max(id) from public.household), 1));
   alter table public.household alter column id set default nextval('public.household_id_seq');
   alter table public.household add column if not exists is_demo boolean not null default false;
   alter table public.household add column if not exists trial_expires_at timestamptz;
+  alter table public.household add column if not exists name text;
+  -- Seed row so every other table's `references household(id) default 1` below has something to
+  -- point at on a project whose household table came in empty (found on the test branch).
+  insert into public.household (id) values (1) on conflict (id) do nothing;
 
   -- 2. profiles.household_id: which household a signed-in person belongs to. Literal default 1
   --    backfills any existing profile instantly (metadata-only, no UPDATE -- see step 4 for why
