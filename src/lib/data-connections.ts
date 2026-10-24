@@ -54,10 +54,13 @@ export async function getMyConnections(): Promise<{ conns: Conn[]; dismissed: Se
     // connection) clears itself. Errors are shown in plain words, not API paths.
     const stale = (a: { last_sync_at: string | null }) => !a.last_sync_at || Date.now() - Date.parse(a.last_sync_at) > 60 * 60000;
     const plain = (e: string) => /retries|rate|429|timeout|ECONN|fetch failed/i.test(e) ? "the mail service is not answering right now" : /invalid_grant|revoked|expired|401|403|insufficient/i.test(e) ? "the sign-in has expired; sign in again on the Mac mini" : e.slice(0, 120);
-    const bad = accts.find((a) => a.last_error && stale(a)), okAcct = accts.find((a) => a.last_sync_at && !a.last_error);
-    if (bad) add("mail", "needs", `${bad.address}: ${plain(String(bad.last_error))} (no sync for ${bad.last_sync_at ? ago(bad.last_sync_at) : "ever"})`);
-    else if (okAcct) add("mail", "connected", `${accts.map((a) => a.address).join(", ")} · synced ${ago(okAcct.last_sync_at)}`);
-    else add("mail", "todo", accts.length ? "Signed in, waiting for the first sync." : STEP_PITCH.mail, accts.length ? undefined : "On the Mac mini, once: node scripts/mail-connect.mjs --provider gmail --account <your address> --person <your name>  (icloud or other instead of gmail). It asks for an app password.");
+    const bad = accts.filter((a) => a.last_error && stale(a));
+    const okAccts = accts.filter((a) => a.last_sync_at && !a.last_error);
+    const names = accts.map((a) => a.address).join(", ");
+    const n = accts.length, word = `${n} mailbox${n === 1 ? "" : "es"}`;
+    if (bad.length) add("mail", "needs", `${word}: ${names}. Needs attention: ${bad.map((a) => `${a.address} (${plain(String(a.last_error))}; no sync for ${a.last_sync_at ? ago(a.last_sync_at) : "ever"})`).join("; ")}`);
+    else if (okAccts.length) add("mail", "connected", `${word}: ${names} · last synced ${ago(okAccts.map((a) => a.last_sync_at!).sort().at(-1) ?? null)}`);
+    else add("mail", "todo", accts.length ? `${word} signed in, waiting for the first sync: ${names}` : STEP_PITCH.mail, accts.length ? undefined : "On the Mac mini, once: node scripts/mail-connect.mjs --provider gmail --account <your address> --person <your name>  (icloud or other instead of gmail). It asks for an app password.");
 
     hasGoogleCal() ? add("calendar", "connected", `Household calendar · ${googleCalAccount()}`) : add("calendar", "todo", STEP_PITCH.calendar);
 
