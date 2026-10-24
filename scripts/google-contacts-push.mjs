@@ -7,7 +7,7 @@
 //   • If the contact changed in Google since the person opened it (etag differs, or Google refuses the etag), nothing is
 //     written: status 'conflict'.
 //   • The contact as it was is saved to ~/Organized/_Contacts/backups/<stamp>/ before any change. Never overwritten.
-//   • Never deletes a contact. There is no delete call in this file.
+//   • Deletes a contact only when its owner asked in the app (op "delete"): etag checked, full copy saved first; the card is hidden (deleted_at), never erased.
 //   • After writing, the contact is read back from Google and the database row is refreshed from what Google now holds.
 // Flags: --dry (show what would be sent, change nothing)
 
@@ -26,6 +26,7 @@ export function peopleIo(api) {
     get: (rn) => api(`/v1/${rn}?personFields=${PERSON_FIELDS}`),
     patch: (rn, body, fields) => api(`/v1/${rn}:updateContact?updatePersonFields=${fields}&personFields=${PERSON_FIELDS}`, { method: "PATCH", body }),
     post: (body) => api(`/v1/people:createContact?personFields=${PERSON_FIELDS}`, { method: "POST", body }),
+    del: (rn) => api(`/v1/${rn}:deleteContact`, { method: "DELETE" }),
   };
 }
 const isPrecondition = (e) => e?.status === 400 && /FAILED_PRECONDITION/i.test(`${e.googleStatus || ""} ${e.message}`);
@@ -40,6 +41,16 @@ export async function applyEdit(edit, card, io, backup) {
       return { status: "applied", note: "Created in Google Contacts.", person: made };
     }
     if (!card) return { status: "error", note: "That contact no longer exists in the dashboard." };
+    if (edit.op === "delete") {
+      let cur;
+      try { cur = await io.get(card.href); }
+      catch (e) { if (e.status === 404) return { status: "applied", note: "Already deleted in Google Contacts.", deleted: true }; throw e; }
+      if (edit.base_etag && normEtag(cur.etag) !== normEtag(edit.base_etag)) return { status: "conflict", note: "This contact changed in Google Contacts after you asked to delete it. Nothing was deleted; open it again if you still want it gone." };
+      if (DRY) return { status: "applied", note: "dry run: would delete" };
+      backup(card.uid, JSON.stringify(cur, null, 2));
+      await io.del(card.href);
+      return { status: "applied", note: "Deleted from Google Contacts. A full copy was saved on the Mac mini first.", deleted: true };
+    }
     let cur;
     try { cur = await io.get(card.href); }
     catch (e) { if (e.status === 404) return { status: "conflict", note: "This contact was deleted in Google Contacts. Nothing was written." }; throw e; }
@@ -93,6 +104,7 @@ async function main() {
       const card = edit.card_id ? (await get(`contact_cards?id=eq.${edit.card_id}&person=eq.${edit.person}&provider=eq.google&select=id,uid,href,etag`))[0] : null;
       const res = await applyEdit(edit, card, io, backup);
       if (DRY) { console.log(`--- ${edit.op} ${edit.summary || ""}\n${res.status}: ${res.note}\n${res.request ? JSON.stringify(res.request, null, 2) : ""}`); continue; }
+      if (res.status === "applied" && res.deleted && edit.card_id) await rest("PATCH", `contact_cards?id=eq.${edit.card_id}`, { deleted_at: new Date().toISOString() }, { Prefer: "return=minimal" });   // hidden, never erased
       if (res.status === "applied" && res.person?.resourceName) {
         const c = personToCard(res.person);
         await rest("POST", "contact_cards?on_conflict=person,uid", [cardRow(edit.person, c)], { Prefer: "resolution=merge-duplicates,return=minimal" });

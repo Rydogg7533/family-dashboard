@@ -73,7 +73,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
         </div>
       </div>
       {msg && <div role="status" className="rounded-xl bg-green-bg text-green px-3 py-2 text-sm font-semibold mb-3">{msg}</div>}
-      {waitingNew.length > 0 && <div role="status" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold mb-3">Being added to Apple Contacts (about 2 minutes, no need to add again): {waitingNew.join(", ")}</div>}
+      {waitingNew.length > 0 && <div role="status" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold mb-3">Being added to your contacts (about 2 minutes, no need to add again): {waitingNew.join(", ")}</div>}
       {editing === "new" && <div className="rounded-xl border border-line mb-3 bg-bg"><ContactForm onDone={done} /></div>}
       {total === 0 && <div className="text-muted text-sm">No results{q ? ` for “${q}”` : ""}.</div>}
       <div className="flex gap-2">
@@ -94,7 +94,7 @@ export default function ContactsBook({ cards, waitingNew = [] }: { cards: Contac
                       {isOpen && editing === c.id && <ContactForm card={c} onDone={done} />}
                       {isOpen && editing !== c.id && (
                         <div className="px-3 pb-3 flex flex-col gap-2 text-sm">
-                          {c.pending && <div className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold">A change is being saved to Apple Contacts…</div>}
+                          {c.pending && <div className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-xs font-semibold">A change is being saved to your contacts…</div>}
                           {c.phones.map((p, i) => (
                             <div key={i} className="flex items-center gap-2">
                               <div className="flex-1 min-w-0"><div className="text-xs text-muted capitalize">{p.label}</div><div>{p.number}</div></div>

@@ -88,7 +88,7 @@ const cardRow = (personId, c, href, etag) => ({ person: personId, uid: c.uid, hr
 
 async function main() {
   if (!SUPABASE_URL || !SUPABASE_KEY) { console.error("SUPABASE_URL / SUPABASE_SERVICE_KEY not set"); process.exit(1); }
-  const edits = await get("contact_edits?status=eq.pending&provider=eq.icloud&order=created_at.asc&limit=50&select=*");
+  const edits = await get("contact_edits?status=eq.pending&provider=eq.icloud&op=in.(create,update)&order=created_at.asc&limit=50&select=*");
   const log = []; let state = "ok";
   const configs = Object.entries(env).filter(([k]) => /^ICLOUD_CONTACTS_\d+$/.test(k)).map(([, v]) => { const [name, user, pass] = v.split("|").map((s) => s.trim()); return { name, user, pass }; });
   const books = new Map(); const profiles = new Map(); const backup = backupWriter();

@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ContactCard } from "@/lib/data-registers";
-import { saveContact } from "@/app/contacts/actions";
+import { saveContact, deleteContact } from "@/app/contacts/actions";
 
 const LABELS = ["mobile", "home", "work", "main", "other"];
 const fix = (l: string) => { const x = (l || "other").toLowerCase(); return x === "cell" ? "mobile" : x; };
@@ -22,6 +22,19 @@ export default function ContactForm({ card, onDone }: { card?: ContactCard; onDo
   const [phones, setPhones] = useState((card?.phones ?? []).map((p) => ({ label: fix(p.label), number: p.number })));
   const [emails, setEmails] = useState((card?.emails ?? []).map((e) => ({ label: fix(e.label), address: e.address })));
   const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const remove = () => {
+    if (!card) return;
+    setErr(null);
+    start(async () => {
+      try {
+        const r = await deleteContact(card.id, card.etag ?? null);
+        if (!r.ok) { setErr(r.error); setConfirmDel(false); return; }
+        router.refresh();
+        onDone(true, "Deleting. It will disappear within a couple of minutes. A copy is saved first.");
+      } catch { setErr("That took too long. Check your connection and try again."); setConfirmDel(false); }
+    });
+  };
 
   const submit = () => {
     setErr(null);
@@ -33,7 +46,7 @@ export default function ContactForm({ card, onDone }: { card?: ContactCard; onDo
         ]);
         if (!r.ok) { setErr(r.error); return; }
         router.refresh();
-        onDone(true, "unchanged" in r && r.unchanged ? "No changes." : "Saved. It will be in Apple Contacts within a couple of minutes.");
+        onDone(true, "unchanged" in r && r.unchanged ? "No changes." : "Saved. It will be in your contacts within a couple of minutes.");
       } catch { setErr("That took too long. Check your connection and try again."); }
     });
   };
@@ -66,8 +79,18 @@ export default function ContactForm({ card, onDone }: { card?: ContactCard; onDo
         ))}
         <button type="button" onClick={() => setEmails([...emails, { label: "home", address: "" }])} className="min-h-11 rounded-xl bg-soft text-xs font-semibold">+ Add email</button>
       </div>
-      {card && <p className="text-xs text-muted">Addresses, birthday, notes and photo are left exactly as they are in Apple Contacts.</p>}
+      {card && <p className="text-xs text-muted">Addresses, birthday, notes and photo are left exactly as they are in your contacts.</p>}
       {err && <div role="alert" className="rounded-xl bg-red-bg text-red px-3 py-2 font-semibold">{err}</div>}
+      {card?.provider === "google" && (confirmDel
+        ? <div className="rounded-xl border border-line p-3 flex flex-col gap-2">
+            <div className="font-semibold">Delete {card.fullName} from Google Contacts?</div>
+            <div className="text-xs text-muted">A full copy is saved first. It also leaves your phone’s contacts.</div>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={remove} className="flex-1 min-h-11 rounded-xl bg-red text-white font-semibold disabled:opacity-60">{busy ? "Working…" : "Yes, delete"}</button>
+              <button type="button" disabled={busy} onClick={() => setConfirmDel(false)} className="min-h-11 px-4 rounded-xl bg-soft font-semibold">Keep</button>
+            </div>
+          </div>
+        : <button type="button" disabled={busy} onClick={() => setConfirmDel(true)} className="min-h-11 rounded-xl bg-red-bg text-red text-xs font-semibold">Delete contact</button>)}
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold disabled:opacity-60">{busy ? "Working…" : "Save"}</button>
         <button type="button" disabled={busy} onClick={() => onDone(false)} className="min-h-11 px-4 rounded-xl bg-soft font-semibold">Cancel</button>

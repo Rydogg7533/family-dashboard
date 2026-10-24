@@ -267,7 +267,7 @@ export type ContactCard = {
   phones: { label: string; number: string; digits: string }[]; emails: { label: string; address: string }[];
   addresses: { label: string; street: string; city: string; state: string; zip: string }[];
   birthday: string | null; notes: string | null;
-  etag: string | null; mine: boolean; pending: boolean;   // mine = in my own address book (editable); pending = an edit is waiting for the Mac mini
+  etag: string | null; provider: "icloud" | "google"; mine: boolean; pending: boolean;   // mine = in my own address book (editable); pending = an edit is waiting for the Mac mini
 };
 export type ContactEditNote = { id: string; status: "conflict" | "error"; note: string; summary: string | null; at: string };
 export async function getContactEditNotes(): Promise<ContactEditNote[]> {
@@ -296,9 +296,9 @@ export async function getContactCards(): Promise<ContactCard[]> {
     const { data: waiting } = await sb.from("contact_edits").select("card_id").eq("status", "pending");
     const pend = new Set((waiting ?? []).map((w) => w.card_id));
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await sb.from("contact_cards").select("id,person,etag,full_name,first_name,last_name,nickname,org,phones,emails,addresses,birthday,notes").is("deleted_at", null).order("last_name", { nullsFirst: false }).range(from, from + 999);
+      const { data, error } = await sb.from("contact_cards").select("id,person,etag,provider,full_name,first_name,last_name,nickname,org,phones,emails,addresses,birthday,notes").is("deleted_at", null).order("last_name", { nullsFirst: false }).range(from, from + 999);
       if (error || !data) break;
-      for (const r of data) out.push({ id: r.id, fullName: r.full_name, firstName: r.first_name, lastName: r.last_name, nickname: r.nickname, org: r.org, phones: r.phones ?? [], emails: r.emails ?? [], addresses: r.addresses ?? [], birthday: r.birthday, notes: r.notes, etag: r.etag, mine: !!user && r.person === user.id, pending: pend.has(r.id) });
+      for (const r of data) out.push({ id: r.id, fullName: r.full_name, firstName: r.first_name, lastName: r.last_name, nickname: r.nickname, org: r.org, phones: r.phones ?? [], emails: r.emails ?? [], addresses: r.addresses ?? [], birthday: r.birthday, notes: r.notes, etag: r.etag, provider: r.provider === "google" ? "google" : "icloud", mine: !!user && r.person === user.id, pending: pend.has(r.id) });
       if (data.length < 1000) break;
     }
     return out;

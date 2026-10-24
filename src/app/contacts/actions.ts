@@ -66,3 +66,26 @@ export async function saveContact(input: ContactInput) {
   await sb.from("activity_log").insert({ actor: who, action: "contact_update_requested", subject: `${who} ${summary}`, ref: card.id, undoable: false }).then(() => {}, () => {});
   return { ok: true as const };
 }
+
+// Delete a contact in the person's own Google address book. Queued like every other edit: the Mac mini checks the contact has not
+// changed, saves a full copy, deletes it in Google, and hides the card here (deleted_at). Apple contacts cannot be deleted from the app.
+export async function deleteContact(cardId: string, baseEtag: string | null) {
+  if (!UUID.test(cardId)) return { ok: false as const, error: "Unknown contact." };
+  if (!hasSupabaseEnv()) return { ok: true as const, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false as const, error: "Sign in again." };
+  const { data: prof } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  const who = prof?.display_name ?? user.email ?? "member";
+  const { data: card } = await sb.from("contact_cards").select("id,etag,provider,full_name").eq("id", cardId).eq("person", user.id).is("deleted_at", null).maybeSingle();
+  if (!card) return { ok: false as const, error: "That contact is not in your own address book." };
+  if (card.provider !== "google") return { ok: false as const, error: "Contacts can only be deleted here when they live in Google Contacts." };
+  const { data: waiting } = await sb.from("contact_edits").select("id").eq("card_id", card.id).eq("status", "pending").limit(1);
+  if (waiting?.length) return { ok: false as const, error: "A change to this contact is still being saved. Try again in a couple of minutes." };
+  if (baseEtag && card.etag && baseEtag !== card.etag) return { ok: false as const, error: "This contact just changed. Close it and open it again." };
+  const summary = `deleted ${card.full_name}`;
+  const { error } = await sb.from("contact_edits").insert({ person: user.id, requested_by: user.id, provider: "google", op: "delete", card_id: card.id, base_etag: card.etag, fields: {}, summary });
+  if (error) { console.error("deleteContact:", error.code, error.message); return { ok: false as const, error: "Could not delete. Try again." }; }
+  await sb.from("activity_log").insert({ actor: who, action: "contact_delete_requested", subject: `${who} ${summary}`, ref: card.id, undoable: false }).then(() => {}, () => {});
+  return { ok: true as const };
+}

@@ -55,7 +55,7 @@ assert.throws(() => buildCreate({ phones: [] }), /name or a company/);
 
 // 7. applyEdit with a fake Google
 const card = { id: "card-1", uid: "people/c111", href: "people/c111", etag: "etag-1" };
-const fake = (over = {}) => { const calls = []; return { calls, io: { get: async (rn) => { calls.push(["get", rn]); if (over.get) return over.get(); return structuredClone(person); }, patch: async (rn, body, f) => { calls.push(["patch", rn, f]); if (over.patch) return over.patch(); return { ...person, etag: "etag-2", phoneNumbers: body.phoneNumbers }; }, post: async (body) => { calls.push(["post"]); return { resourceName: "people/c999", etag: "e9", names: body.names }; } } }; };
+const fake = (over = {}) => { const calls = []; return { calls, io: { get: async (rn) => { calls.push(["get", rn]); if (over.get) return over.get(); return structuredClone(person); }, patch: async (rn, body, f) => { calls.push(["patch", rn, f]); if (over.patch) return over.patch(); return { ...person, etag: "etag-2", phoneNumbers: body.phoneNumbers }; }, del: async (rn) => { calls.push(["del", rn]); if (over.del) return over.del(); return {}; }, post: async (body) => { calls.push(["post"]); return { resourceName: "people/c999", etag: "e9", names: body.names }; } } }; };
 const backups = []; const backup = (uid, text) => backups.push([uid, JSON.parse(text).resourceName]);
 const edit = { op: "update", base_etag: "etag-1", fields: { phones: [{ label: "mobile", number: "(801) 555-0111" }] } };
 let f = fake(); let res = await applyEdit(edit, card, f.io, backup);
@@ -73,6 +73,19 @@ res = await applyEdit(edit, null, fake().io, backup); assert.equal(res.status, "
 const before = backups.length;
 f = fake(); res = await applyEdit({ op: "create", fields: { first_name: "Sam", last_name: "Lee" } }, null, f.io, backup);
 assert.equal(res.status, "applied"); assert.equal(res.person.resourceName, "people/c999"); assert.equal(backups.length, before, "creates need no backup");
+
+// 7b. delete: etag checked, backed up before the delete, already-gone is fine, stale etag deletes nothing
+const delEdit = { op: "delete", base_etag: "etag-1", fields: {} };
+let nb = backups.length; f = fake(); res = await applyEdit(delEdit, card, f.io, backup);
+assert.equal(res.status, "applied"); assert.equal(res.deleted, true); assert.deepEqual(f.calls.map((x) => x[0]), ["get", "del"]); assert.equal(f.calls[1][1], "people/c111");
+assert.equal(backups.length, nb + 1, "backed up before the delete");
+nb = backups.length; f = fake(); res = await applyEdit({ ...delEdit, base_etag: "old" }, card, f.io, backup);
+assert.equal(res.status, "conflict"); assert.deepEqual(f.calls.map((x) => x[0]), ["get"], "stale etag: nothing deleted"); assert.equal(backups.length, nb);
+f = fake({ get: async () => { throw Object.assign(new Error("gone"), { status: 404 }); } }); res = await applyEdit(delEdit, card, f.io, backup);
+assert.equal(res.status, "applied"); assert.match(res.note, /Already/); assert.deepEqual(f.calls.map((x) => x[0]), ["get"]);
+f = fake({ del: async () => { throw Object.assign(new Error("boom"), { status: 500 }); } }); res = await applyEdit(delEdit, card, f.io, backup);
+assert.equal(res.status, "error");
+res = await applyEdit(delEdit, null, fake().io, backup); assert.equal(res.status, "error");
 
 // 8. pulls: pages are joined, the sync token comes from the last page, a token is passed on the next call
 const urls = [];
