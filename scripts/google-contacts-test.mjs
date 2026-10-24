@@ -87,6 +87,8 @@ f = fake({ del: async () => { throw Object.assign(new Error("boom"), { status: 5
 assert.equal(res.status, "error");
 res = await applyEdit(delEdit, null, fake().io, backup); assert.equal(res.status, "error");
 
+res = await applyEdit({ op: "merge", fields: {} }, card, fake().io, backup); assert.equal(res.status, "error"); assert.match(res.note, /Unknown edit type/);
+
 // 8. pulls: pages are joined, the sync token comes from the last page, a token is passed on the next call
 const urls = [];
 const api = async (path) => { urls.push(path); const q = new URL("http://x" + path).searchParams; if (!q.get("pageToken")) return { connections: [{ resourceName: "people/a" }], nextPageToken: "t2" }; return { connections: [{ resourceName: "people/b" }], nextSyncToken: "SYNC1" }; };

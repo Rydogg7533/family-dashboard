@@ -34,6 +34,7 @@ const isPrecondition = (e) => e?.status === 400 && /FAILED_PRECONDITION/i.test(`
 // One edit; io is injected so this can be tested without Google. Returns { status: 'applied'|'conflict'|'error', note, person? }
 export async function applyEdit(edit, card, io, backup) {
   try {
+    if (!["create", "update", "delete"].includes(edit.op)) return { status: "error", note: `Unknown edit type "${edit.op}"; nothing was changed.` };   // an old script must never treat a newer edit type as an update
     if (edit.op === "create") {
       const body = buildCreate(edit.fields);
       if (DRY) return { status: "applied", note: "dry run: would create", request: body };
