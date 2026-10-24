@@ -57,7 +57,7 @@ export async function getMyConnections(): Promise<{ conns: Conn[]; dismissed: Se
     const bad = accts.filter((a) => a.last_error && stale(a));
     const okAccts = accts.filter((a) => a.last_sync_at && !a.last_error);
     const names = accts.map((a) => a.address).join(", ");
-    const n = accts.length, word = `${n} mailbox${n === 1 ? "" : "es"}`;
+    const nm = accts.length, word = `${nm} mailbox${nm === 1 ? "" : "es"}`;
     if (bad.length) add("mail", "needs", `${word}: ${names}. Needs attention: ${bad.map((a) => `${a.address} (${plain(String(a.last_error))}; no sync for ${a.last_sync_at ? ago(a.last_sync_at) : "ever"})`).join("; ")}`);
     else if (okAccts.length) add("mail", "connected", `${word}: ${names} · last synced ${ago(okAccts.map((a) => a.last_sync_at!).sort().at(-1) ?? null)}`);
     else add("mail", "todo", accts.length ? `${word} signed in, waiting for the first sync: ${names}` : STEP_PITCH.mail, accts.length ? undefined : "On the Mac mini, once: node scripts/mail-connect.mjs --provider gmail --account <your address> --person <your name>  (icloud or other instead of gmail). It asks for an app password.");
