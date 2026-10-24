@@ -97,7 +97,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
           {(m.action || pending[m.id]) && (
             <div className={`self-center text-[11px] rounded-full px-2.5 py-1 ${m.action?.status === "waiting" || pending[m.id] === "task" && !m.action ? "bg-amber-bg text-amber" : "bg-soft text-muted"}`}>
               {m.action?.label ?? "Task created from this · Undo in the toast"}
-              <span className="block text-[10px] opacity-80">{m.action ? `${m.action.requested_by} · for ${m.action.for_person}` : `Ryan asked · for Ryan`} · from {thread.name} thread</span>
+              <span className="block text-[10px] opacity-80">{m.action ? `${m.action.requested_by} · for ${m.action.for_person}` : `Asked here · for you`} · from {thread.name} thread</span>
             </div>
           )}
           {isAssistant && m.assistant_kind === "confirmation" && m.action?.status === "waiting" && !sent.some((s) => /^(y|yes|n|no)$/i.test(s.text)) && (

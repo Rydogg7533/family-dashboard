@@ -66,7 +66,7 @@ export function AddWarranty({ initial }: { initial?: Initial }) {
     }} className="card flex flex-col gap-2 w-full">
       <input className={inp} placeholder="What is covered (e.g. Dishwasher, roof, laptop)" value={f.item} onChange={set("item")} />
       <input className={inp} placeholder="Who provides it (store, brand, company)" value={f.provider} onChange={set("provider")} />
-      <input className={inp} placeholder="Whose or where (Ryan, Melissa, Household, Kitchen)" value={f.for_who} onChange={set("for_who")} />
+      <input className={inp} placeholder="Whose or where (a person's name, Household, Kitchen)" value={f.for_who} onChange={set("for_who")} />
       <label className="text-xs text-muted">Starts<input type="date" className={inp} value={f.start} onChange={set("start")} /></label>
       <label className="text-xs text-muted">Ends (leave blank if the paper doesn’t say)<input type="date" className={inp} value={f.end} onChange={set("end")} /></label>
       <textarea className={inp} rows={2} placeholder="Terms worth remembering (what is covered, what voids it)" value={f.terms} onChange={set("terms")} />

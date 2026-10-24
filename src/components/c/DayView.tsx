@@ -88,7 +88,7 @@ function Checklist({ block }: { block: DayBlock }) {
             </div>
           )}
           {adding ? (
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; const it: ChecklistItem = { id: `n${Date.now()}`, label: text.trim(), layer: "today", packed: false, added_by: "Ryan added just now" }; setItems((xs) => [...xs, it]); setText(""); setAdding(false); show(`Added ${it.label} · added twice becomes Always`, () => setItems((xs) => xs.filter((x) => x.id !== it.id))); }}>
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; const it: ChecklistItem = { id: `n${Date.now()}`, label: text.trim(), layer: "today", packed: false, added_by: "You added just now" }; setItems((xs) => [...xs, it]); setText(""); setAdding(false); show(`Added ${it.label} · added twice becomes Always`, () => setItems((xs) => xs.filter((x) => x.id !== it.id))); }}>
               <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Item to bring" className="flex-1 min-h-10 rounded-lg border border-line bg-bg px-3 text-sm" />
               <button className={`${btn} bg-accent text-white border-accent`}>Add</button>
             </form>
@@ -106,7 +106,7 @@ const KIND: Record<DayBlock["kind"], { text: string; cls: string }> = {
   calendar: { text: "CALENDAR", cls: "text-muted" }, inferred: { text: "FILLED FROM OVERLAND", cls: "text-accent" }, free: { text: "FREE", cls: "text-muted" }, unknown: { text: "UNKNOWN STOP", cls: "text-amber" },
 };
 
-export function Schedule({ blocks }: { blocks: DayBlock[] }) {
+export function Schedule({ blocks, viewer }: { blocks: DayBlock[]; viewer?: string }) {
   const [fix, setFix] = useState<string | null>(null);
   const { show, el } = useToast();
   return (
@@ -116,7 +116,7 @@ export function Schedule({ blocks }: { blocks: DayBlock[] }) {
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0 flex-1">
               <div className={`text-[11px] font-bold tracking-wide ${KIND[b.kind].cls}`}>
-                {KIND[b.kind].text}{b.confidence != null && ` · ${Math.round(b.confidence * 100)}% sure`}{b.person !== "Ryan" && ` · ${b.person}`}
+                {KIND[b.kind].text}{b.confidence != null && ` · ${Math.round(b.confidence * 100)}% sure`}{b.person !== viewer && ` · ${b.person}`}
               </div>
               <div className="font-semibold text-base">{b.title}</div>
               <div className="text-sm text-muted">

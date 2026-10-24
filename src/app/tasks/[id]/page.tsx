@@ -32,7 +32,7 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
         <div className={`text-[11px] font-bold tracking-wide ${task.kind === "reply" ? "text-amber" : "text-accent"}`}>{label[task.kind]}</div>
         {task.summary && <div className="text-sm">{task.summary}</div>}
         <div className="text-xs text-muted">
-          {draft ? `For ${draft.requested_by}` : task.origin_kind === "system" ? "System" : `For ${name || "Ryan"}`} · from {task.origin_kind}{task.origin_kind === "email" ? ` (${draft?.account ?? `${name || "Ryan"}'s mailbox`})` : ""} · {ago(task.created_at)}
+          {draft ? `For ${draft.requested_by}` : task.origin_kind === "system" ? "System" : `For ${name || "you"}`} · from {task.origin_kind}{task.origin_kind === "email" ? ` (${draft?.account ?? `${name || "Ryan"}'s mailbox`})` : ""} · {ago(task.created_at)}
           {due && <span className={isPast(task.due_at!) ? " text-red font-semibold" : ""}> · due {due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>}
           {" · "}<a href={task.origin_ref ?? "#"} className="font-semibold text-accent">Open in {originLabel}</a>
         </div>

@@ -41,7 +41,7 @@ export default async function Places() {
         <div className="flex justify-between items-center min-h-10 border-b border-line"><span>Questions wait before the weekly review</span><span className="text-xs text-muted">3 days</span></div>
         <div className="flex justify-between items-center min-h-10"><span>Starter checklists</span><span className="text-xs text-muted">sports, school, travel, medical</span></div>
       </Card>
-      <p className="text-xs text-muted mt-4">Switches change in Settings (tier 1, with Undo). &quot;Reset learning&quot; asks for confirmation. Last changed: Ryan · from Settings · 2026-10-18.</p>
+      <p className="text-xs text-muted mt-4">Switches change in Settings (tier 1, with Undo). &quot;Reset learning&quot; asks for confirmation.</p>
       <PageSources items={[{ label: "Location history", href: "#location" }, { label: "Maps", href: "#maps" }, { label: "Google Calendar", href: "#gcal" }]} />
     </>
   );

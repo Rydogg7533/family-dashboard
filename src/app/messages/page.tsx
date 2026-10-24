@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getThreads, getConfirmations, clock } from "@/lib/data-messages";
 import { getSyncStatus } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
+import { getPeople, getViewer } from "@/lib/data-registers";
 import { SyncLine } from "@/components/c/SyncLine";
 import { ConfirmCards } from "@/components/c/MessagesView";
 
@@ -10,7 +11,8 @@ export const dynamic = "force-dynamic";
 // F16: a window on the person's own Messages threads (family only, last 30 days), mirrored by their own Mac.
 // F17: the Assistant thread, with Y/N confirmations that can be answered here or by text.
 export default async function Messages() {
-  const [threads, confirmations, sync] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"])]);
+  const [threads, confirmations, sync, viewer, people] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"]), getViewer(), getPeople()]);
+  const otherParent = people.find((p) => p.role === "parent" && p.id !== viewer.id)?.name ?? null;
   const waiting = confirmations.filter((c) => c.status === "waiting");
   const mirror = sync[0];
   return (
@@ -29,7 +31,7 @@ export default async function Messages() {
       {threads.length === 0 && (
         <Card className="mb-4 text-sm">
           <div className="font-semibold mb-1">Not connected to Messages yet</div>
-          <div className="text-muted text-xs">Your family threads appear here once the Messages mirror runs on the Mac mini. Typing here then sends through Messages as you, so it shows on your phone and Melissa&apos;s like any other text. Until then, use the Messages app.</div>
+          <div className="text-muted text-xs">Your family threads appear here once the Messages mirror runs on the Mac mini. Typing here then sends through Messages as you, so it shows on your phone and everyone else&apos;s like any other text. Until then, use the Messages app.</div>
         </Card>
       )}
       <div className="flex flex-col gap-1.5 mb-4">
@@ -38,17 +40,17 @@ export default async function Messages() {
             <div className="min-w-0">
               <div className="font-semibold">{t.name}{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold ml-1">· AI, by text</span>}</div>
               <div className="text-xs text-muted truncate">{t.last_line}</div>
-              <div className="text-[10px] text-muted">{t.kind === "assistant" ? "Assistant · AI · for you" : `${t.members.filter((m) => m !== "Ryan").join(", ")} · for ${t.kind === "group" ? "Family" : "you"}`} · from Messages (your Mac)</div>
+              <div className="text-[10px] text-muted">{t.kind === "assistant" ? "Assistant · AI · for you" : `${t.members.filter((m) => m !== viewer.name).join(", ")} · for ${t.kind === "group" ? "Family" : "you"}`} · from Messages (your Mac)</div>
             </div>
             {t.unread > 0 ? <span className="shrink-0 text-[11px] font-bold text-white bg-accent rounded-full px-2 py-0.5">{t.unread}</span> : <span className="shrink-0 text-[11px] text-muted">{clock(t.last_at)}</span>}
           </Link>
         ))}
       </div>
 
-      <Card className="mb-3 text-sm">
-        <div className="font-semibold mb-1">Melissa's one-to-one threads</div>
-        <div className="text-muted text-xs">Not mirrored yet. They appear on her page once her MacBook Air runs the mirror with her consent; until then she sees the Family thread and “Open Messages” buttons.</div>
-      </Card>
+      {otherParent && <Card className="mb-3 text-sm">
+        <div className="font-semibold mb-1">{otherParent}&apos;s one-to-one threads</div>
+        <div className="text-muted text-xs">Not mirrored yet. They appear on their page once their own Mac runs the mirror with their consent; until then they see the Family thread and “Open Messages” buttons.</div>
+      </Card>}
 
       <section className="card"><SyncLine items={sync} /></section>
       <p className="text-xs text-muted mt-3">Family threads only · last 30 days · owner-only, encrypted at rest · full history stays in Messages and iCloud. Children's pages do not show Messages. If the mirror pauses, every thread shows an “Open Messages” button instead. <a href="messages://" className="font-semibold text-accent">Open in Messages</a></p>

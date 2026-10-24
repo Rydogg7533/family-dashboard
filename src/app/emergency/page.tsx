@@ -42,7 +42,7 @@ export default async function Emergency() {
         </section>
       ))}
 
-      <p className="text-xs text-muted mt-4">Maintained by Ryan and Melissa (last change: Ryan · from Settings · 2026-10-18). A sealed, time-limited link for a designated person outside the household can be issued only by a parent, and that access is logged.</p>
+      <p className="text-xs text-muted mt-4">Maintained by the household's parents. A sealed, time-limited link for a designated person outside the household can be issued only by a parent, and that access is logged.</p>
       <PageSources items={[{ label: "1Password", href: "#1password" }, { label: "Apple Passwords", href: "#apple-passwords" }, { label: "Organized (Family)", href: "#finder-family" }, { label: "Contacts", href: "/contacts" }]} />
     </>
   );

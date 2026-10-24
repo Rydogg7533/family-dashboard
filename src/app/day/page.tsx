@@ -32,7 +32,7 @@ export default async function Day() {
           <h2 className="text-base">Schedule</h2>
           <span className="text-xs text-muted">calendar + gaps filled from Overland</span>
         </div>
-        <Schedule blocks={blocks} />
+        <Schedule blocks={blocks} viewer={name} />
       </section>
 
       <DayRecord entries={record} dateLabel={yesterday} />

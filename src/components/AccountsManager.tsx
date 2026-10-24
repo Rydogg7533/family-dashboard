@@ -8,7 +8,7 @@ const KINDS = [["credit", "Credit card"], ["checking", "Checking"], ["savings", 
 const DELIVERY = [["email_pdf", "Emailed with the PDF attached"], ["email_link", "Emailed, link only"], ["upload", "I download and upload it"]] as const;
 const blank: AccountInput = { kind: "credit", institution: "", last4: "", owner: "Joint", entity: "Personal", statement_arrival_day: null, statement_delivery: "email_pdf" };
 
-export function AccountsManager({ accounts }: { accounts: Account[] }) {
+export function AccountsManager({ accounts, owners }: { accounts: Account[]; owners: string[] }) {
   const router = useRouter();
   const [form, setForm] = useState<AccountInput | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export function AccountsManager({ accounts }: { accounts: Account[] }) {
             <input className={`${field} w-32`} inputMode="numeric" placeholder="Statement day" value={form.statement_arrival_day ?? ""} onChange={(e) => setForm({ ...form, statement_arrival_day: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })} />
           </div>
           <div className="flex gap-2">
-            <select className={`${field} flex-1`} value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}><option>Joint</option><option>Ryan</option><option>Melissa</option></select>
+            <select className={`${field} flex-1`} value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}><option>Joint</option>{owners.map((o) => <option key={o}>{o}</option>)}</select>
             <input className={`${field} flex-1`} placeholder="Entity (Personal, Veil Labs…)" value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })} />
           </div>
           <div className="flex flex-col gap-1">{DELIVERY.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" checked={form.statement_delivery === k} onChange={() => setForm({ ...form, statement_delivery: k })} />{l}</label>)}</div>
