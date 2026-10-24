@@ -1,5 +1,6 @@
 "use client";
 import { usePathname, useRouter } from "next/navigation";
+import { isFrameless } from "@/lib/frameless";
 import { useEffect, useState } from "react";
 import { ReportIssueSheet } from "@/components/ReportIssue";
 
@@ -15,7 +16,7 @@ export function QuickBar() {
     return () => window.removeEventListener("scroll", on);
   }, []);
   // No + on a conversation: the compose bar owns the bottom edge there.
-  if (["/login", "/ask", "/tv", "/kid", "/privacy", "/terms"].some((p) => path.startsWith(p)) || /^\/messages\/[^/]+$/.test(path)) return null;
+  if (isFrameless(path) || path.startsWith("/ask") || /^\/messages\/[^/]+$/.test(path)) return null;
   const go = (href: string) => { setPlus(false); router.push(href); };
   return (
     <>

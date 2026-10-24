@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isFrameless } from "@/lib/frameless";
 import { useEffect, useRef, useState } from "react";
 
 const items = [
@@ -16,7 +17,7 @@ export function Nav() {
   const path = usePathname();
   const [handed, setHanded] = useState(0);
   const navRef = useRef<HTMLElement>(null);
-  const hidden = path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms";
+  const hidden = isFrameless(path);
   useEffect(() => {
     if (hidden) return;
     let live = true;
@@ -33,7 +34,7 @@ export function Nav() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [hidden]);
-  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms") return null;
+  if (isFrameless(path)) return null;
   return (
     <nav ref={navRef} className="fixed bottom-0 inset-x-0 border-t border-line bg-bg/95 backdrop-blur">
       <div className="max-w-md mx-auto flex justify-around px-1 pt-2 pb-[max(18px,env(safe-area-inset-bottom))] text-[11px] font-semibold">

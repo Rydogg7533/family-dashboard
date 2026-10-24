@@ -2,6 +2,7 @@
 import { RefreshButton } from "@/components/RefreshControls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isFrameless } from "@/lib/frameless";
 
 // Fixed header: always shows where you are (tab › section › page); page content scrolls underneath.
 // The first crumb is always one of the five bottom tabs, so the header and the nav bar agree.
@@ -65,7 +66,7 @@ export function crumbsFor(path: string): Crumb[] {
 
 export function TopBar() {
   const path = usePathname();
-  if (path.startsWith("/login") || path.startsWith("/tv") || path.startsWith("/kid") || path === "/privacy" || path === "/terms") return null;
+  if (isFrameless(path)) return null;
   const crumbs = crumbsFor(path);
   const here = crumbs[crumbs.length - 1];
   return (
