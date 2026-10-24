@@ -22,8 +22,11 @@ export async function setContactsProvider(input: { provider: string; account: st
 
   const now = new Date().toISOString();
   const waiting = provider === "none" ? "ok" : "waiting";
-  const { error } = await sb.from("person_connections").upsert({ person: user.id, kind: "contacts", provider, account: acct, status: waiting, status_note: null, changed_by: user.id, updated_at: now }, { onConflict: "person,kind" });
-  if (error) return { ok: false as const, error: "Could not save. Try again." };
+  // Insert the first time, update after that. (An upsert would also rewrite person and kind, which the app may not change.)
+  const { error } = cur
+    ? await sb.from("person_connections").update({ provider, account: acct, status: waiting, status_note: null, changed_by: user.id, updated_at: now }).eq("person", user.id).eq("kind", "contacts")
+    : await sb.from("person_connections").insert({ person: user.id, kind: "contacts", provider, account: acct, status: waiting, status_note: null, changed_by: user.id, updated_at: now });
+  if (error) { console.error("setContactsProvider:", error.code, error.message); return { ok: false as const, error: "Could not save. Try again." }; }
 
   // Hide (never delete) cards that belong to a source this person no longer uses.
   if (provider === "none") await sb.from("contact_cards").update({ deleted_at: now }).eq("person", user.id).is("deleted_at", null);
