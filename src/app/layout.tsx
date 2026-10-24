@@ -6,6 +6,7 @@ import { AppearanceProvider } from "@/components/AppearanceProvider";
 import { QuickBar } from "@/components/QuickBar";
 import { TopBar } from "@/components/TopBar";
 import { RecentTracker } from "@/components/RecentPages";
+import { MainFrame } from "@/components/MainFrame";
 
 
 export const metadata: Metadata = {
@@ -25,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AppearanceProvider>
           <TopBar />
           <PullToRefresh />
-          <main className="flex-1 w-full max-w-md mx-auto px-5 pt-[calc(44px+env(safe-area-inset-top)+16px)] pb-[var(--page-bottom)]">{children}</main>
+          <MainFrame>{children}</MainFrame>
           <QuickBar />
           <RecentTracker />
           <Nav />
