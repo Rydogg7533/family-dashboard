@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { DueChip, OpenIn, PageSources, SectionTitle } from "@/components/registers";
-import { PEOPLE, daysUntil, fmtDate, getMedications, getViewer, type PersonId } from "@/lib/data-registers";
+import { daysUntil, fmtDate, getMedications, getPeople, getViewer, type PersonId } from "@/lib/data-registers";
 
 export const dynamic = "force-dynamic";
 
 export default async function Meds({ searchParams }: PageProps<"/meds">) {
   const sp = await searchParams;
   const viewer = await getViewer();
-  const allowed = PEOPLE.filter((p) => p.id === viewer.id || (p.role === "child" && viewer.role === "parent"));
+  const allowed = (await getPeople()).filter((p) => p.id === viewer.id || (p.role === "child" && viewer.role === "parent"));
   const requested = typeof sp.person === "string" ? sp.person : viewer.id;
   const person = allowed.find((p) => p.id === requested) ?? allowed[0];
   const meds = await getMedications(person.id as PersonId);

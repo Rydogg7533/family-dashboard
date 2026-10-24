@@ -1,6 +1,8 @@
 // Slice A: client-safe types, constants and helpers (no Supabase import). data-registers.ts re-exports these.
-export type PersonId = "ryan" | "melissa" | "child1" | "child2";
-export type Person = { id: PersonId; name: string; role: "parent" | "child"; initials: string };
+// A short stable name for a person ("ryan"). For a real household it is made from the profile's first name (see getPeople); the database itself
+// always stores the profile uuid. Sample mode uses the fixed sample people below.
+export type PersonId = string;
+export type Person = { id: PersonId; name: string; role: "parent" | "child"; initials: string; uuid?: string };
 
 export type Expiry = { label: string; date: string; kind: "registration" | "insurance" | "inspection" | "emissions" | "license" | "warranty" | "other"; action: string; source: string; href: string };
 export type Maintenance = { item: string; dueDate: string | null; dueMiles: number | null; lastDone: string | null };
@@ -59,5 +61,8 @@ export const PEOPLE: Person[] = [
   { id: "child1", name: "[Child 1]", role: "child", initials: "C1" },
   { id: "child2", name: "[Child 2]", role: "child", initials: "C2" },
 ];
-export const personName = (id: PersonId | "household") => id === "household" ? "Household" : PEOPLE.find((p) => p.id === id)?.name ?? id;
+// The household's people as last read from the database (set by getPeople on the server, before pages render). Single-tenant app: one household per deployment.
+let roster: Person[] = PEOPLE;
+export const setRoster = (people: Person[]) => { roster = people.length ? people : PEOPLE; };
+export const personName = (id: PersonId | "household") => id === "household" ? "Household" : roster.find((p) => p.id === id)?.name ?? PEOPLE.find((p) => p.id === id)?.name ?? id;
 

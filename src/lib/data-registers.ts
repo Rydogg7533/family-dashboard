@@ -3,7 +3,7 @@
 import { createClient, getRequestUser, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export * from "@/lib/a-shared";
-import { PEOPLE, dIso, daysUntil, dueText, type Device, type Vehicle, type Person, type PersonId, type Medication, type Contact, type HomeItem, type Place, type Source, type EmergencySection, type ScheduleBlock, type Activity, type OpenItem } from "@/lib/a-shared";
+import { PEOPLE, setRoster, dIso, daysUntil, dueText, type Device, type Vehicle, type Person, type PersonId, type Medication, type Contact, type HomeItem, type Place, type Source, type EmergencySection, type ScheduleBlock, type Activity, type OpenItem } from "@/lib/a-shared";
 
 
 const sampleVehicles: Vehicle[] = [
@@ -189,17 +189,35 @@ async function table<T>(name: string, sample: T[], filter?: (q: any) => any): Pr
   } catch { return sample; }
 }
 
-export const getPeople = async () => PEOPLE;
-export async function getViewer(): Promise<Person> {
-  if (!hasSupabaseEnv()) return PEOPLE[0];
+// The household's people. Real mode reads profiles (parents first); each gets a short id from the first name ("Ryan" -> "ryan", a second "Sam" -> "sam-2")
+// so existing links and sample data keyed by name keep working, and a `uuid` for database queries. Sample mode and an empty table use the sample people.
+export async function getPeople(): Promise<Person[]> {
+  if (!hasSupabaseEnv()) return PEOPLE;
   try {
     const sb = await createClient();
+    const { data } = await sb.from("profiles").select("id, display_name, role, created_at").order("created_at");
+    if (!data?.length) return PEOPLE;
+    const rank = (r: string) => (r === "child" ? 1 : 0);
+    const used = new Map<string, number>();
+    const people = [...data].sort((a, b) => rank(String(a.role)) - rank(String(b.role))).map((r) => {
+      const name = String(r.display_name ?? "").trim() || "Member";
+      const base = name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, "") || "member";
+      const n = (used.get(base) ?? 0) + 1; used.set(base, n);
+      const initials = name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
+      return { id: n === 1 ? base : `${base}-${n}`, name, role: (r.role === "child" ? "child" : "parent") as Person["role"], initials, uuid: String(r.id) } satisfies Person;
+    });
+    setRoster(people);
+    return people;
+  } catch { return PEOPLE; }
+}
+export async function getViewer(): Promise<Person> {
+  const people = await getPeople();
+  if (!hasSupabaseEnv()) return people[0];
+  try {
     const user = await getRequestUser();
-    if (!user) return PEOPLE[0];
-    const { data } = await sb.from("profiles").select("display_name, role").eq("id", user.id).single();
-    const match = PEOPLE.find((p) => p.name.toLowerCase() === (data?.display_name ?? "").toLowerCase());
-    return match ?? PEOPLE[0];
-  } catch { return PEOPLE[0]; }
+    if (!user) return people[0];
+    return people.find((p) => p.uuid === user.id) ?? people[0];
+  } catch { return people[0]; }
 }
 // Real rows are snake_case with a profile uuid as driver; the pages read the camelCase Vehicle shape.
 // An empty table shows the sample (preview/demo); a table with rows never does.
@@ -207,12 +225,10 @@ export async function getVehicles(): Promise<Vehicle[]> {
   if (!hasSupabaseEnv()) return sampleVehicles;
   try {
     const sb = await createClient();
-    const [{ data }, { data: profs }] = await Promise.all([sb.from("vehicles").select("*").order("created_at"), sb.from("profiles").select("id, display_name")]);
+    const [{ data }, people] = await Promise.all([sb.from("vehicles").select("*").order("created_at"), getPeople()]);
     if (!data || !data.length) return sampleVehicles;
-    const who = new Map((profs ?? []).map((p) => [p.id as string, String(p.display_name ?? "").toLowerCase()]));
     return (data as Array<Record<string, unknown>>).map((r) => {
-      const dn = who.get(String(r.driver ?? ""));
-      const driver = (PEOPLE.find((p) => p.name.toLowerCase() === dn)?.id ?? "ryan") as PersonId;
+      const driver: PersonId = people.find((p) => p.uuid === String(r.driver ?? ""))?.id ?? people[0].id;
       return {
         id: String(r.id), name: String(r.name), short: String(r.short), year: Number(r.year ?? 0), make: String(r.make ?? ""), model: String(r.model ?? ""),
         plate: r.plate ? String(r.plate) : "not recorded", driver, driverId: (r.driver as string | null) ?? null, mileage: Number(r.mileage ?? 0), mileageKnown: r.mileage != null, mileageAt: r.mileage_at ? String(r.mileage_at) : "",
@@ -224,8 +240,18 @@ export async function getVehicles(): Promise<Vehicle[]> {
     });
   } catch { return sampleVehicles; }
 }
-export const getDevices = () => table<Device>("devices", sampleDevices);
-export const getMedications = (person?: PersonId) => table<Medication>("medications", person ? sampleMeds.filter((m) => m.person === person) : sampleMeds, person ? (q) => q.eq("person", person) : undefined);
+export async function getDevices(): Promise<Device[]> {
+  const rows = await table<Device>("devices", sampleDevices);
+  if (!hasSupabaseEnv() || rows === sampleDevices) return rows;
+  const people = await getPeople(); // real rows carry the profile uuid (null = household); the pages use the short ids
+  return rows.map((d) => { const u = d.person as unknown as string | null; return { ...d, person: u ? people.find((p) => p.uuid === u)?.id ?? u : "household" } as Device; });
+}
+export async function getMedications(person?: PersonId): Promise<Medication[]> {
+  const people = await getPeople();
+  const uuid = person ? people.find((p) => p.id === person)?.uuid : undefined;
+  const rows = await table<Medication>("medications", person ? sampleMeds.filter((m) => m.person === person) : sampleMeds, person && uuid ? (q) => q.eq("person", uuid) : undefined);
+  return hasSupabaseEnv() && person ? rows.map((m) => ({ ...m, person })) : rows;
+}
 export const getContacts = () => table<Contact>("contacts", sampleContacts);
 export const getHomeItems = () => table<HomeItem>("home_items", sampleHome);
 // Real rows come back under RLS (own + shared), so no person filter is needed; `person` only narrows the sample.
@@ -234,17 +260,17 @@ export async function getPlaces(person?: PersonId): Promise<Place[]> {
   if (!hasSupabaseEnv()) return person ? samplePlaces.filter((p) => p.person === person) : samplePlaces;
   try {
     const sb = await createClient();
-    const { data } = await sb.from("places").select("id, person, name, meaning, indoors, usual_activity, visits, added_by, confirmed").order("visits", { ascending: false });
+    const [{ data }, people] = await Promise.all([sb.from("places").select("id, person, name, meaning, indoors, usual_activity, visits, added_by, confirmed").order("visits", { ascending: false }), getPeople()]);
     return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-      id: String(r.id), person: (person ?? "ryan") as PersonId, name: String(r.name), meaning: String(r.meaning ?? ""), indoors: r.indoors as boolean,
+      id: String(r.id), person: (people.find((p) => p.uuid === String(r.person ?? ""))?.id ?? person ?? people[0].id) as PersonId, name: String(r.name), meaning: String(r.meaning ?? ""), indoors: r.indoors as boolean,
       usualActivity: String(r.usual_activity ?? ""), visits: Number(r.visits ?? 0), addedBy: r.added_by === "answer" ? "You · from a question" : r.added_by === "calendar" ? "System · from Calendar" : `System · ${String(r.added_by ?? "learned")}`,
     }));
   } catch { return []; }
 }
 export const getSources = () => table<Source>("sources", sampleSources);
-export const getSchedule = async (person: PersonId) => sampleSchedule[person];
-export const getActivities = async (person: PersonId) => sampleActivities[person];
-export const getOpenItems = async (person: PersonId) => sampleOpenItems[person];
+export const getSchedule = async (person: PersonId) => sampleSchedule[person] ?? [];
+export const getActivities = async (person: PersonId) => sampleActivities[person] ?? [];
+export const getOpenItems = async (person: PersonId) => sampleOpenItems[person] ?? [];
 
 // ---- derived ----
 export function vehicleStatus(v: Vehicle): { state: "ok" | "warn" | "error"; text: string } {

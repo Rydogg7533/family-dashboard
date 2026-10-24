@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources, SectionTitle } from "@/components/registers";
-import { PEOPLE, getActivities, getPlaces, getViewer, type PersonId } from "@/lib/data-registers";
+import { getActivities, getPeople, getPlaces, getViewer, type PersonId } from "@/lib/data-registers";
 import { PlacesList } from "@/components/c/PlacesList";
 
 export const dynamic = "force-dynamic";
 
 export default async function Places() {
   const viewer = await getViewer();
-  const [places, activities] = await Promise.all([getPlaces(viewer.id as PersonId), Promise.all(PEOPLE.map(async (p) => ({ p, acts: await getActivities(p.id) })))]);
+  const people = await getPeople();
+  const [places, activities] = await Promise.all([getPlaces(viewer.id as PersonId), Promise.all(people.map(async (p) => ({ p, acts: await getActivities(p.id) })))]);
   return (
     <>
       <H1 right={`${viewer.name}'s`}>Schedule and activities</H1>
@@ -25,7 +26,7 @@ export default async function Places() {
             {acts.map((a) => (
               <div key={a.name} className="py-2 border-b border-line last:border-b-0">
                 <div className="flex justify-between gap-2"><div className="font-semibold text-sm">{a.name}</div><div className="text-xs text-muted">{a.season}</div></div>
-                <div className="text-xs text-muted">Always: {a.checklist.join(", ")} · {PEOPLE.find((x) => x.id === a.responsible)?.name} gets them there · <a href="#edit" className="text-accent font-semibold">Edit list ›</a></div>
+                <div className="text-xs text-muted">Always: {a.checklist.join(", ")} · {people.find((x) => x.id === a.responsible)?.name} gets them there · <a href="#edit" className="text-accent font-semibold">Edit list ›</a></div>
               </div>
             ))}
           </Card>

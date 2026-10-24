@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, H1 } from "@/components/ui";
 import { DueChip, OpenIn, PageSources, SectionTitle } from "@/components/registers";
-import { PEOPLE, deviceDue, dueText, getActivities, getDevices, getMedications, getOpenItems, getSchedule, getVehicles, getViewer, vehicleStatus, type PersonId } from "@/lib/data-registers";
+import { deviceDue, dueText, getActivities, getDevices, getMedications, getOpenItems, getPeople, getSchedule, getVehicles, getViewer, vehicleStatus, type PersonId } from "@/lib/data-registers";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,8 @@ const kindLabel = { reply: "REPLY NEEDED", do: "DO", decide: "DECIDE" } as const
 
 export default async function PersonPage({ params }: PageProps<"/family/[person]">) {
   const { person } = await params;
-  const p = PEOPLE.find((x) => x.id === person);
+  const people = await getPeople();
+  const p = people.find((x) => x.id === person);
   if (!p) notFound();
   const id = p.id as PersonId;
   const [viewer, schedule, open, activities, devices, vehicles] = await Promise.all([getViewer(), getSchedule(id), getOpenItems(id), getActivities(id), getDevices(), getVehicles()]);
@@ -55,7 +56,7 @@ export default async function PersonPage({ params }: PageProps<"/family/[person]
           {activities.map((a) => (
             <Card key={a.name}>
               <div className="flex justify-between gap-2"><div className="font-semibold">{a.name}</div><div className="text-xs text-muted">{a.season}</div></div>
-              <div className="text-xs text-muted mt-1">Always: {a.checklist.join(", ")}{a.responsible !== id ? ` · ${PEOPLE.find((x) => x.id === a.responsible)?.name} gets them there` : ""}</div>
+              <div className="text-xs text-muted mt-1">Always: {a.checklist.join(", ")}{a.responsible !== id ? ` · ${people.find((x) => x.id === a.responsible)?.name} gets them there` : ""}</div>
             </Card>
           ))}
         </div>

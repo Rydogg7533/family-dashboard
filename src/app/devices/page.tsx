@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { DueChip, OpenIn, PageSources, SectionTitle } from "@/components/registers";
-import { PEOPLE, deviceDue, fmtDate, getDevices, personName, type Device, type PersonId } from "@/lib/data-registers";
+import { deviceDue, fmtDate, getDevices, getPeople, personName, type Device, type PersonId } from "@/lib/data-registers";
 
 export const dynamic = "force-dynamic";
-
-const owners: (PersonId | "household")[] = ["ryan", "melissa", "child1", "child2", "household"];
 
 function DeviceRow({ d }: { d: Device }) {
   const due = deviceDue(d);
@@ -34,7 +32,8 @@ export default async function Devices({ searchParams }: PageProps<"/devices">) {
   const sp = await searchParams;
   const all = sp.all === "1";
   const person = typeof sp.person === "string" ? sp.person : null;
-  const devices = await getDevices();
+  const [devices, people] = await Promise.all([getDevices(), getPeople()]);
+  const owners: (PersonId | "household")[] = [...people.map((p) => p.id), "household"];
   const surfaced = devices.map((d) => ({ d, due: deviceDue(d) })).filter((x) => x.due).sort((a, b) => a.due!.date.localeCompare(b.due!.date));
   const shown = person ? devices.filter((d) => d.person === person) : devices;
   const active = shown.filter((d) => d.status !== "retired");
@@ -93,7 +92,7 @@ export default async function Devices({ searchParams }: PageProps<"/devices">) {
         </Card>
       )}
 
-      <p className="text-xs text-muted mt-4">Serials and IMEIs: last digits only, with a pointer to the vault. Add with &quot;+&quot; (snap the serial plate or receipt). Retire or Sold moves an item to history; nothing is deleted. People: {PEOPLE.map((p) => p.name).join(", ")} and the household.</p>
+      <p className="text-xs text-muted mt-4">Serials and IMEIs: last digits only, with a pointer to the vault. Add with &quot;+&quot; (snap the serial plate or receipt). Retire or Sold moves an item to history; nothing is deleted. People: {people.map((p) => p.name).join(", ")} and the household.</p>
       <PageSources items={[{ label: "Find My", href: "#findmy" }, { label: "AppleCare", href: "#applecare" }, { label: "Carrier", href: "#carrier" }, { label: "1Password", href: "#1password" }, { label: "Receipts (Organized)", href: "#finder-devices" }]} />
     </>
   );
