@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getViewer } from "@/lib/data-registers";
 import { getDisplayName, getOpenTasks, getPeopleNames, getStatus, overall } from "@/lib/data";
 import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
 import { splitTasks } from "@/lib/tasks-view";
@@ -11,6 +13,8 @@ import { getMyConnections } from "@/lib/data-connections";
 export const dynamic = "force-dynamic";
 
 export default async function Today() {
+  // A child's login has one page: theirs.
+  if ((await getViewer()).role === "child" && hasSupabaseEnv()) redirect("/kid");
   const [name, status, allTasks, names, user, setup] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser(), getMyConnections()]);
   const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;

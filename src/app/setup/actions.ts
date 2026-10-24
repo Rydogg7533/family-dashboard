@@ -1,5 +1,5 @@
 "use server";
-import { randomInt } from "node:crypto";
+import { tempPassword } from "@/lib/temp-password";
 import { getSetupState, serviceClient } from "@/lib/setup-state";
 
 // First run: makes the household and its two parents. Runs only while the database has no profile at all (checked again here, server-side),
@@ -10,10 +10,6 @@ export type SetupInput = { household: string; tz: string; parents: Parent[] };
 
 const clean = (s: unknown, n: number) => String(s ?? "").replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// 14 characters from an alphabet without look-alikes (no 0/O, 1/l/I). About 70 bits.
-const ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
-const tempPassword = () => Array.from({ length: 14 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
-
 export async function runSetup(input: SetupInput) {
   const household = clean(input.household, 60);
   const tz = clean(input.tz, 60) || "America/Denver";

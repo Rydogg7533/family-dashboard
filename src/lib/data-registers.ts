@@ -195,16 +195,18 @@ export async function getPeople(): Promise<Person[]> {
   if (!hasSupabaseEnv()) return PEOPLE;
   try {
     const sb = await createClient();
-    const { data } = await sb.from("profiles").select("id, display_name, role, created_at").order("created_at");
+    const [{ data }, { data: kids }] = await Promise.all([sb.from("profiles").select("id, display_name, role, created_at").order("created_at"), sb.from("children").select("id, display_name, profile_id").is("archived_at", null).order("birth_year")]);
     if (!data?.length) return PEOPLE;
+    // Children with a login are already profiles; the rest (no login yet) are added after them so the whole family is listed.
+    const rows = [...data.map((r) => ({ uuid: String(r.id), name: String(r.display_name ?? ""), role: String(r.role), childId: undefined as string | undefined })), ...(kids ?? []).filter((k) => !k.profile_id).map((k) => ({ uuid: undefined as string | undefined, name: String(k.display_name ?? ""), role: "child", childId: String(k.id) }))];
     const rank = (r: string) => (r === "child" ? 1 : 0);
     const used = new Map<string, number>();
-    const people = [...data].sort((a, b) => rank(String(a.role)) - rank(String(b.role))).map((r) => {
-      const name = String(r.display_name ?? "").trim() || "Member";
+    const people = rows.sort((a, b) => rank(a.role) - rank(b.role)).map((r) => {
+      const name = r.name.trim() || "Member";
       const base = name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, "") || "member";
       const n = (used.get(base) ?? 0) + 1; used.set(base, n);
       const initials = name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
-      return { id: n === 1 ? base : `${base}-${n}`, name, role: (r.role === "child" ? "child" : "parent") as Person["role"], initials, uuid: String(r.id) } satisfies Person;
+      return { id: n === 1 ? base : `${base}-${n}`, name, role: (r.role === "child" ? "child" : "parent") as Person["role"], initials, uuid: r.uuid, childId: r.childId } satisfies Person;
     });
     setRoster(people);
     return people;

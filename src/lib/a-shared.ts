@@ -2,7 +2,7 @@
 // A short stable name for a person ("ryan"). For a real household it is made from the profile's first name (see getPeople); the database itself
 // always stores the profile uuid. Sample mode uses the fixed sample people below.
 export type PersonId = string;
-export type Person = { id: PersonId; name: string; role: "parent" | "child"; initials: string; uuid?: string };
+export type Person = { id: PersonId; name: string; role: "parent" | "child"; initials: string; uuid?: string; childId?: string };
 
 export type Expiry = { label: string; date: string; kind: "registration" | "insurance" | "inspection" | "emissions" | "license" | "warranty" | "other"; action: string; source: string; href: string };
 export type Maintenance = { item: string; dueDate: string | null; dueMiles: number | null; lastDone: string | null };
