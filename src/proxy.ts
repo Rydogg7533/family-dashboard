@@ -19,6 +19,8 @@ export async function proxy(request: NextRequest) {
   if (p === "/sitter" || p === "/sitter/pair") return NextResponse.next();
   // A child's invite link proves itself with its token; no session yet.
   if (p.startsWith("/join/")) return NextResponse.next();
+  // A pre-onboarding checklist link proves itself with its token; the buyer has no account yet.
+  if (p.startsWith("/preonboard/")) return NextResponse.next();
   // First run: /setup works before anyone can sign in. The page itself refuses once a profile exists.
   if (p === "/setup" || p.startsWith("/setup/")) return NextResponse.next();
   // Password reset: the email link lands on /auth/callback signed out; /forgot-password is for signed-out people.
