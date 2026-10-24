@@ -20,7 +20,7 @@ const moreTitles: Record<string, string> = {
 };
 const subTitles: Record<string, string> = {
   "/shop/orders": "Orders", "/shop/cases": "Support cases",
-  "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications", "/vehicles/new": "Add a vehicle",
+  "/settings/people": "People and access", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications", "/settings/connections": "Connections", "/settings/location": "Location", "/settings/contacts": "Contacts source", "/settings/filing-rules": "Filing rules", "/vehicles/new": "Add a vehicle",
 };
 const moneyTitles: Record<string, string> = {
   "/money/receipts": "Receipts", "/money/recurring": "Bills and charges", "/money/subscriptions": "Subscriptions",

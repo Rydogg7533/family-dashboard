@@ -50,8 +50,12 @@ export async function getMyConnections(): Promise<{ conns: Conn[]; dismissed: Se
     n > 0 ? add("push", "connected", `${n} device${n === 1 ? "" : "s"} allowed`) : add("push", "todo", STEP_PITCH.push);
 
     const accts = (mail.data ?? []).filter((a) => !/\.(contacts|calendar|sheets)$/.test(a.address));
-    const bad = accts.find((a) => a.last_error), okAcct = accts.find((a) => a.last_sync_at && !a.last_error);
-    if (bad) add("mail", "needs", `${bad.address}: ${String(bad.last_error).slice(0, 120)}`);
+    // A sync error is "needs attention" only once it is old enough to matter: a single failed 5-minute run (rate limits, a dropped
+    // connection) clears itself. Errors are shown in plain words, not API paths.
+    const stale = (a: { last_sync_at: string | null }) => !a.last_sync_at || Date.now() - Date.parse(a.last_sync_at) > 60 * 60000;
+    const plain = (e: string) => /retries|rate|429|timeout|ECONN|fetch failed/i.test(e) ? "the mail service is not answering right now" : /invalid_grant|revoked|expired|401|403|insufficient/i.test(e) ? "the sign-in has expired; sign in again on the Mac mini" : e.slice(0, 120);
+    const bad = accts.find((a) => a.last_error && stale(a)), okAcct = accts.find((a) => a.last_sync_at && !a.last_error);
+    if (bad) add("mail", "needs", `${bad.address}: ${plain(String(bad.last_error))} (no sync for ${bad.last_sync_at ? ago(bad.last_sync_at) : "ever"})`);
     else if (okAcct) add("mail", "connected", `${accts.map((a) => a.address).join(", ")} · synced ${ago(okAcct.last_sync_at)}`);
     else add("mail", "todo", accts.length ? "Signed in, waiting for the first sync." : STEP_PITCH.mail, accts.length ? undefined : "On the Mac mini, once: node scripts/mail-connect.mjs --provider gmail --account <your address> --person <your name>  (icloud or other instead of gmail). It asks for an app password.");
 
