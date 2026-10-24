@@ -2,13 +2,14 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { addChild, createChildLogin, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
+import { addChild, createChildLogin, createChildInvite, revokeChildInvite, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
+import type { InviteRow } from "@/lib/data-children";
 import { ageFloor, ageText, loginAllowed, minAgeFor, type ChildRow } from "@/lib/children";
 
 const input = "w-full min-h-11 px-3 rounded-xl border border-line bg-bg text-base";
 const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50";
 
-export function PeopleManager({ parents, kids, householdMin, canEdit }: { parents: string[]; kids: ChildRow[]; householdMin: number; canEdit: boolean }) {
+export function PeopleManager({ parents, kids, householdMin, canEdit, invites = [] }: { parents: string[]; kids: ChildRow[]; householdMin: number; canEdit: boolean; invites?: InviteRow[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -19,6 +20,9 @@ export function PeopleManager({ parents, kids, householdMin, canEdit }: { parent
   const [loginFor, setLoginFor] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [made, setMade] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [inviteFor, setInviteFor] = useState<string | null>(null);
+  const [invite, setInvite] = useState<{ name: string; link: string; qr: string; expires: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const run = (fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) => { setErr(null); start(async () => { try { const r = await fn(); if (!r.ok) { setErr(r.error ?? "That didn't work."); return; } after?.(); router.refresh(); } catch { setErr("That took too long. Try again."); } }); };
 
@@ -39,7 +43,7 @@ export function PeopleManager({ parents, kids, householdMin, canEdit }: { parent
             <div key={k.id} className="border-t border-line pt-3 first:border-t-0 first:pt-0">
               <div className="flex justify-between gap-2 items-baseline"><div className="font-semibold">{k.display_name}</div><div className="text-xs text-muted">born {k.birth_year} · about {ageText(k.birth_year)}</div></div>
               <Link href={`/settings/people/${k.id}`} className="inline-block mt-1 text-xs font-semibold text-accent">What {k.display_name} can see and do ›</Link>
-              {k.profile_id ? <div className="text-xs text-green mt-1">Has a login. It opens the kid page and sees only their own things.</div> : (
+              {k.profile_id ? <div className="text-xs text-green mt-1">Has a login{k.pin_login ? " with a 6-digit code" : ""}. It opens the kid page and sees only their own things.</div> : (
                 <div className="mt-1">
                   <div className="text-xs text-muted">{allowed ? "Can have a login." : `No personal login until age ${min}. Their schedule and jobs can still show on a shared screen.`}</div>
                   {canEdit && (loginFor === k.id ? (
@@ -51,8 +55,20 @@ export function PeopleManager({ parents, kids, householdMin, canEdit }: { parent
                         <button type="button" className={`${btn} bg-soft`} onClick={() => { setLoginFor(null); setErr(null); }}>Cancel</button>
                       </div>
                     </div>
+                  ) : inviteFor === k.id ? (
+                    <div className="flex flex-col gap-2 mt-2">
+                      <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" placeholder="Email for their login" className={input} />
+                      <div className="text-xs text-muted">A parent&apos;s address works (for example name+kid@gmail.com). They never see it; they sign in with their name and a 6-digit code they pick themselves.</div>
+                      <div className="flex gap-2">
+                        <button type="button" disabled={pending || !email.trim()} className={`${btn} bg-accent text-white`} onClick={() => run(async () => { const r = await createChildInvite(k.id, email); if (r.ok) { setInvite({ name: r.name, link: r.link, qr: r.qr, expires: r.expires }); setCopied(false); return { ok: true }; } return r; }, () => { setInviteFor(null); setEmail(""); })}>{pending ? "Making…" : "Make the invite"}</button>
+                        <button type="button" className={`${btn} bg-soft`} onClick={() => { setInviteFor(null); setErr(null); }}>Cancel</button>
+                      </div>
+                    </div>
                   ) : allowed ? (
-                    <button type="button" className={`${btn} bg-soft mt-2`} onClick={() => { setLoginFor(k.id); setMade(null); setErr(null); }}>Create login</button>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <button type="button" className={`${btn} bg-accent text-white`} onClick={() => { setInviteFor(k.id); setLoginFor(null); setMade(null); setInvite(null); setErr(null); }}>Invite {k.display_name}</button>
+                      <button type="button" className={`${btn} bg-soft`} onClick={() => { setLoginFor(k.id); setInviteFor(null); setMade(null); setErr(null); }}>Create login with a password</button>
+                    </div>
                   ) : (
                     <button type="button" disabled={pending} className={`${btn} bg-soft mt-2`} onClick={() => run(() => setChildLoginAge(k.id, Math.max(3, ageFloor(k.birth_year))))}>Allow a login for {k.display_name} now</button>
                   ))}
@@ -63,6 +79,31 @@ export function PeopleManager({ parents, kids, householdMin, canEdit }: { parent
           );
         })}
       </div>
+
+      {invites.length > 0 && (
+        <div className="card flex flex-col gap-2">
+          <div className="font-semibold">Invites waiting</div>
+          {invites.map((i) => { const kid = kids.find((k) => k.id === i.child_id); return (
+            <div key={i.id} className="flex justify-between items-center gap-2 text-xs">
+              <span>{kid?.display_name ?? "A child"} · expires {new Date(i.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              {canEdit && <button type="button" disabled={pending} className="font-semibold text-muted min-h-9" onClick={() => run(() => revokeChildInvite(i.id))}>Cancel</button>}
+            </div>); })}
+        </div>
+      )}
+
+      {invite && (
+        <div className="card flex flex-col gap-2 border-accent">
+          <div className="font-semibold">Invite for {invite.name}: shown only now</div>
+          <div className="text-xs text-muted">Show them this code on your phone, or send them the link. It works once and expires {new Date(invite.expires).toLocaleDateString("en-US", { month: "short", day: "numeric" })}. They pick their own 6-digit code when they open it.</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={invite.qr} alt="QR code for the invite link" className="w-56 h-56 self-center rounded-xl bg-white p-2" />
+          <div className="font-mono text-[11px] break-all select-all rounded-xl border border-line p-2">{invite.link}</div>
+          <div className="flex gap-2">
+            <button type="button" className={`${btn} bg-soft`} onClick={async () => { try { await navigator.clipboard.writeText(invite.link); setCopied(true); } catch { setCopied(false); } }}>{copied ? "Copied" : "Copy the link"}</button>
+            <button type="button" className={`${btn} bg-soft`} onClick={() => setInvite(null)}>Done</button>
+          </div>
+        </div>
+      )}
 
       {made && (
         <div className="card flex flex-col gap-2 border-accent">

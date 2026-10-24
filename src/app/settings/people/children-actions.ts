@@ -93,9 +93,14 @@ export async function setChildFeature(childId: string, key: string, mode: "auto"
   const o = await owner(); if ("ok" in o) return o;
   if (!["auto", "on", "off"].includes(mode)) return { ok: false, error: "Pick automatic, on or off." };
   const f = await featureKnown(o.svc, key); if (!f) return { ok: false, error: "That feature was not found." };
-  const { data: c } = await o.svc.from("children").select("display_name,access").eq("id", childId).maybeSingle();
+  const { data: c } = await o.svc.from("children").select("display_name,access,pin_login").eq("id", childId).maybeSingle();
   if (!c) return { ok: false, error: "That child was not found." };
   const access = { ...((c.access as Record<string, string>) ?? {}) };
+  if (mode === "on") {
+    // A child who signs in with a PIN cannot be given a feature that needs a real password; the database would refuse it anyway, so say why here.
+    const [{ data: cf }, { data: cr }] = await Promise.all([o.svc.from("child_features").select("pin_ok").eq("key", key).maybeSingle(), o.svc.from("children").select("pin_login").eq("id", childId).maybeSingle()]);
+    if (cr?.pin_login && cf && !cf.pin_ok) return { ok: false, error: `${c.display_name} signs in with a PIN. ${f.label} needs a real password: have them set one first (Settings › People), then turn this on.` };
+  }
   if (mode === "auto") delete access[key]; else access[key] = mode;
   const { error } = await o.svc.from("children").update({ access }).eq("id", childId);
   if (error) return { ok: false, error: error.message };
@@ -129,4 +134,36 @@ export async function setHouseholdFeatureAge(key: string, age: number | null): P
   await log(o.svc, o.name, "child_access_changed", `${f.label}: minimum age ${a == null ? "back to the default" : `set to ${a}`} for the household`);
   revalidatePath("/settings/people", "layout"); revalidatePath("/kid");
   return { ok: true };
+}
+
+// ---- invites (migration 0038): a parent sends a link; the child opens it and picks a 6-digit PIN. Only a hash of the token is stored. ----
+export async function createChildInvite(childId: string, email: string): Promise<{ ok: true; name: string; link: string; qr: string; expires: string } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  const addr = clean(email, 120).toLowerCase();
+  if (!EMAIL.test(addr)) return { ok: false, error: "That doesn't look like an email address." };
+  const { data: c } = await o.svc.from("children").select("id,display_name,birth_year,login_min_age,profile_id,archived_at").eq("id", childId).maybeSingle();
+  if (!c || c.archived_at) return { ok: false, error: "That child was not found." };
+  if (c.profile_id) return { ok: false, error: `${c.display_name} already has a login.` };
+  const { data: hh } = await o.svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
+  if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10))) return { ok: false, error: `${c.display_name} is under the login age (${minAgeFor(c, Number(hh?.child_login_min_age ?? 10))}). Change the age for this child first.` };
+  const { newToken, hashToken } = await import("@/lib/pin");
+  const QR = (await import("qrcode")).default;
+  // One open invite per child: older ones are revoked, never deleted.
+  await o.svc.from("child_invites").update({ revoked_at: new Date().toISOString() }).eq("child_id", childId).is("accepted_at", null).is("revoked_at", null);
+  const token = newToken(); const expires = new Date(Date.now() + 7 * 864e5);
+  const { error } = await o.svc.from("child_invites").insert({ child_id: childId, email: addr, token_hash: hashToken(token), created_by: o.id, expires_at: expires.toISOString() });
+  if (error) return { ok: false, error: error.message };
+  const { headers } = await import("next/headers"); const h = await headers();
+  const link = `https://${h.get("x-forwarded-host") ?? h.get("host") ?? ""}/join/${token}`;
+  const qr = await QR.toDataURL(link, { margin: 1, width: 320 });
+  await log(o.svc, o.name, "child_invited", `Invited ${c.display_name} to set up their own login`);
+  done(); return { ok: true, name: c.display_name, link, qr, expires: expires.toISOString() };
+}
+
+export async function revokeChildInvite(inviteId: string): Promise<{ ok: true } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  const { data, error } = await o.svc.from("child_invites").update({ revoked_at: new Date().toISOString() }).eq("id", inviteId).is("accepted_at", null).is("revoked_at", null).select("child_id");
+  if (error || !data?.length) return { ok: false, error: "That invite was already used or cancelled." };
+  await log(o.svc, o.name, "child_invite_cancelled", "An invite was cancelled");
+  done(); return { ok: true };
 }
