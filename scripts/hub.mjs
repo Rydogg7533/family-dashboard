@@ -63,7 +63,7 @@ export const MODULES = [
     extraArgs: () => ["--account", mailboxTokens[0].replace(/^google-/, "").replace(/\.json$/, ""), "--days", "3"] },
   { id: "messages-mirror", script: "messages-mirror.mjs", keepAlive: true, needs: () => supabase && has("MIRROR_PERSON_ID") && canRead(join(HOME, "Library", "Messages", "chat.db")), why: "needs MIRROR_PERSON_ID in the env file and Full Disk Access to Messages (advanced)", powers: "Messages mirror", extraArgs: () => ["--watch"] },
 ];
-const PERSONAL = ["com.ryan.dashboard-report", "com.ryan.bookmark-evening"];
+const PERSONAL = ["com.ryan.dashboard-report", "com.ryan.nightly-mirror", "com.ryan.bookmark-evening"];
 
 function canRead(p) { try { readFileSync(p, { flag: "r" }).length; return true; } catch { return false; } }
 
@@ -106,19 +106,20 @@ function main() {
     const label = PREFIX + m.id, file = join(AGENTS, `${label}.plist`);
     const want = on ? plistFor(m) : null;   // a module that is off has nothing to build (its prerequisites may be missing)
     const have = existsSync(file) ? readFileSync(file, "utf8") : null;
-    const state = !on ? "off" : have === null ? "install" : have === want ? "ok" : "update";
+    // "load": the plist is right but launchd does not have it (written earlier, never bootstrapped, or unloaded by hand)
+    const state = !on ? "off" : have === null ? "install" : have !== want ? "update" : loaded.has(label) ? "ok" : "load";
     const legacyLabel = `com.ryan.${m.id}`;
     const row = { id: m.id, powers: m.powers, on, why: on ? null : m.why, state, loaded: loaded.has(label), legacyLoaded: loaded.has(legacyLabel) || legacy.includes(legacyLabel) };
     report.modules.push(row);
     if (!on || state === "ok" || (ONLY && !ONLY.has(m.id))) continue;
     if (!APPLY) { report.changes.push(`${state} ${label}`); continue; }
     mkdirSync(LOGS, { recursive: true }); mkdirSync(AGENTS, { recursive: true });
-    writeFileSync(file, want, { mode: 0o644 });
+    if (state !== "load") writeFileSync(file, want, { mode: 0o644 });
     const domain = `gui/${uid()}`;
     spawnSync("launchctl", ["bootout", `${domain}/${label}`], { stdio: "ignore" });     // fine if it was not loaded
     const b = spawnSync("launchctl", ["bootstrap", domain, file], { encoding: "utf8" });
     row.loaded = b.status === 0; row.state = b.status === 0 ? "ok" : "load-failed";
-    report.changes.push(`${state === "install" ? "installed" : "updated"} ${label}${b.status === 0 ? "" : ` (bootstrap failed: ${(b.stderr || "").trim()})`}`);
+    report.changes.push(`${state === "install" ? "installed" : state === "load" ? "loaded" : "updated"} ${label}${b.status === 0 ? "" : ` (bootstrap failed: ${(b.stderr || "").trim()})`}`);
   }
   if (JSON_OUT) { console.log(JSON.stringify(report, null, 2)); return; }
 
@@ -129,7 +130,7 @@ function main() {
   console.log("\nModules");
   for (const r of report.modules) {
     const mark = !r.on ? "·" : r.state === "ok" && r.loaded ? "✓" : r.state === "ok" ? "~" : "→";
-    const note = !r.on ? `off: ${r.why}` : r.state === "ok" ? (r.loaded ? "installed and loaded" : "installed, not loaded") : r.state === "install" ? "would install" : r.state === "update" ? "would update (plist differs)" : r.state;
+    const note = !r.on ? `off: ${r.why}` : r.state === "ok" ? "installed and loaded" : r.state === "install" ? "would install" : r.state === "update" ? "would update (plist differs)" : r.state === "load" ? "installed but not loaded: would load" : r.state;
     console.log(`  ${mark} ${r.id.padEnd(22)} ${note}${r.legacyLoaded ? `   [com.ryan.${r.id} also present]` : ""}`);
   }
   console.log("\nPersonal jobs (not part of the kit, left alone)");
