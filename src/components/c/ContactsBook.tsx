@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ContactCard } from "@/lib/data-registers";
 import { groupLetter, matches, sortKey } from "@/lib/contact-search";
 import ContactForm from "@/components/c/ContactForm";
+import { tick } from "@/lib/haptics";
 
 const tel = (n: string) => `tel:${n.replace(/[^\d+]/g, "")}`;
 
@@ -13,6 +14,7 @@ function IndexRail({ present, stickTop }: { present: string[]; stickTop: number 
   const ref = useRef<HTMLElement>(null);
   const [bubble, setBubble] = useState<string | null>(null);
   const last = useRef<string | null>(null);
+  const tickLabel = useRef<HTMLLabelElement>(null);   // hidden iOS switch that gives the haptic tick (see src/lib/haptics.ts)
   const go = (clientY: number) => {
     const r = ref.current?.getBoundingClientRect(); if (!r || !present.length) return;
     const i = Math.max(0, Math.min(ALPHA.length - 1, Math.floor(((clientY - r.top) / r.height) * ALPHA.length)));
@@ -21,7 +23,7 @@ function IndexRail({ present, stickTop }: { present: string[]; stickTop: number 
     last.current = hit; setBubble(hit);
     const sec = document.getElementById(`g-${hit}`);
     if (sec) window.scrollTo(0, Math.max(0, sec.getBoundingClientRect().top + window.scrollY - (stickTop - 1)));   // measured, not assumed: the letter lands flush under the pinned bar
-    try { navigator.vibrate?.(5); } catch { /* not supported on iPhone */ }
+    tick(tickLabel.current);
   };
   const end = () => { last.current = null; setBubble(null); };
   return (
@@ -31,6 +33,9 @@ function IndexRail({ present, stickTop }: { present: string[]; stickTop: number 
         style={{ top: "calc(150px + env(safe-area-inset-top))", bottom: "calc(132px + env(safe-area-inset-bottom))" }}>
         {ALPHA.map((l) => <span key={l} className={present.includes(l) ? "" : "opacity-30"}>{l}</span>)}
       </nav>
+      <label ref={tickLabel} aria-hidden className="fixed left-0 top-0 size-px opacity-0 pointer-events-none overflow-hidden">
+        <input type="checkbox" tabIndex={-1} {...({ switch: "" } as Record<string, string>)} />
+      </label>
       {bubble && <div aria-hidden className="fixed right-12 top-1/2 -translate-y-1/2 z-30 w-16 h-16 rounded-2xl bg-fg text-bg grid place-items-center text-3xl font-bold shadow-lg">{bubble}</div>}
     </>
   );
