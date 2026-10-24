@@ -58,5 +58,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icon.*).*)"],
+  // preonboard-assets: public screenshots for the pre-onboarding walkthrough, fetched by <img> tags on the
+  // no-login /preonboard/[token] page — must never redirect to /login or those images 404 into the placeholder.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icon.*|preonboard-assets/).*)"],
 };
