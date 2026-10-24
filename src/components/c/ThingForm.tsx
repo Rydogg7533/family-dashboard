@@ -9,7 +9,7 @@ type Initial = { id: string } & ThingInput;
 const blank: ThingInput = { name: "", category: "", owner: "shared", location: "", brand: "", model: "", serialLast4: "", size: "", season: "", notes: "" };
 
 // Add a thing, or edit one. Photos are shrunk on the phone (location data removed) and uploaded when you save, so nothing is left behind if you cancel.
-export function ThingForm({ people, isOwner, initial, lastCategory, lastLocation }: { people: { key: string; label: string }[]; isOwner: boolean; initial?: Initial; lastCategory?: string; lastLocation?: string }) {
+export function ThingForm({ people, isOwner, initial, lastCategory, lastLocation, areaId, areaName, label }: { people: { key: string; label: string }[]; isOwner: boolean; initial?: Initial; lastCategory?: string; lastLocation?: string; areaId?: string; areaName?: string; label?: string }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<ThingInput>(initial ?? { ...blank, category: lastCategory ?? "", location: lastLocation ?? "" });
   const [price, setPrice] = useState({ dollars: "", date: "", store: "" });
@@ -21,7 +21,7 @@ export function ThingForm({ people, isOwner, initial, lastCategory, lastLocation
   const set = (k: keyof ThingInput) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF((c) => ({ ...c, [k]: e.target.value }));
   const inp = "w-full min-h-10 rounded-xl border border-line bg-bg px-3 text-sm";
 
-  if (!open) return <button onClick={() => setOpen(true)} className={initial ? "min-h-9 px-3 rounded-full border border-line text-xs font-semibold" : "min-h-10 px-4 rounded-full bg-accent text-white text-sm font-semibold"}>{initial ? "Edit details" : "Add a thing"}</button>;
+  if (!open) return <button onClick={() => setOpen(true)} className={initial ? "min-h-9 px-3 rounded-full border border-line text-xs font-semibold" : "min-h-10 px-4 rounded-full bg-accent text-white text-sm font-semibold"}>{initial ? "Edit details" : label ?? "Add a thing"}</button>;
 
   async function save(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setErr(null);
@@ -31,7 +31,7 @@ export function ThingForm({ people, isOwner, initial, lastCategory, lastLocation
         if (!r.ok) throw new Error(r.error ?? "Could not save.");
       } else {
         const photos = files.length ? await uploadThingPhotos(files.map((x) => x.file)) : [];
-        const r = await addThing(f, photos);
+        const r = await addThing({ ...f, areaId }, photos);
         if (!r.id) throw new Error(r.error ?? "Could not save.");
         if (isOwner && (price.dollars.trim() || price.store.trim() || price.date)) {
           const p = await setThingPrice(r.id, price.dollars, price.date, price.store);
@@ -73,7 +73,7 @@ export function ThingForm({ people, isOwner, initial, lastCategory, lastLocation
           {people.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
       </label>
-      <input className={inp} placeholder="Where does it live? (e.g. Garage, top shelf)" value={f.location} onChange={set("location")} />
+      <input className={inp} placeholder={areaName ? `Spot in the ${areaName} (e.g. top shelf)` : "Where does it live? (e.g. Garage, top shelf)"} value={f.location} onChange={set("location")} />
       {isClothing(f.category) && (
         <div className="grid grid-cols-2 gap-2">
           <input className={inp} placeholder="Size" value={f.size} onChange={set("size")} />

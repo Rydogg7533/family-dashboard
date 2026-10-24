@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { parseOwnerKey, parseDollars, SEASONS, type ThingStatus } from "@/lib/things-shared";
 
-export type ThingInput = { name: string; category: string; owner: string; location?: string; brand?: string; model?: string; serialLast4?: string; size?: string; season?: string; notes?: string };
+export type ThingInput = { name: string; category: string; owner: string; location?: string; brand?: string; model?: string; serialLast4?: string; size?: string; season?: string; notes?: string; areaId?: string };
 export type NewPhoto = { path: string; thumb: string; name: string };
 type Res = { ok: boolean; error?: string; id?: string; note?: string };
 
@@ -26,6 +26,8 @@ function fields(input: ThingInput) {
   return {
     name: (input.name ?? "").trim().slice(0, 200), category: cat ? cat[0].toUpperCase() + cat.slice(1) : "Other", owner_kind: o.kind, owner_id: o.id,
     location: t(input.location, 120), brand: t(input.brand, 80), model: t(input.model, 80), serial_last4: t(input.serialLast4, 4), size: t(input.size, 40), season, notes: t(input.notes, 1000),
+    // Only set when the form says which area it is for; an edit that does not mention an area leaves the area alone.
+    ...(input.areaId && /^[0-9a-f-]{36}$/i.test(input.areaId) ? { area_id: input.areaId } : {}),
   };
 }
 

@@ -33,6 +33,7 @@ export default async function Things({ searchParams }: PageProps<"/things">) {
     <>
       <H1>Things</H1>
       <p className="text-sm text-muted mb-2">Everything the household owns, with photos. Nothing here is ever deleted: an item is marked sold, given away, lost or thrown out, and the history stays.</p>
+      <Link href="/things/catalog" className="block mb-3"><div className="card text-sm font-semibold border-accent">Catalog everything you own, one area at a time <span className="text-accent">Open the guide</span></div></Link>
       <div className="mb-3"><ThingForm people={peopleOpts} isOwner={isOwner} lastCategory={last?.category} lastLocation={last?.location ?? undefined} /></div>
       {noPhoto > 0 && st === "active" && <Card className="text-sm mb-3">{noPhoto} {noPhoto === 1 ? "item has" : "items have"} no photo yet. Open one and tap Add the first photo.</Card>}
       <form action="/things" className="flex gap-2 mb-2">
