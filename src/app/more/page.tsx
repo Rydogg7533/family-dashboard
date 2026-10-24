@@ -3,10 +3,15 @@ import { H1 } from "@/components/ui";
 import { MORE_GROUPS, MORE_LINKS } from "@/lib/more-links";
 import { MoreIcon } from "@/components/MoreIcons";
 import { RecentRow } from "@/components/RecentPages";
+import { getViewer } from "@/lib/data-registers";
+import SignOut from "@/components/c/SignOut";
+
+export const dynamic = "force-dynamic";
 
 // Four sections of two-column tiles. Each section has its own color (tokens in globals.css), icon and count;
 // the tile shape is the same everywhere, so a section is recognised by color, icon and heading.
-export default function More() {
+export default async function More() {
+  const viewer = await getViewer();
   return (
     <>
       <H1>More</H1>
@@ -33,6 +38,7 @@ export default function More() {
           </section>
         );
       })}
+      <SignOut who={viewer.name} />
     </>
   );
 }
