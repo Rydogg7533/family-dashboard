@@ -3,6 +3,8 @@ import { H1, Card } from "@/components/ui";
 import { EventForm } from "@/components/EventForm";
 import { hasGoogleCal, listCalendars, getEvent } from "@/lib/google-calendar";
 import { fmtDate, fmtTime } from "@/lib/data-day";
+import { SitterMark } from "@/components/c/SitterMark";
+import { getNightForEvent } from "@/lib/data-sitter";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,8 @@ export default async function EventPage({ params, searchParams }: PageProps<"/ca
   let event; try { event = await getEvent(decodeURIComponent(cal), decodeURIComponent(id), calendars); } catch { event = null; }
   if (!event) return <><H1>Event</H1><Card>This event is no longer in Google Calendar. <Link href="/calendar" className="font-semibold text-accent">Back to the calendar</Link></Card></>;
   const edit = sp.edit === "1";
+  const eventKey = `${event.calendarId}|${event.id}`;
+  const night = edit || event.allDay ? null : await getNightForEvent(eventKey);
   return (
     <>
       <H1 right={!edit ? <Link href={`?edit=1`} className="font-semibold text-accent">Edit</Link> : undefined}>{edit ? "Edit event" : event.title}</H1>
@@ -28,6 +32,7 @@ export default async function EventPage({ params, searchParams }: PageProps<"/ca
           <div className="text-sm mt-2">Reminders: {event.reminders.useDefault ? "the calendar's default" : event.reminders.overrides.length ? event.reminders.overrides.map((r) => `${r.minutes === 0 ? "at the time" : r.minutes % 1440 === 0 ? `${r.minutes / 1440} day${r.minutes === 1440 ? "" : "s"} before` : r.minutes % 60 === 0 ? `${r.minutes / 60} h before` : `${r.minutes} min before`}${r.method === "email" ? " (email)" : ""}`).join(", ") : "none"}</div>
           {event.attendees.length > 0 && <div className="text-sm mt-1">Guests: {event.attendees.map((a) => a.name || a.email).join(", ")}</div>}
           {event.description && <div className="text-sm mt-2 whitespace-pre-wrap text-muted">{event.description}</div>}
+          {!event.allDay && <SitterMark eventKey={eventKey} title={event.title} place={event.location} startIso={event.startIso} endIso={event.endIso} existing={night} />}
           {event.htmlLink && <a href={event.htmlLink} target="_blank" rel="noreferrer" className="block text-sm font-semibold text-accent mt-3">Open in Google Calendar</a>}
         </Card>
       )}

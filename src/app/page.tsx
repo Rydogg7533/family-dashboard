@@ -7,7 +7,10 @@ import { splitTasks } from "@/lib/tasks-view";
 import { Banner, Card, H1 } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
 import SetupCard from "@/components/c/SetupCard";
-import CatalogCard from "@/components/c/CatalogCard";
+import GuidedCard from "@/components/c/GuidedCard";
+import { SitterToday } from "@/components/c/SitterToday";
+import { getNights, getSitterSheetNudge } from "@/lib/data-sitter";
+import { detectSitterNights } from "@/lib/sitter-detect";
 import { getCatalogNudge } from "@/lib/data-catalog";
 import { getMyConnections } from "@/lib/data-connections";
 import { getChildFeatures, getChildRows, getFeatureAges } from "@/lib/data-children";
@@ -36,6 +39,14 @@ export default async function Today() {
   // One set-up step at a time: the first connection that is not done and was not put off with "Not now".
   const nextStep = setup.conns.find((c) => (c.state === "todo" || c.state === "needs") && !setup.dismissed.has(c.step));
   const catalog = nextStep ? null : await getCatalogNudge();
+  const sitterNudge = nextStep || catalog?.show ? null : await getSitterSheetNudge();
+  // Sitter nights: the app looks for evening events with no kids on them (and asks), and surfaces a night that is due for review.
+  let sitterReview = null as Awaited<ReturnType<typeof getNights>>[number] | null, sitterProposal = null as typeof sitterReview;
+  if (me && hasSupabaseEnv()) {
+    await detectSitterNights(me);
+    const [due, asks] = await Promise.all([getNights(["awaiting_review"], 1), getNights(["proposed"], 1)]);
+    sitterReview = due[0] ?? null; sitterProposal = asks[0] ?? null;
+  }
   const connDone = setup.conns.filter((c) => c.state === "connected" || c.state === "off").length;
   const o = overall(status);
   const top = tasks.filter((t) => t.kind !== "fyi").slice(0, 5);
@@ -49,7 +60,10 @@ export default async function Today() {
       <Link href="/health" className="block mb-4"><Banner level={o.level} text={o.level === "ok" ? "System: all good" : `System: ${o.text}`} /></Link>
 
       {nextStep && <SetupCard step={nextStep.step} label={nextStep.label} detail={nextStep.detail} href={nextStep.href} state={nextStep.state as "todo" | "needs"} done={connDone} total={setup.conns.length} />}
-      {catalog?.show && <CatalogCard started={catalog.started} done={catalog.done} total={catalog.total} next={catalog.next} />}
+      {catalog?.show && <GuidedCard step="catalog" title={catalog.started ? "Keep cataloging what you own" : "Next: catalog what you own"} progress={catalog.started && catalog.total > 0 ? `${catalog.done} of ${catalog.total} areas done` : undefined}
+        body={catalog.started ? (catalog.next ? `Next area: ${catalog.next}. A few minutes at a time is fine; it keeps your place.` : "Every area is marked done. Run the final check to finish.") : "Pick the rooms, then photograph things one room at a time. It takes a few minutes per room, over as many days as you like, and it keeps your place."} href="/things/catalog" startLabel={catalog.started ? "Continue" : "Start"} />}
+      {sitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${sitterNudge.done} of ${sitterNudge.total} sections done`} body={`What a babysitter needs, written once.${sitterNudge.next ? ` Next: ${sitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter" startLabel="Continue" />}
+      <SitterToday review={sitterReview} proposal={sitterProposal} />
       {handed > 0 && <Link href="/inbox" className="block mb-4"><div className="card border-accent text-sm font-semibold">{handedBy ? `${handedBy} handed you` : "Handed to you:"} {handed} item{handed === 1 ? "" : "s"} in the Inbox. <span className="text-accent">Open</span></div></Link>}
       <section className="mb-5">
         <div className="flex items-baseline justify-between mb-2">

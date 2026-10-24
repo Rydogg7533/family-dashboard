@@ -15,7 +15,7 @@ const DRY = process.argv.includes("--dry");
 const TZ = "America/Denver";
 // Quiet hours live in each phone's browser storage for now (not the database), so the sender uses the household default.
 const QUIET = { start: "21:00", end: "07:00" };
-const BYPASS = new Set(["test", "safety", "system"]);
+const BYPASS = new Set(["test", "safety", "system", "sitter"]); // a sitter prompt is time-critical: it is not held for quiet hours
 const HOLD_LIMIT_MS = 24 * 3600e3; // a row for a person with no subscribed device waits this long, then is marked failed
 
 const env = {};

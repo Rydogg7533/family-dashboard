@@ -7,6 +7,7 @@ export const NOTIF_TYPES: NotifType[] = [
   { id: "receipt", label: "Receipt nudge", note: "After a store; tap opens the camera", def: "push" },
   { id: "needed", label: "Needed-today record", note: "Check-in, appointment, return window; the morning of", def: "push" },
   { id: "money", label: "Money threshold", note: "Immediately", def: "push" },
+  { id: "sitter", label: "Sitter night", note: "At your leave-by time; tap opens the sitter sheet", def: "push" },
   { id: "safety", label: "Safety", note: "Immediately", def: "push" },
   { id: "system", label: "System red", note: "Immediately", def: "push" },
   { id: "other", label: "Everything else", note: "Quietly on Today", def: "today" },

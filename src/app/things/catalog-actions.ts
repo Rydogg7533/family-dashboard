@@ -83,15 +83,3 @@ export async function reopenCatalog(): Promise<Res> {
   await reopen(w); await log(w, "catalog_reopened", "catalog"); touch();
   return { ok: true };
 }
-
-// "Not now" on the Today card for the catalog task: hide it for 7 days. Same table and rules as the connection cards.
-export async function dismissCatalogCard(): Promise<Res> {
-  const w = await who(); if (!w) return { ok: false, error: "Sign in again." };
-  const now = new Date(), until = new Date(now.getTime() + 7 * 864e5).toISOString();
-  const { data: cur } = await w.sb.from("setup_dismissals").select("step").eq("person", w.user.id).eq("step", "catalog").maybeSingle();
-  const { error } = cur ? await w.sb.from("setup_dismissals").update({ until, updated_at: now.toISOString() }).eq("person", w.user.id).eq("step", "catalog")
-    : await w.sb.from("setup_dismissals").insert({ person: w.user.id, step: "catalog", until, updated_at: now.toISOString() });
-  if (error) return { ok: false, error: "Could not save. Try again." };
-  revalidatePath("/");
-  return { ok: true };
-}
