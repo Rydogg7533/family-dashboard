@@ -1,21 +1,41 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
-import { savePreonboardAnswer, finishPreonboard } from "@/app/preonboard/[token]/actions";
+import { savePreonboardAnswer, savePreonboardEmail, finishPreonboard, resendOnboardingEmail } from "@/app/preonboard/[token]/actions";
 import { SECTIONS, progress, type Answers } from "@/lib/preonboard-shared";
 import { WALKTHROUGH_STEPS } from "@/lib/preonboard-walkthrough";
 
 const card = "rounded-2xl border border-line bg-card p-4";
 const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50";
 const input = "w-full min-h-10 px-3 rounded-xl border border-line bg-bg text-sm";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function PreonboardApp({ token, initialAnswers, initialCompleted }: { token: string; initialAnswers: Answers; initialCompleted: boolean }) {
+function relTime(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hr${h === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function PreonboardApp({ token, initialAnswers, initialCompleted, initialEmail, initialSentAt }: { token: string; initialAnswers: Answers; initialCompleted: boolean; initialEmail: string; initialSentAt: string | null }) {
   const [tab, setTab] = useState<"checklist" | "walkthrough">("checklist");
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
   const [completed, setCompleted] = useState(initialCompleted);
   const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [email, setEmail] = useState(initialEmail);
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [sentEmail, setSentEmail] = useState(initialEmail);
+  const [sentAt, setSentAt] = useState<string | null>(initialSentAt);
+  const [finishErr, setFinishErr] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendErr, setResendErr] = useState<string | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const prog = useMemo(() => progress(answers), [answers]);
+  const emailValid = EMAIL_RE.test(email.trim());
 
   const persist = (key: string, checked: boolean, value?: string) => {
     setSaving((s) => new Set(s).add(key));
@@ -37,15 +57,49 @@ export function PreonboardApp({ token, initialAnswers, initialCompleted }: { tok
     timers.current[key] = setTimeout(() => persist(key, next[key].checked, value), 500);
   };
 
+  const onEmailChange = (value: string) => {
+    setEmail(value);
+    clearTimeout(timers.current.__email);
+    timers.current.__email = setTimeout(() => {
+      setEmailSaving(true);
+      savePreonboardEmail(token, value).finally(() => setEmailSaving(false));
+    }, 500);
+  };
+
   const finish = () => {
-    finishPreonboard(token).then((r) => { if (r.ok) setCompleted(true); });
+    setFinishErr(null);
+    setFinishing(true);
+    finishPreonboard(token).then((r) => {
+      setFinishing(false);
+      if (!r.ok) { setFinishErr(r.error ?? "That didn't work."); return; }
+      setCompleted(true);
+      setSentEmail(r.email ?? email);
+      setSentAt(r.sentAt ?? new Date().toISOString());
+    });
+  };
+
+  const resend = () => {
+    setResendErr(null);
+    setResending(true);
+    resendOnboardingEmail(token).then((r) => {
+      setResending(false);
+      if (!r.ok) { setResendErr(r.error ?? "That didn't work."); return; }
+      setSentAt(r.sentAt ?? new Date().toISOString());
+    });
   };
 
   if (completed) {
     return (
       <div className="max-w-xl mx-auto px-4 py-10 flex flex-col gap-3 text-center">
         <h1 className="text-2xl font-semibold">You&apos;re ready</h1>
-        <p className="text-muted">Thanks — you&apos;ve checked off everything on the pre-onboarding list. We&apos;ll follow up with the real setup link.</p>
+        <p className="text-muted">Thanks — you&apos;ve checked off everything on the pre-onboarding list. We&apos;ll follow up to schedule your setup call.</p>
+        <div className={`${card} text-left text-sm mx-auto w-full`}>
+          <div className="text-muted text-xs">Onboarding link sent to</div>
+          <div className="font-semibold">{sentEmail || "(no email on file)"}</div>
+          {sentAt && <div className="text-muted text-xs mt-1">Sent {relTime(sentAt)}</div>}
+          <button type="button" disabled={resending || !sentEmail} className={`${btn} bg-soft mt-3`} onClick={resend}>{resending ? "Sending…" : "Resend onboarding email"}</button>
+          {resendErr && <div role="alert" className="text-red text-xs mt-2">{resendErr}</div>}
+        </div>
         <button type="button" className={`${btn} bg-soft self-center`} onClick={() => setCompleted(false)}>Go back and review</button>
       </div>
     );
@@ -68,6 +122,12 @@ export function PreonboardApp({ token, initialAnswers, initialCompleted }: { tok
           <div className="flex items-center gap-3">
             <div className="flex-1 h-2 rounded-full bg-soft overflow-hidden"><div className="h-full bg-accent" style={{ width: `${Math.round((prog.done / prog.total) * 100)}%` }} /></div>
             <div className="text-xs text-muted shrink-0">{prog.done}/{prog.total}</div>
+          </div>
+          <div className={card}>
+            <div className="font-semibold">Your email</div>
+            <div className="text-xs text-muted mt-1">We&apos;ll send your onboarding link here once everything&apos;s checked off.</div>
+            <input className={`${input} mt-2`} type="email" placeholder="you@example.com" value={email} onChange={(e) => onEmailChange(e.target.value)} />
+            {emailSaving && <div className="text-xs text-muted mt-1">saving…</div>}
           </div>
           {SECTIONS.map((sec) => (
             <div key={sec.id} className={card}>
@@ -92,7 +152,10 @@ export function PreonboardApp({ token, initialAnswers, initialCompleted }: { tok
               </div>
             </div>
           ))}
-          <button type="button" disabled={!prog.ready} className={`${btn} bg-accent text-white self-start`} onClick={finish}>{prog.ready ? "I'm ready — let them know" : `Finish the checklist first (${prog.done}/${prog.total})`}</button>
+          <button type="button" disabled={!prog.ready || !emailValid || finishing} className={`${btn} bg-accent text-white self-start`} onClick={finish}>
+            {finishing ? "Sending your link…" : prog.ready ? (emailValid ? "I'm ready — send me the link" : "Add your email above first") : `Finish the checklist first (${prog.done}/${prog.total})`}
+          </button>
+          {finishErr && <div role="alert" className="rounded-xl bg-red-bg text-red px-3 py-2 font-semibold text-sm">{finishErr}</div>}
         </div>
       ) : (
         <div className="flex flex-col gap-4">

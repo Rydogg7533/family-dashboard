@@ -13,5 +13,5 @@ export default async function Preonboard({ params }: PageProps<"/preonboard/[tok
   const r = await loadPreonboard(token);
   if (!r.found) return wrap(<><h1 className="text-2xl font-semibold">This link doesn&apos;t work</h1><p className="text-muted">Ask whoever sent it to send a new one.</p></>);
   if (r.revoked) return wrap(<><h1 className="text-2xl font-semibold">This link has been turned off</h1><p className="text-muted">Ask whoever sent it to send a new one.</p></>);
-  return <PreonboardApp token={token} initialAnswers={r.answers} initialCompleted={r.completed} />;
+  return <PreonboardApp token={token} initialAnswers={r.answers} initialCompleted={r.completed} initialEmail={r.email} initialSentAt={r.sentAt} />;
 }

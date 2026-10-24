@@ -2,4 +2,4 @@
 const match = (list: string[], path: string) => list.some((p) => path === p || path.startsWith(p + "/"));
 const AUTH = ["/login", "/setup", "/forgot-password", "/reset-password", "/auth", "/join"];
 export const isAuthScreen = (path: string) => match(AUTH, path);
-export const isFrameless = (path: string) => match([...AUTH, "/tv", "/kid", "/preonboard"], path) || path === "/privacy" || path === "/terms" || path === "/sitter" || path === "/sitter/pair";
+export const isFrameless = (path: string) => match([...AUTH, "/tv", "/kid", "/preonboard"], path) || path === "/privacy" || path === "/terms" || path === "/sitter" || path === "/sitter/pair" || path === "/onboarding-soon";
