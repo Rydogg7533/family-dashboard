@@ -3,6 +3,8 @@ import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources } from "@/components/registers";
 import { getContacts, getContactCards, getContactEditNotes, getPendingNewContacts } from "@/lib/data-registers";
 import ContactsBook from "@/components/c/ContactsBook";
+import { getMyContactsConnection } from "@/lib/data-connections";
+import { providerLabel } from "@/lib/contacts-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +13,22 @@ export default async function Contacts({ searchParams }: PageProps<"/contacts">)
   const q = typeof sp.q === "string" ? sp.q.trim().toLowerCase() : "";
   const kind = typeof sp.kind === "string" ? sp.kind : "";
   const cards = await getContactCards();
+  const conn = await getMyContactsConnection();
+  const source = providerLabel(conn.provider);
+  // A person who chose Google (or none) and whose sync is not running yet gets a plain explanation instead of an empty page.
+  const notice = conn.provider === "none" ? "Your contacts are not connected."
+    : conn.status === "error" ? `Your ${source} sync has a problem${conn.note ? `: ${conn.note}` : "."}`
+    : conn.chosen && conn.status === "waiting" ? `Waiting for the Mac mini to start syncing your ${source}.` : null;
+  const noticeEl = notice ? <Link href="/settings/contacts" className="block rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">{notice} <span className="underline">Contacts source ›</span></Link> : null;
   if (cards.length > 0) {
     const [problems, waitingNew] = await Promise.all([getContactEditNotes(), getPendingNewContacts()]);
     return (
       <>
         <H1>Contacts</H1>
+        {noticeEl}
         {problems.map((p) => <div key={p.id} role="alert" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">A change was not saved{p.summary ? ` (${p.summary})` : ""}: {p.note}</div>)}
         <ContactsBook cards={cards} waitingNew={waitingNew} />
-        <PageSources items={[{ label: "Apple Contacts", href: "#contacts" }]} />
+        <PageSources items={[{ label: source, href: "/settings/contacts" }]} />
       </>
     );
   }
@@ -28,6 +38,7 @@ export default async function Contacts({ searchParams }: PageProps<"/contacts">)
   return (
     <>
       <H1 right={`${all.length} contacts`}>Contacts</H1>
+      {noticeEl}
       <form action="/contacts" className="flex gap-2 mb-2">
         <input name="q" defaultValue={q} placeholder="Search name, kind, notes" className="flex-1 min-w-0 min-h-11 px-3 rounded-xl border border-line bg-bg text-sm" aria-label="Search contacts" />
         {kind && <input type="hidden" name="kind" value={kind} />}

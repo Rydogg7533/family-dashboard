@@ -88,7 +88,7 @@ const cardRow = (personId, c, href, etag) => ({ person: personId, uid: c.uid, hr
 
 async function main() {
   if (!SUPABASE_URL || !SUPABASE_KEY) { console.error("SUPABASE_URL / SUPABASE_SERVICE_KEY not set"); process.exit(1); }
-  const edits = await get("contact_edits?status=eq.pending&order=created_at.asc&limit=50&select=*");
+  const edits = await get("contact_edits?status=eq.pending&provider=eq.icloud&order=created_at.asc&limit=50&select=*");
   const log = []; let state = "ok";
   const configs = Object.entries(env).filter(([k]) => /^ICLOUD_CONTACTS_\d+$/.test(k)).map(([, v]) => { const [name, user, pass] = v.split("|").map((s) => s.trim()); return { name, user, pass }; });
   const books = new Map(); const profiles = new Map(); const backup = backupWriter();
@@ -107,7 +107,7 @@ async function main() {
       if (!cfg) { await finish({ status: "error", note: `No iCloud link set up for ${prof?.display_name || "this person"} on the Mac mini.` }, prof?.display_name); continue; }
       if (!books.has(cfg.name)) books.set(cfg.name, (await findAddressbooks(cfg.user, cfg.pass))[0]);
       const book = books.get(cfg.name);
-      const card = edit.card_id ? (await get(`contact_cards?id=eq.${edit.card_id}&person=eq.${edit.person}&select=id,uid,href,etag`))[0] : null;
+      const card = edit.card_id ? (await get(`contact_cards?id=eq.${edit.card_id}&person=eq.${edit.person}&provider=eq.icloud&select=id,uid,href,etag`))[0] : null;
       const res = await applyEdit(edit, card, book.url, icloudIo(cfg.user, cfg.pass), backup);
       if (DRY) { console.log(`--- ${edit.op} ${edit.summary || ""}\n${res.status}: ${res.note}\n${res.vcard || ""}`); continue; }
       if (res.status === "applied" && res.vcard) {

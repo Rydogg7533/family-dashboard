@@ -1,9 +1,9 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
-// The app never writes to Apple Contacts and never changes a contact_cards field itself. It queues an edit in
-// contact_edits (row-level security: your own address book, status 'pending' only); the Mac mini applies it to iCloud
-// within a couple of minutes, refuses if iCloud changed first, and backs the card up before touching it (migration 0019).
+// The app never writes to Apple or Google Contacts and never changes a contact_cards field itself. It queues an edit in
+// contact_edits (row-level security: your own address book, status 'pending' only, stamped with the source); the Mac mini
+// applies it to iCloud or Google (migration 0029) within a couple of minutes, refuses if iCloud changed first, and backs the card up before touching it (migration 0019).
 type Phone = { label: string; number: string };
 type Mail = { label: string; address: string };
 export type ContactInput = { cardId?: string; baseEtag?: string | null; firstName: string; lastName: string; org: string; phones: Phone[]; emails: Mail[] };
@@ -27,20 +27,24 @@ export async function saveContact(input: ContactInput) {
   if (!user) return { ok: false as const, error: "Sign in again." };
   const { data: prof } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
   const who = prof?.display_name ?? user.email ?? "member";
+  // Which sync applies the edit: a new contact goes to the person's chosen source; an edit goes to the card's own source.
+  const { data: conn } = await sb.from("person_connections").select("provider").eq("person", user.id).eq("kind", "contacts").maybeSingle();
+  const chosen = conn?.provider ?? "icloud";
 
   if (!input.cardId) {
+    if (chosen === "none") return { ok: false as const, error: "Your contacts are not connected. Choose Apple or Google under Settings › Contacts source." };
     const summary = `new contact ${[first, last].filter(Boolean).join(" ") || org}`;
-    const { error } = await sb.from("contact_edits").insert({ person: user.id, requested_by: user.id, op: "create", fields: { first_name: first, last_name: last, org, phones, emails }, summary });
+    const { error } = await sb.from("contact_edits").insert({ person: user.id, requested_by: user.id, provider: chosen, op: "create", fields: { first_name: first, last_name: last, org, phones, emails }, summary });
     if (error) return { ok: false as const, error: "Could not save. Try again." };
     await sb.from("activity_log").insert({ actor: who, action: "contact_create_requested", subject: `${who} added ${summary}`, undoable: false }).then(() => {}, () => {});
     return { ok: true as const };
   }
 
   if (!UUID.test(input.cardId)) return { ok: false as const, error: "Unknown contact." };
-  const { data: card } = await sb.from("contact_cards").select("id,person,etag,first_name,last_name,org,phones,emails,full_name").eq("id", input.cardId).eq("person", user.id).is("deleted_at", null).maybeSingle();
+  const { data: card } = await sb.from("contact_cards").select("id,person,etag,provider,first_name,last_name,org,phones,emails,full_name").eq("id", input.cardId).eq("person", user.id).is("deleted_at", null).maybeSingle();
   if (!card) return { ok: false as const, error: "That contact is not in your own address book." };
   const { data: waiting } = await sb.from("contact_edits").select("id").eq("card_id", card.id).eq("status", "pending").limit(1);
-  if (waiting?.length) return { ok: false as const, error: "A change to this contact is still being saved to iCloud. Try again in a couple of minutes." };
+  if (waiting?.length) return { ok: false as const, error: "A change to this contact is still being saved. Try again in a couple of minutes." };
   if (input.baseEtag && card.etag && input.baseEtag !== card.etag) return { ok: false as const, error: "This contact just changed. Close it and open it again." };
 
   // Send only what actually changed, so everything else on the card is left exactly as it is.
@@ -57,7 +61,7 @@ export async function saveContact(input: ContactInput) {
   if (!Object.keys(fields).length) return { ok: true as const, unchanged: true };
 
   const summary = `edited ${card.full_name} (${Object.keys(fields).map((k) => k.replace("_name", "").replace("org", "company")).join(", ")})`;
-  const { error } = await sb.from("contact_edits").insert({ person: user.id, requested_by: user.id, op: "update", card_id: card.id, base_etag: card.etag, fields, summary });
+  const { error } = await sb.from("contact_edits").insert({ person: user.id, requested_by: user.id, provider: card.provider, op: "update", card_id: card.id, base_etag: card.etag, fields, summary });
   if (error) return { ok: false as const, error: "Could not save. Try again." };
   await sb.from("activity_log").insert({ actor: who, action: "contact_update_requested", subject: `${who} ${summary}`, ref: card.id, undoable: false }).then(() => {}, () => {});
   return { ok: true as const };

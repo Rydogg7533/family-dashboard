@@ -17,6 +17,9 @@
 //     Used by scripts/tiller-inspect.mjs and the Tiller sync. Your existing mail/calendar token is not touched.
 //   - --purpose calendar: a SEPARATE calendar-only sign-in for the app itself (Vercel). Scopes: calendar.events + calendar.readonly,
 //     no Gmail. Saved as google-<account>.calendar.json plus google-<account>.calendar.env (the three lines Vercel needs).
+//   - --purpose contacts: a SEPARATE sign-in for Google Contacts (read and write, so the app can edit contacts), no Gmail or Calendar.
+//     Scopes: contacts. Saved as google-<account>.contacts.json. Used by scripts/google-contacts-sync.mjs and google-contacts-push.mjs.
+//     The People API must be enabled in the household's Google Cloud project (APIs & Services > Library > "Google People API").
 //   - Scopes requested (default): gmail.modify, gmail.compose, calendar.events, calendar.readonly. No gmail.send.
 //
 // Client file: ~/_secrets_local_only/email-agent/google-oauth-client.json (the Desktop-app JSON from Google Cloud).
@@ -36,7 +39,8 @@ const clientPath = opt("--client") || join(dir, "google-oauth-client.json");
 const NO_OPEN = args.includes("--no-open");
 const SHEETS = opt("--purpose") === "sheets";   // a separate, read-only sign-in for Google Sheets (the Tiller sheet); the mail/calendar token is untouched
 const CAL = opt("--purpose") === "calendar";   // calendar-only token for the app (Vercel); no Gmail
-const SCOPES = SHEETS ? ["openid", "email", "https://www.googleapis.com/auth/spreadsheets.readonly"] : CAL ? ["openid", "email", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly"] : [
+const CONTACTS = opt("--purpose") === "contacts";   // Google Contacts for the Mac mini sync; no Gmail, no Calendar
+const SCOPES = CONTACTS ? ["openid", "email", "https://www.googleapis.com/auth/contacts"] : SHEETS ? ["openid", "email", "https://www.googleapis.com/auth/spreadsheets.readonly"] : CAL ? ["openid", "email", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly"] : [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/calendar.events",
@@ -45,7 +49,7 @@ const SCOPES = SHEETS ? ["openid", "email", "https://www.googleapis.com/auth/spr
 
 const die = (m) => { console.error(`STOP: ${m}`); process.exit(2); };
 if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(account)) die("pass --account <the Google address you are signing in with>");
-const tokenPath = join(dir, SHEETS ? `google-${account}.sheets.json` : CAL ? `google-${account}.calendar.json` : `google-${account}.json`);
+const tokenPath = join(dir, CONTACTS ? `google-${account}.contacts.json` : SHEETS ? `google-${account}.sheets.json` : CAL ? `google-${account}.calendar.json` : `google-${account}.json`);
 if (existsSync(tokenPath)) die(`${tokenPath} already exists. Not overwriting. To redo: revoke access at myaccount.google.com/permissions, delete that file, run again.`);
 
 let client;
@@ -116,10 +120,17 @@ async function main() {
   if (missing.length) throw new Error(`not all permissions were granted; missing: ${missing.map((s) => s.split("/").pop()).join(", ")}. Run again and tick every box. Nothing saved.`);
 
   const get = async (url) => { const x = await fetch(url, { headers: { Authorization: `Bearer ${tok.access_token}` } }); if (!x.ok) throw new Error(`${url.split("?")[0]} → ${x.status}`); return x.json(); };
-  const profile = SHEETS || CAL ? { emailAddress: (await get("https://openidconnect.googleapis.com/v1/userinfo")).email } : await get("https://gmail.googleapis.com/gmail/v1/users/me/profile");
+  const profile = SHEETS || CAL || CONTACTS ? { emailAddress: (await get("https://openidconnect.googleapis.com/v1/userinfo")).email } : await get("https://gmail.googleapis.com/gmail/v1/users/me/profile");
   if (String(profile.emailAddress || "").toLowerCase() !== account) throw new Error(`you signed in as ${profile.emailAddress}, not ${account}. Nothing saved.`);
-  const cals = SHEETS ? { items: [] } : await get("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250");
+  const cals = SHEETS || CONTACTS ? { items: [] } : await get("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250");
 
+  let contactCount = null;
+  if (CONTACTS) {   // read-only check that the People API is on and the sign-in works; counts only, nothing printed from the contacts
+    const x = await fetch("https://people.googleapis.com/v1/people/me/connections?pageSize=1&personFields=names", { headers: { Authorization: `Bearer ${tok.access_token}` } });
+    const j = await x.json().catch(() => ({}));
+    if (!x.ok) throw new Error(`the People API answered ${x.status}${j?.error?.status ? ` [${j.error.status}]` : ""}. ${x.status === 403 ? "Turn on the Google People API in the Google Cloud project (APIs & Services > Library), then run again. " : ""}Nothing saved.`);
+    contactCount = j.totalPeople ?? j.totalItems ?? 0;
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(tokenPath, JSON.stringify({ account, refresh_token: tok.refresh_token, scope: tok.scope, saved_at: new Date().toISOString() }, null, 2), { flag: "wx", mode: 0o600 });
   chmodSync(tokenPath, 0o600);
@@ -131,8 +142,9 @@ async function main() {
 
   console.log("\nPASS");
   console.log(`  account:        ${profile.emailAddress}`);
-  if (!SHEETS && !CAL) console.log(`  gmail messages: ${profile.messagesTotal}`);
-  if (!SHEETS) console.log(`  calendars:      ${(cals.items || []).length}`);
+  if (!SHEETS && !CAL && !CONTACTS) console.log(`  gmail messages: ${profile.messagesTotal}`);
+  if (!SHEETS && !CONTACTS) console.log(`  calendars:      ${(cals.items || []).length}`);
+  if (CONTACTS) console.log(`  contacts:       ${contactCount}`);
   if (envPath) console.log(`  for Vercel:     ${envPath} (mode 600) — add its four lines with: node scripts/vercel-env-from-file.mjs ${envPath}`);
   console.log(`  permissions:    ${granted.map((s) => s.split("/").pop()).join(", ")}`);
   console.log(`  saved:          ${tokenPath} (mode 600)`);

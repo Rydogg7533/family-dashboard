@@ -157,10 +157,13 @@ async function syncPerson(cfg, log) {
   const people = await get(`profiles?select=id,display_name&display_name=ilike.${encodeURIComponent(cfg.name)}`);
   if (!people.length) throw new Error(`no profile named ${cfg.name}`);
   const person = people[0];
+  // A person who chose Google (or none) in the app is not synced from iCloud. No row means iCloud, as before.
+  const [choice] = await get(`person_connections?person=eq.${person.id}&kind=eq.contacts&select=provider`).catch(() => []);
+  if (choice && choice.provider !== "icloud") { log.push(`${person.display_name}: skipped (contacts source is ${choice.provider})`); return; }
   const books = await findAddressbooks(cfg.user, cfg.pass);
   const existing = new Map();
   for (let from = 0; ; from += 1000) {
-    const page = await rest("GET", `contact_cards?person=eq.${person.id}&select=id,uid,etag,deleted_at`, undefined, { Range: `${from}-${from + 999}` });
+    const page = await rest("GET", `contact_cards?person=eq.${person.id}&provider=eq.icloud&select=id,uid,etag,deleted_at`, undefined, { Range: `${from}-${from + 999}` });
     for (const r of page) existing.set(r.uid, r);
     if (page.length < 1000) break;
   }
@@ -177,7 +180,7 @@ async function syncPerson(cfg, log) {
       const card = parseVcard(f.vcard);
       if (!card.uid) card.uid = f.path;
       seen.add(card.uid);
-      rows.push({ person: person.id, uid: card.uid, href: f.path, etag: f.etag, full_name: card.full_name, first_name: card.first_name, last_name: card.last_name, nickname: card.nickname, org: card.org, phones: card.phones, emails: card.emails, addresses: card.addresses, birthday: card.birthday, notes: card.notes, synced_at: new Date().toISOString(), deleted_at: null });
+      rows.push({ person: person.id, provider: "icloud", uid: card.uid, href: f.path, etag: f.etag, full_name: card.full_name, first_name: card.first_name, last_name: card.last_name, nickname: card.nickname, org: card.org, phones: card.phones, emails: card.emails, addresses: card.addresses, birthday: card.birthday, notes: card.notes, synced_at: new Date().toISOString(), deleted_at: null });
     }
     for (let i = 0; i < rows.length; i += 200) {
       await rest("POST", "contact_cards?on_conflict=person,uid", rows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
