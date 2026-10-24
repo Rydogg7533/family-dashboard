@@ -44,6 +44,7 @@ const emailFiles = existsSync(EMAIL_DIR) ? readdirSync(EMAIL_DIR) : [];
 const mailboxTokens = emailFiles.filter((f) => /^google-.+@.+\.json$/.test(f) && !/\.(contacts|calendar|sheets)\.json$/.test(f));
 const contactsTokens = emailFiles.filter((f) => /\.contacts\.json$/.test(f));
 const icloudMail = emailFiles.filter((f) => /^icloud-.+\.env$/.test(f));
+const imapEnvs = emailFiles.filter((f) => /^imap-.+@.+\.env$/.test(f));
 const icloudContacts = Object.keys(env).some((k) => /^ICLOUD_CONTACTS_\d+$/.test(k));
 const nodeBin = (() => { for (const p of ["/opt/homebrew/bin/node", "/usr/local/bin/node", process.execPath]) if (existsSync(p)) return p; return process.execPath; })();
 
@@ -53,6 +54,7 @@ export const MODULES = [
   { id: "location-agent", script: "location-agent.mjs", every: 600, needs: () => supabase, why: "needs the Supabase keys in the env file", powers: "Day page: stops, Places, questions" },
   { id: "filing-agent", script: "filing-agent.mjs", every: 600, needs: () => supabase && existsSync(join(HOME, "Organized")), why: "needs ~/Organized (the filing tree)", powers: "Inbox › file into Organized" },
   { id: "mail-sync", script: "mail-sync.mjs", every: 300, needs: () => supabase && mailboxTokens.length > 0, why: "needs a Gmail sign-in (node scripts/google-auth.mjs --account <address>)", powers: "Mail (Gmail inbox and drafts)" },
+  { id: "imap-mail-sync", script: "imap-mail-sync.mjs", every: 300, needs: () => supabase && imapEnvs.length > 0, why: "needs a mailbox connected with an app password (node scripts/mail-connect.mjs)", powers: "Mail over IMAP (Gmail, iCloud, other)" },
   { id: "icloud-mail-sync", script: "icloud-mail-sync.mjs", every: 300, needs: () => supabase && icloudMail.length > 0, why: "needs email-agent/icloud-<name>.env (app-specific password)", powers: "Mail (iCloud inbox and drafts)" },
   { id: "contacts-sync", script: "contacts-sync.mjs", every: 1800, needs: () => supabase && icloudContacts, why: "needs ICLOUD_CONTACTS_1 in the env file", powers: "Apple Contacts, read" },
   { id: "contacts-push", script: "contacts-push.mjs", every: 120, needs: () => supabase && icloudContacts, why: "needs ICLOUD_CONTACTS_1 in the env file", powers: "Apple Contacts, write-back" },
@@ -98,7 +100,7 @@ function main() {
   const report = {
     host: hostname(), user: userInfo().username, repo: REPO, node: nodeBin,
     envFile: existsSync(ENV_FILE) ? { present: true, keys: Object.keys(env).sort() } : { present: false, keys: [] },
-    secrets: { gmailMailboxes: mailboxTokens.length, googleContactsSignins: contactsTokens.length, icloudMailAccounts: icloudMail.length, icloudContacts },
+    secrets: { gmailMailboxes: mailboxTokens.length, imapMailboxes: imapEnvs.length, googleContactsSignins: contactsTokens.length, icloudMailAccounts: icloudMail.length, icloudContacts },
     modules: [], personal: PERSONAL.map((l) => ({ label: l, loaded: loaded.has(l) })), changes: [],
   };
   for (const m of MODULES) {
@@ -126,7 +128,7 @@ function main() {
   console.log(`StewardOS hub on ${report.host} (user ${report.user})${APPLY ? "" : "  — REPORT ONLY, nothing changed (add --apply)"}`);
   console.log(`  repo ${REPO}\n  node ${nodeBin}`);
   console.log(`  env file ${ENV_FILE}: ${report.envFile.present ? `present, keys: ${report.envFile.keys.join(", ")}` : "MISSING"}`);
-  console.log(`  sign-ins: ${mailboxTokens.length} Gmail, ${contactsTokens.length} Google contacts, ${icloudMail.length} iCloud mail, iCloud contacts ${icloudContacts ? "yes" : "no"}`);
+  console.log(`  sign-ins: ${mailboxTokens.length} Gmail API, ${imapEnvs.length} IMAP mailboxes, ${contactsTokens.length} Google contacts, ${icloudMail.length} iCloud mail (old style), iCloud contacts ${icloudContacts ? "yes" : "no"}`);
   console.log("\nModules");
   for (const r of report.modules) {
     const mark = !r.on ? "·" : r.state === "ok" && r.loaded ? "✓" : r.state === "ok" ? "~" : "→";

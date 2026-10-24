@@ -53,7 +53,7 @@ export async function getMyConnections(): Promise<{ conns: Conn[]; dismissed: Se
     const bad = accts.find((a) => a.last_error), okAcct = accts.find((a) => a.last_sync_at && !a.last_error);
     if (bad) add("mail", "needs", `${bad.address}: ${String(bad.last_error).slice(0, 120)}`);
     else if (okAcct) add("mail", "connected", `${accts.map((a) => a.address).join(", ")} · synced ${ago(okAcct.last_sync_at)}`);
-    else add("mail", "todo", accts.length ? "Signed in, waiting for the first sync." : STEP_PITCH.mail, accts.length ? undefined : "A one-time sign-in on the Mac mini: node scripts/google-auth.mjs --account <your address>, then node scripts/mail-sync.mjs --account <your address> --person <your name>");
+    else add("mail", "todo", accts.length ? "Signed in, waiting for the first sync." : STEP_PITCH.mail, accts.length ? undefined : "On the Mac mini, once: node scripts/mail-connect.mjs --provider gmail --account <your address> --person <your name>  (icloud or other instead of gmail). It asks for an app password.");
 
     hasGoogleCal() ? add("calendar", "connected", `Household calendar · ${googleCalAccount()}`) : add("calendar", "todo", STEP_PITCH.calendar);
 

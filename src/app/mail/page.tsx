@@ -35,7 +35,7 @@ export default async function Mail({ searchParams }: PageProps<"/mail">) {
       <MailList rows={list} showAccount={accounts.length > 1 && !acct} draft={box === "draft"} />
       <div className="flex gap-2 flex-wrap mt-4">
         <a href="message://" className="min-h-11 px-4 inline-flex items-center rounded-xl bg-soft text-xs font-semibold">Open Apple Mail</a>
-        {accounts.map((a) => <a key={a.id} href={`https://mail.google.com/mail/u/${encodeURIComponent(a.address)}/`} target="_blank" rel="noreferrer" className="min-h-11 px-4 inline-flex items-center rounded-xl bg-soft text-xs font-semibold">Gmail: {a.address}</a>)}
+        {accounts.filter((a) => a.kind === "gmail" && !/\.(contacts|calendar|sheets)$/.test(a.address)).map((a) => <a key={a.id} href={`https://mail.google.com/mail/u/${encodeURIComponent(a.address)}/`} target="_blank" rel="noreferrer" className="min-h-11 px-4 inline-flex items-center rounded-xl bg-soft text-xs font-semibold">Gmail: {a.address}</a>)}
       </div>
       <p className="text-xs text-muted mt-3">Read-only for now: reply and compose come next. Mail is copied from your mailbox every few minutes; pull down to refresh the list.</p>
     </>

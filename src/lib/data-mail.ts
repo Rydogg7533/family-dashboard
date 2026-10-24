@@ -6,12 +6,12 @@ export type MailRow = {
   subject: string | null; snippet: string | null; sent_at: string | null; unread: boolean; has_files: boolean;
 };
 export type MailFull = MailRow & { cc_addrs: { name: string; addr: string }[]; body_text: string | null; attachments: { name: string; mime: string; size: number }[]; web_url: string | null; rfc_message_id: string | null };
-export type MailAccount = { id: string; address: string; last_sync_at: string | null; last_error: string | null };
+export type MailAccount = { id: string; address: string; kind: "gmail" | "icloud" | "other"; last_sync_at: string | null; last_error: string | null };
 
 const SAMPLE_ACCT = "you@example.com";
 export async function getMailAccounts(): Promise<MailAccount[]> {
-  if (!hasSupabaseEnv()) return [{ id: "a1", address: SAMPLE_ACCT, last_sync_at: new Date().toISOString(), last_error: null }];
-  try { const sb = await createClient(); const { data } = await sb.from("mail_accounts").select("id,address,last_sync_at,last_error").order("address"); return data ?? []; } catch { return []; }
+  if (!hasSupabaseEnv()) return [{ id: "a1", address: SAMPLE_ACCT, kind: "gmail" as const, last_sync_at: new Date().toISOString(), last_error: null }];
+  try { const sb = await createClient(); const { data } = await sb.from("mail_accounts").select("id,address,kind,last_sync_at,last_error").order("address"); return data ?? []; } catch { return []; }
 }
 export async function getMail(folder: "inbox" | "draft"): Promise<MailRow[]> {
   if (!hasSupabaseEnv()) {
