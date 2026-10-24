@@ -5,17 +5,37 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+const SPLASH_MS = 1700;
+
 export default function Login() {
   const [email, setEmail] = useState(""); const [pw, setPw] = useState(""); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const [splash, setSplash] = useState(false);
   const router = useRouter();
   const reset = useSearchParams().get("reset");
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setErr(null);
     const { error } = await createClient().auth.signInWithPassword({ email, password: pw });
     setBusy(false);
-    if (error) setErr("That didn't work. Check the email and password."); else { router.replace("/"); router.refresh(); }
+    if (error) { setErr("That didn't work. Check the email and password."); return; }
+    // Welcome-in animation, tied to the login event itself (not a per-session gate) — sessions stay
+    // signed in, so in practice this shows rarely, only when someone actually signs in.
+    setSplash(true);
+    setTimeout(() => { router.replace("/"); router.refresh(); }, SPLASH_MS);
   }
   const input = "w-full min-h-12 rounded-xl border border-line bg-bg px-4 text-base";
+  if (splash) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg">
+        <span
+          className="text-5xl sm:text-6xl inline-block"
+          style={{ fontFamily: "'Dancing Script', cursive", color: "var(--accent)", clipPath: "inset(0 100% 0 0)", animation: `stewardos-reveal ${SPLASH_MS - 200}ms ease forwards` }}
+        >
+          StewardOS
+        </span>
+        <style>{`@keyframes stewardos-reveal { to { clip-path: inset(0 0% 0 0); } }`}</style>
+      </div>
+    );
+  }
   return (
     <div className="pt-16">
       <h1 className="text-3xl mb-1">Family Dashboard</h1>
