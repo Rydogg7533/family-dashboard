@@ -30,7 +30,10 @@ export default async function Connections() {
             </div>
             <div className="text-xs text-muted mt-1 break-words">{c.detail}</div>
             {c.help && c.state === "todo" && <div className="font-mono text-[11px] text-muted mt-1 break-words select-all rounded-lg border border-line p-2">{c.help}</div>}
-            <Link href={c.href} className="inline-block mt-2 text-sm font-semibold text-accent">{c.state === "connected" ? "Manage" : c.state === "needs" ? "Fix it" : c.state === "off" ? "Change" : "Set up"} ›</Link>
+            <div className="flex gap-4">
+              <Link href={c.step === "mail" && c.state === "todo" ? "/settings/connections/mailbox" : c.href} className="inline-block mt-2 text-sm font-semibold text-accent">{c.state === "connected" ? "Manage" : c.state === "needs" ? "Fix it" : c.state === "off" ? "Change" : "Set up"} ›</Link>
+              {c.step === "mail" && c.state !== "todo" && <Link href="/settings/connections/mailbox" className="inline-block mt-2 text-sm font-semibold text-accent">Add a mailbox ›</Link>}
+            </div>
           </div>
         ))}
       </RowGroup>
