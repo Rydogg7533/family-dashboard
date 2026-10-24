@@ -81,3 +81,52 @@ export async function createChildLogin(childId: string, email: string): Promise<
   await log(o.svc, o.name, "child_login_created", `Created a login for ${c.display_name}`);
   done(); return { ok: true, name: c.display_name, email: addr, password };
 }
+
+// ---- per-child access (migration 0036) ----
+async function featureKnown(svc: NonNullable<ReturnType<typeof serviceClient>>, key: string) {
+  const { data } = await svc.from("child_features").select("key,label").eq("key", key).maybeSingle();
+  return data as { key: string; label: string } | null;
+}
+
+// mode: "auto" (by age; sensitive ones wait for a parent), "on" (always), "off". Stored per child; the database enforces it for the child's login.
+export async function setChildFeature(childId: string, key: string, mode: "auto" | "on" | "off"): Promise<{ ok: true } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  if (!["auto", "on", "off"].includes(mode)) return { ok: false, error: "Pick automatic, on or off." };
+  const f = await featureKnown(o.svc, key); if (!f) return { ok: false, error: "That feature was not found." };
+  const { data: c } = await o.svc.from("children").select("display_name,access").eq("id", childId).maybeSingle();
+  if (!c) return { ok: false, error: "That child was not found." };
+  const access = { ...((c.access as Record<string, string>) ?? {}) };
+  if (mode === "auto") delete access[key]; else access[key] = mode;
+  const { error } = await o.svc.from("children").update({ access }).eq("id", childId);
+  if (error) return { ok: false, error: error.message };
+  await log(o.svc, o.name, "child_access_changed", `${c.display_name}: ${f.label} set to ${mode === "auto" ? "automatic" : mode}`);
+  revalidatePath("/settings/people", "layout"); revalidatePath("/kid");
+  return { ok: true };
+}
+
+export async function setChildPaused(childId: string, paused: boolean): Promise<{ ok: true } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  const { data: c } = await o.svc.from("children").select("display_name").eq("id", childId).maybeSingle();
+  if (!c) return { ok: false, error: "That child was not found." };
+  const { error } = await o.svc.from("children").update({ paused_at: paused ? new Date().toISOString() : null }).eq("id", childId);
+  if (error) return { ok: false, error: error.message };
+  await log(o.svc, o.name, "child_access_changed", `${c.display_name}'s page ${paused ? "paused" : "resumed"}`);
+  revalidatePath("/settings/people", "layout"); revalidatePath("/kid");
+  return { ok: true };
+}
+
+// Moves a feature to a different minimum age for the whole household. age = null puts it back to the default.
+export async function setHouseholdFeatureAge(key: string, age: number | null): Promise<{ ok: true } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  const f = await featureKnown(o.svc, key); if (!f) return { ok: false, error: "That feature was not found." };
+  const a = age == null ? null : Math.trunc(Number(age));
+  if (a != null && !(a >= 0 && a <= 18)) return { ok: false, error: "Pick an age from 0 to 18." };
+  const { data: h } = await o.svc.from("household").select("child_feature_ages").eq("id", 1).maybeSingle();
+  const ages = { ...((h?.child_feature_ages as Record<string, number>) ?? {}) };
+  if (a == null) delete ages[key]; else ages[key] = a;
+  const { error } = await o.svc.from("household").update({ child_feature_ages: ages }).eq("id", 1);
+  if (error) return { ok: false, error: error.message };
+  await log(o.svc, o.name, "child_access_changed", `${f.label}: minimum age ${a == null ? "back to the default" : `set to ${a}`} for the household`);
+  revalidatePath("/settings/people", "layout"); revalidatePath("/kid");
+  return { ok: true };
+}

@@ -8,6 +8,9 @@ import { Banner, Card, H1 } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
 import SetupCard from "@/components/c/SetupCard";
 import { getMyConnections } from "@/lib/data-connections";
+import { getChildFeatures, getChildRows, getFeatureAges } from "@/lib/data-children";
+import { syncChildUnlockTasks } from "@/lib/child-unlocks";
+import { isOwnerViewer } from "@/lib/owner";
 
 
 export const dynamic = "force-dynamic";
@@ -15,6 +18,8 @@ export const dynamic = "force-dynamic";
 export default async function Today() {
   // A child's login has one page: theirs.
   if ((await getViewer()).role === "child" && hasSupabaseEnv()) redirect("/kid");
+  // A parent gets one task per sensitive feature a child has just become old enough for.
+  if (hasSupabaseEnv() && (await isOwnerViewer())) { const u = await getRequestUser(); if (u) { const [kids, feats, ages] = await Promise.all([getChildRows(), getChildFeatures(), getFeatureAges()]); await syncChildUnlockTasks(await createClient(), u.id, kids, feats, ages).catch(() => null); } }
   const [name, status, allTasks, names, user, setup] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser(), getMyConnections()]);
   const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;

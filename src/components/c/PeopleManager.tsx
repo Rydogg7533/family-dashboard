@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addChild, createChildLogin, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
 import { ageFloor, ageText, loginAllowed, minAgeFor, type ChildRow } from "@/lib/children";
@@ -37,6 +38,7 @@ export function PeopleManager({ parents, kids, householdMin, canEdit }: { parent
           return (
             <div key={k.id} className="border-t border-line pt-3 first:border-t-0 first:pt-0">
               <div className="flex justify-between gap-2 items-baseline"><div className="font-semibold">{k.display_name}</div><div className="text-xs text-muted">born {k.birth_year} · about {ageText(k.birth_year)}</div></div>
+              <Link href={`/settings/people/${k.id}`} className="inline-block mt-1 text-xs font-semibold text-accent">What {k.display_name} can see and do ›</Link>
               {k.profile_id ? <div className="text-xs text-green mt-1">Has a login. It opens the kid page and sees only their own things.</div> : (
                 <div className="mt-1">
                   <div className="text-xs text-muted">{allowed ? "Can have a login." : `No personal login until age ${min}. Their schedule and jobs can still show on a shared screen.`}</div>
