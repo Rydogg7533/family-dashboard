@@ -35,14 +35,16 @@ export default async function Money() {
     <>
       <H1 right={<SyncLine at={synced} />}>Money</H1>
 
-      <section className="card mb-5 p-0 overflow-hidden" aria-label="Receipts">
+      <Section title="Receipts">
+      <div className="card p-0 overflow-hidden">
         <Link href="/money/receipts-to-finish" className={`flex flex-col gap-1.5 p-4 min-h-14 ${finish.total ? "bg-amber-bg" : ""}`}>
           <div className="flex justify-between items-center gap-2"><span className="text-base font-bold">Receipts to finish</span><span className={`text-2xl font-bold ${finish.total ? "text-amber" : "text-green"}`}>{finish.total}</span></div>
           {finish.total ? <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-soft px-2.5 py-1 text-amber">{finish.noCard.length} need a card</span><span className="rounded-full bg-soft px-2.5 py-1">{finish.waiting.length} waiting for the charge</span></div> : <div className="text-sm text-green font-semibold">All settled</div>}
         </Link>
         <Link href="/money/no-receipt" className="flex justify-between items-center gap-2 p-4 min-h-14 border-t border-line"><span><span className="text-base font-bold">Charges with no receipt</span><span className="block text-xs text-muted">from Tiller, newest first</span></span><span className="text-2xl font-bold">{unmatched.length}</span></Link>
         <Link href="/money/receipts?view=matched" className="flex justify-between items-center gap-2 p-4 min-h-14 border-t border-line"><span><span className="text-base font-bold">Matched</span><span className="block text-xs text-muted">receipt linked to its charge</span></span><span className="text-2xl font-bold text-green">{matchedCount}</span></Link>
-      </section>
+      </div>
+      </Section>
 
       <Section title="Needs me" right={needsMe.length ? `${needsMe.length} open` : "all good"}>
         {routine && routine.total > 0 && (
