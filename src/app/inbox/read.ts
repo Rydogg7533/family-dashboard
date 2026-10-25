@@ -85,7 +85,7 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
   const vlist = (vehicles ?? []) as VRow[];
   const needsVehicle = parsed.category === "vehicle" || vLines.length > 0;
   const vNames = vlist.map((v) => v.name);
-  const vehicle = needsVehicle || parsed.warranty_relevant ? matchVehicle(parsed.for_vehicle_hint as string | null, vlist) : null;
+  const vehicle = needsVehicle || parsed.warranty_relevant ? matchVehicle((parsed.vehicle_pick as string | null) || (parsed.for_vehicle_hint as string | null), vlist) : null;
 
   // The plan: ONE place the file lives (FILE), and every other place that only points at it (LINK).
   const plan: { t: "file" | "link"; text: string }[] = [];
@@ -205,6 +205,33 @@ export async function correctRead(inboxId: string, field: string, raw: string): 
   if (error) return { ok: false, error: error.message };
   if (!saved) return { ok: false, error: "It was answered while you were editing." };
   await sb.from("activity_log").insert({ actor: user.email ?? by, action: "inbox_field_corrected", subject: `${f}: ${String(rr[f] ?? "(none)")} → ${String(chk.value)}`.slice(0, 80), undoable: false }).then(() => {}, () => {});
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
+// "Save and plan" on a card that is missing its vehicle: remember the person's pick, work the plan out again (no model, no file read),
+// and leave the item open so the one "Yes, file it" tap is still the only thing that files. Nothing is filed or deleted here.
+export async function planWithVehicle(inboxId: string, vehicleName: string): Promise<{ ok: boolean; error?: string }> {
+  if (!hasSupabaseEnv()) return { ok: false, error: "Not available in preview." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: row } = await sb.from("inbox_items").select("id,status,read_result,claim_id").eq("id", inboxId).maybeSingle();
+  if (!row) return { ok: false, error: "That item is gone." };
+  if (row.status !== "open") return { ok: false, error: "Already answered." };
+  const rr = row.read_result as Record<string, unknown> | null;
+  if (!rr || "error" in rr || rr.kind === "statement") return { ok: false, error: "There is nothing to plan on this one." };
+  const { data: vs } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
+  const v = matchVehicle(vehicleName, (vs ?? []) as VRow[]);
+  if (!v || v.name !== vehicleName) return { ok: false, error: "That is not one of your vehicles." };
+  const next: Record<string, unknown> = { ...rr, vehicle_pick: v.name };
+  for (const k of ["plan", "home", "claim_plan", "same_receipt", "near_receipt"]) delete next[k];
+  const { update } = await planFromRead(sb, (row.claim_id as string | null) ?? null, next);
+  delete update.read_at;
+  const { data: saved, error } = await sb.from("inbox_items").update(update).eq("id", inboxId).eq("status", "open").select("id").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!saved) return { ok: false, error: "It was answered while you were choosing." };
+  await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "inbox_vehicle_planned", subject: `${v.short}`.slice(0, 80), ref: inboxId, undoable: false }).then(() => {}, () => {});
   revalidatePath("/inbox");
   return { ok: true };
 }

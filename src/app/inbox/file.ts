@@ -14,7 +14,7 @@ import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
 import { vehicleLines, lineLabel, type Line } from "@/lib/receipt-lines";
 import { matchAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
-type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
+type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; vehicle_pick?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();
@@ -65,7 +65,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     await sb.from("inbox_items").update({ read_result: rr, missing: "Filing it as an ordinary receipt, not a vehicle one. Is that right?", options: ["Yes, file it", "Not quite"] }).eq("id", inboxId);
     return { ok: true, summary: "Okay, treating it as an ordinary receipt. Tap Yes to file it.", kept: true };
   }
-  if ((r.category === "vehicle" || vehicleLines(r.lines).length > 0) && !vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[])) {
+  if ((r.category === "vehicle" || vehicleLines(r.lines).length > 0) && !vehicleFor(r.vehicle_pick ?? r.for_vehicle_hint, answer, (vs ?? []) as VRow[])) {
     const names = ((vs ?? []) as VRow[]).map((v) => v.name);
     await sb.from("inbox_items").update({ missing: "Which vehicle is it for? A vehicle receipt needs one before it can be filed.", options: [...names, NOT_VEHICLE] }).eq("id", inboxId);
     return { ok: true, summary: "Which vehicle is it for?", kept: true };
@@ -115,7 +115,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   // 2. The vehicle: service history and any warranty the paper states.
   let vehicle: VRow | null = null;
-  if (r.category === "vehicle" || vehicleLines(r.lines).length > 0 || r.warranty_relevant) vehicle = vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[]);
+  if (r.category === "vehicle" || vehicleLines(r.lines).length > 0 || r.warranty_relevant) vehicle = vehicleFor(r.vehicle_pick ?? r.for_vehicle_hint, answer, (vs ?? []) as VRow[]);
   if (vehicle) {
     const d = { ...(vehicle.details ?? {}) } as Record<string, unknown>;
     const log = ((d.serviceLog as Array<Record<string, string>>) ?? []).slice();

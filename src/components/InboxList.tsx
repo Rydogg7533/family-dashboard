@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxItem, DecidedItem, PaidWithContext } from "@/lib/data-inbox";
 import { SKIP, CLEAR } from "@/lib/paid-with";
 import { destination, folderWarnings, isFiledByCard, type DestRead } from "@/lib/destination";
+import { NOT_VEHICLE } from "@/lib/inbox-answers";
+import { NeededToContinue } from "@/components/c/NeededToContinue";
 import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture } from "@/app/inbox/read";
@@ -127,6 +129,7 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
   const by = item.created_by && names[item.created_by] ? names[item.created_by] : item.requested_by;
   const rrk = item.read_result as { kind?: string; error?: string } | null;
   const showRead = !!item.file_path && !!rrk && !("error" in rrk) && ["receipt", "bill", "warranty", "service_report", "form", "other"].includes(String(rrk.kind ?? ""));
+  const vehicleMissing = showRead && inboxStatus(item) === "missing_info" && item.options.includes(NOT_VEHICLE);
   async function hand(to: string | null) { setHandBusy(true); await assignInboxItem(item.id, to).catch(() => null); setHandBusy(false); router.refresh(); }
   return (
     <div className="card flex flex-col gap-2">
@@ -168,9 +171,11 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
       {inboxStatus(item) === "needs_answer" && isFiledByCard(item.read_result as DestRead) && <PaidWith item={item} known={paid.known} suggestion={paid.suggestions[item.id] ?? null} />}
       {item.read_result?.home && !isFiledByCard(item.read_result as DestRead) && <FolderFix item={item} />}
       <div className="text-sm font-semibold text-amber">{item.missing}</div>
-      <div className="flex flex-wrap gap-1.5">
+      {vehicleMissing
+        ? <NeededToContinue id={item.id} vehicles={item.options.filter((o) => o !== NOT_VEHICLE)} onNotVehicle={() => onAnswer(NOT_VEHICLE)} notVehicleLabel={NOT_VEHICLE} />
+        : <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
-      </div>
+      </div>}
       <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) onAnswer(text.trim()); }} className="flex gap-2">
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Or answer in words…" className="flex-1 min-h-10 rounded-xl border border-line bg-bg px-3 text-sm" />
         <button type="submit" disabled={!text.trim()} className="min-h-10 px-3 rounded-xl bg-soft text-sm font-semibold disabled:opacity-40">Answer</button>
