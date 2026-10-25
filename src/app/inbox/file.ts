@@ -64,7 +64,8 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     const d = { ...(vehicle.details ?? {}) } as Record<string, unknown>;
     const log = ((d.serviceLog as Array<Record<string, string>>) ?? []).slice();
     const what = r.item ?? "Service";
-    if (!log.some((e) => e.date === (r.date ?? "") && e.what === what)) log.push({ date: r.date ?? "", miles: "", what, shop: r.vendor ?? "", cost: r.amount != null ? String(r.amount) : "", proof: name });
+    const sameLine = (e: Record<string, string>) => e.date === (r.date ?? "") && (e.what === what || (r.amount != null && Number(e.cost) === Number(r.amount) && normalizeVendor(e.shop) === normalizeVendor(r.vendor)));
+    if (!log.some(sameLine)) log.push({ date: r.date ?? "", miles: "", what, shop: r.vendor ?? "", cost: r.amount != null ? String(r.amount) : "", proof: name });
     d.serviceLog = log;
     if (r.warranty_note) {
       const w = ((d.warranties as Array<Record<string, string>>) ?? []).slice();
