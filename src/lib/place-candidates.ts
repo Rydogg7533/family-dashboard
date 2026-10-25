@@ -3,13 +3,16 @@
 export const CLUSTER_M = 100;
 export const MIN_STOP_MIN = 8;
 const HOME_MIN_NIGHTS = 3;      // a two-night hotel stay is not home
-const SAME_NAME_FAR_M = 300;    // a second place with an existing place's name, this far away, gets its city added
+const SAME_NAME_FAR_M = 300;
+const CONTACT_MATCH_M = 50;     // a stop this close to a contact's address is at that contact's address    // a second place with an existing place's name, this far away, gets its city added
 const TZ = "America/Denver";
 
 export type Stop = { id: string; started_at: string; ended_at: string; lat: number; lon: number; address: string | null };
 export type Receipt = { merchant: string | null; date: string };
 export type Event = { date: string; start_time: string | null; end_time: string | null; title: string | null; place: string | null };
 export type Named = { name: string; lat: number | null; lon: number | null };
+// A contact's address as coordinates. validUntil set = an older address of that contact (kept so old visits still match).
+export type ContactSpot = { cardId: string; name: string; lastName: string | null; org: string | null; label: string | null; lat: number; lon: number; address: string; validUntil: string | null };
 export type Suggestion = { name: string; reason: string };
 export type Candidate = { key: string; ids: string[]; lat: number; lon: number; address: string | null; visits: number; minutes: number; lastAt: string; when: string; suggestion: Suggestion | null };
 
@@ -100,9 +103,27 @@ export function cityOf(address: string | null | undefined): string | null {
   return street ? street.slice(0, 30) : null;
 }
 
+
+// Contacts whose address (current, or older and closed before the visit) is within CONTACT_MATCH_M of this place. One contact names it; several
+// sharing a last name make a family home; anything else is ambiguous and suggests nothing.
+export function contactSuggestion(stops: Stop[], contacts: ContactSpot[], lat: number, lon: number): Suggestion | null {
+  const hits = contacts.filter((c) => distM(c.lat, c.lon, lat, lon) <= CONTACT_MATCH_M && (!c.validUntil || stops.some((s) => s.ended_at <= c.validUntil!)));
+  const cards = Array.from(new Map(hits.map((h) => [h.cardId, h])).values());
+  if (!cards.length) return null;
+  const old = (c: ContactSpot) => (c.validUntil ? " (an older address on their card)" : "");
+  if (cards.length === 1) {
+    const c = cards[0], work = /work|office|business/i.test(c.label ?? "") && c.org;
+    const name = work ? (c.org as string) : /home|house/i.test(c.label ?? "") || !c.label ? `${c.name}'s home` : `${c.name}'s place`;
+    return { name, reason: `This is the address on ${c.name}'s contact card (${c.address})${old(c)}` };
+  }
+  const last = cards[0].lastName;
+  if (last && cards.every((c) => c.lastName === last)) return { name: `${last} family home`, reason: `${cards.map((c) => c.name).join(", ")} all have this address (${cards[0].address})` };
+  return null;
+}
+
 // A name for a place, only when the evidence points to exactly one. Never fills anything in by itself.
 // Order: calendar, then the map's name (a receipt that agrees is mentioned, never needed or used alone), then Home.
-export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[], opts: { named?: Named[]; hasHome?: boolean; lat?: number; lon?: number } = {}): Suggestion | null {
+export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[], opts: { named?: Named[]; hasHome?: boolean; lat?: number; lon?: number; contacts?: ContactSpot[] } = {}): Suggestion | null {
   const visitDays = Array.from(new Set(stops.map((s) => localParts(s.started_at).date)));
   // 1. A calendar event that overlaps the visit names the place (its location, else its title) when every visit with an event agrees.
   const named = new Map<string, { name: string; date: string }>();
@@ -112,7 +133,9 @@ export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[],
     if (ev) { const nm = (ev.place || ev.title) as string; named.set(normName(nm), { name: nm, date: ev.date }); }
   }
   if (named.size === 1) { const v = Array.from(named.values())[0]; return { name: v.name, reason: `Your calendar has "${v.name}" at this time on ${nice(v.date)}` }; }
-  // 2. The map's name for the spot (already in the stored address), the one most of the visits agree on. A receipt dated on a visit day that matches it is added to the reason.
+  // 2. A contact's address at this spot: more specific than the map's nearest-feature guess, so it ranks first of the two.
+  if (opts.contacts?.length && opts.lat != null && opts.lon != null) { const c = contactSuggestion(stops, opts.contacts, opts.lat, opts.lon); if (c) return c; }
+  // 3. The map's name for the spot (already in the stored address), the one most of the visits agree on. A receipt dated on a visit day that matches it is added to the reason.
   const names = new Map<string, { name: string; n: number }>();
   for (const s of stops) { const m = mapName(s.address); if (m) { const k = normName(m); names.set(k, { name: m, n: (names.get(k)?.n ?? 0) + 1 }); } }
   const top = Array.from(names.values()).sort((a, b) => b.n - a.n)[0];
@@ -125,20 +148,20 @@ export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[],
     const base = `OpenStreetMap lists "${top.name}" at this spot. A business next door could be the real stop.`;
     return { name, reason: rc ? `A ${rc.merchant} receipt is dated ${nice(rc.date)}, a day you were here, and the map lists this spot under a matching name.` : base };
   }
-  // 3. Home: only when no place is called Home yet, you stayed overnight here on three or more nights, and the spot is not a hotel, inn or rental.
+  // 4. Home: only when no place is called Home yet, you stayed overnight here on three or more nights, and the spot is not a hotel, inn or rental.
   const lodging = stops.some((s) => LODGING.test(s.address ?? ""));
   if (!opts.hasHome && !lodging && new Set(stops.flatMap(nightsOf)).size >= HOME_MIN_NIGHTS) return { name: "Home", reason: "You stay here overnight" };
   return null;
 }
 
-export function buildCandidates(stops: Stop[], receipts: Receipt[], events: Event[], named: Named[] = []): Candidate[] {
+export function buildCandidates(stops: Stop[], receipts: Receipt[], events: Event[], named: Named[] = [], contacts: ContactSpot[] = []): Candidate[] {
   const hasHome = named.some((p) => normName(p.name) === "home");
   return groupStops(stops).map((g) => {
     const addr = new Map<string, number>();
     for (const s of g.stops) if (s.address) addr.set(s.address, (addr.get(s.address) ?? 0) + 1);
     const address = Array.from(addr.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
     const last = g.stops.map((s) => s.ended_at).sort().pop() as string;
-    return { key: g.stops[0].id, ids: g.stops.map((s) => s.id), lat: g.lat, lon: g.lon, address, visits: g.stops.length, minutes: Math.round(g.stops.reduce((t, s) => t + mins(s.started_at, s.ended_at), 0)), lastAt: last, when: whenText(g.stops), suggestion: suggestName(g.stops, receipts, events, { named, hasHome, lat: g.lat, lon: g.lon }) };
+    return { key: g.stops[0].id, ids: g.stops.map((s) => s.id), lat: g.lat, lon: g.lon, address, visits: g.stops.length, minutes: Math.round(g.stops.reduce((t, s) => t + mins(s.started_at, s.ended_at), 0)), lastAt: last, when: whenText(g.stops), suggestion: suggestName(g.stops, receipts, events, { named, hasHome, lat: g.lat, lon: g.lon, contacts }) };
   }).sort((a, b) => b.visits - a.visits || b.minutes - a.minutes);
 }
 

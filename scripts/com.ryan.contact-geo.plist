@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.ryan.contact-geo</string>
+  <key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>/Users/ryanrossiter/family-dashboard/scripts/contact-geo.mjs</string></array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>/Users/ryanrossiter/Organized/_Consolidation Records/mirror-logs/contact-geo.log</string>
+  <key>StandardErrorPath</key><string>/Users/ryanrossiter/Organized/_Consolidation Records/mirror-logs/contact-geo.log</string>
+</dict></plist>

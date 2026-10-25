@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCandidates, groupStops, suggestName, checkPlaceName, mapName, normName, sameBusiness, cityOf } from "../src/lib/place-candidates.ts";
+import { buildCandidates, groupStops, suggestName, checkPlaceName, mapName, normName, sameBusiness, cityOf, contactSuggestion } from "../src/lib/place-candidates.ts";
 // Denver is UTC-6 in October (MDT). 2026-10-22 18:00Z = 12:00 local.
 const mk = (id, startZ, mins, lat = 40.2969, lon = -111.6946, address = null) => ({ id, started_at: startZ, ended_at: new Date(Date.parse(startZ) + mins * 60000).toISOString(), lat, lon, address });
 const a = mk("a", "2026-10-22T18:00:00Z", 30, 40.2969, -111.6946, "800 N State St, Orem");
@@ -65,4 +65,27 @@ assert.equal(checkPlaceName("  Costco  ").value, "Costco"); assert.equal(checkPl
 const many = [mk("m1", "2026-10-20T16:00:00Z", 20, 40.30, -111.70), mk("m2", "2026-10-20T18:00:00Z", 20, 40.31, -111.71), mk("m3", "2026-10-20T20:00:00Z", 20, 40.32, -111.72)];
 const cs = buildCandidates(many, [{ merchant: "AAA California Roadside Service", date: "2026-10-20" }], []);
 assert.ok(cs.every((x) => x.suggestion === null));
+
+// Contact addresses.
+const house = mk("k1", "2026-10-22T18:00:00Z", 30, 40.2000, -111.6000, "Family Center Drive, Orem");   // street-only in the map
+const sarah = { cardId: "c1", name: "Sarah Smith", lastName: "Smith", org: null, label: "home", lat: 40.20010, lon: -111.60005, address: "315 E Juanita, Glendora, CA 91741", validUntil: null };
+const rs = suggestName([house], [], [], { contacts: [sarah], lat: 40.2000, lon: -111.6000 });
+assert.equal(rs.name, "Sarah Smith's home"); assert.match(rs.reason, /contact card/);
+assert.equal(suggestName([house], [], [], { contacts: [{ ...sarah, lat: 40.2010 }], lat: 40.2000, lon: -111.6000 }), null);          // ~110 m away: no match
+const old = { ...sarah, validUntil: "2026-10-23T00:00:00Z" };                                                                       // closed after the visit
+assert.match(suggestName([house], [], [], { contacts: [old], lat: 40.2000, lon: -111.6000 }).reason, /older address/);
+const later = mk("k2", "2026-10-25T18:00:00Z", 30, 40.2000, -111.6000, null);                                                         // visit after the address was closed
+assert.equal(suggestName([later], [], [], { contacts: [old], lat: 40.2000, lon: -111.6000 }), null);
+const work = { ...sarah, label: "work", org: "Acme Dental" };
+assert.equal(contactSuggestion([house], [work], 40.2000, -111.6000).name, "Acme Dental");
+const tom = { ...sarah, cardId: "c2", name: "Tom Smith" };
+assert.equal(contactSuggestion([house], [sarah, tom], 40.2000, -111.6000).name, "Smith family home");
+const bob = { ...sarah, cardId: "c3", name: "Bob Jones", lastName: "Jones" };
+assert.equal(contactSuggestion([house], [sarah, bob], 40.2000, -111.6000), null);                                                   // different families at one address: ambiguous
+assert.equal(contactSuggestion([house], [sarah, { ...sarah }], 40.2000, -111.6000).name, "Sarah Smith's home");                    // two rows, one card
+// A contact outranks the map name; the calendar outranks a contact.
+const pe2 = { ...pe, lat: 40.2000, lon: -111.6000 };
+assert.equal(suggestName([pe2], [], [], { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Sarah Smith's home");
+const ev2 = [{ date: "2026-10-22", start_time: "11:30:00", end_time: "12:45:00", title: "Dentist", place: null }];
+assert.equal(suggestName([house], [], ev2, { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Dentist");
 console.log("place-candidates-test ok");

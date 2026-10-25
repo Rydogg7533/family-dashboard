@@ -5,7 +5,7 @@ import IssueStatus from "@/components/IssueStatus";
 import { Fold } from "@/components/Fold";
 import { ReportIssueButton } from "@/components/ReportIssue";
 
-const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space", mail_suspicious: "Held as suspicious (iCloud Mail)" };
+const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space", mail_suspicious: "Held as suspicious (iCloud Mail)", sync_contact_geo: "Contact addresses on the map" };
 
 export const dynamic = "force-dynamic";
 
