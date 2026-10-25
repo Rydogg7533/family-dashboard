@@ -13,6 +13,7 @@ export default async function Money() {
   const routine = await getRoutine();
   const routineOverdue = routine?.items.filter((i) => i.overdue).length ?? 0;
   const finish = splitToFinish(receipts, Date.now());
+  const matchedCount = receipts.filter((r) => r.status === "matched").length;
   const top = needs.slice(0, 5);
   const spent = cats.reduce((n, c) => n + c.spent, 0), typical = cats.reduce((n, c) => n + c.typical, 0);
   const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings" || a.kind === "business").reduce((n, a) => n + (a.balance_current ?? 0), 0);
@@ -60,7 +61,7 @@ export default async function Money() {
         )}
       </Section>
 
-      <Section title="At a glance" right={<Link href="/money/receipts" className="font-semibold text-accent">Receipts ›</Link>}>
+      <Section title="At a glance" right={<Link href="/money/receipts?view=matched" className="font-semibold text-accent min-h-11 inline-flex items-center">{matchedCount} matched receipt{matchedCount === 1 ? "" : "s"} ›</Link>}>
         <div className="grid grid-cols-2 gap-2">
           <div className="card"><div className="text-[11px] text-muted">Month to date</div><div className="font-semibold">{money(spent)}</div><div className="text-[11px] text-muted">typical {money(typical)}</div></div>
           <div className="card"><div className="text-[11px] text-muted">Cash across accounts</div><div className="font-semibold">{money(cash)}</div><div className="text-[11px] text-muted">as of last sync</div></div>
