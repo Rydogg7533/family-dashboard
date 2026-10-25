@@ -39,7 +39,7 @@ export default async function Health() {
         {rows.map((s) => (
           <Card key={s.key}>
             <div className="flex justify-between items-center gap-2">
-              <div className="font-semibold">{names[s.key] ?? s.key}</div>
+              <div className="font-semibold">{names[s.key] ?? (s.key.startsWith("location_gap_") ? "Location reporting" : s.key)}</div>
               <Chip status={s.state} />
             </div>
             <div className="text-sm mt-1">{s.summary}</div>

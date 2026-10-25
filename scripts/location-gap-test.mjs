@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { gapState } from "./location-agent.mjs";
+const now = Date.parse("2026-10-25T20:00:00Z"), ago = (h) => new Date(now - h * 3600000).toISOString();
+assert.equal(gapState(ago(0.2), now).state, "ok");
+assert.equal(gapState(ago(5.9), now).state, "ok");
+assert.equal(gapState(ago(6), now).state, "warn");
+assert.equal(gapState(ago(23.9), now).state, "warn");
+assert.equal(gapState(ago(24), now).state, "error");
+assert.equal(gapState("not a date", now), null);
+console.log("location-gap-test ok");

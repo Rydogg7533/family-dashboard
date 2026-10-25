@@ -270,11 +270,39 @@ async function main() {
     } catch (e) { log.push(`retention: ${e.message}`); }
   }
 
+  await checkGaps(people).catch((e) => log.push(`gap check: ${e.message}`));
+
   const open = await get("location_stops?status=eq.question&select=id").catch(() => []);
   const summary = (log.length ? log.join("; ") : "no new points") + `; ${open.length} open question${open.length === 1 ? "" : "s"}`;
   const state = log.some((l) => l.includes("ERROR")) ? "error" : "ok";
   await rest("POST", "system_status?on_conflict=key", [{ key: "sync_location", state, summary: `Location agent: ${summary}`, value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});
   console.log(`${new Date().toISOString()} ${summary}`);
+}
+
+// Gap alert. For each person who has ever reported, how long since their newest point (any status)? ok under 6 h, warn 6-24 h, error over 24 h.
+// Writes one system_status row per person (location_gap_<id>) and queues ONE push per gap (the tag holds the last point's time, so a gap never repeats).
+const GAP_WARN_H = 6, GAP_ERROR_H = 24;
+function gapState(lastIso, nowMs = Date.now()) {
+  const hours = (nowMs - Date.parse(lastIso)) / 3600000;
+  if (!Number.isFinite(hours)) return null;
+  return { hours, state: hours >= GAP_ERROR_H ? "error" : hours >= GAP_WARN_H ? "warn" : "ok" };
+}
+async function checkGaps(people) {
+  for (const person of people) {
+    const [last] = await get(`locations?person=eq.${person.id}&order=recorded_at.desc&limit=1&select=recorded_at`);
+    if (!last) continue;                                              // never reported: nothing to alert about
+    const g = gapState(last.recorded_at);
+    if (!g) continue;
+    const when = new Date(last.recorded_at).toLocaleString("en-US", { timeZone: "America/Denver", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const h = Math.round(g.hours);
+    const summary = g.state === "ok" ? `${person.display_name}: reporting (last point ${when})` : `${person.display_name}: no location points since ${when} (${h} h)`;
+    await rest("POST", "system_status?on_conflict=key", [{ key: `location_gap_${String(person.id).slice(0, 8)}`, state: g.state, summary, value_num: Math.round(g.hours * 10) / 10, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" });
+    if (g.state === "ok") continue;
+    const tag = `location-gap-${person.id}-${last.recorded_at}`;
+    const [seen] = await get(`notifications?person=eq.${person.id}&tag=eq.${encodeURIComponent(tag)}&select=id&limit=1`);
+    if (seen) continue;
+    await rest("POST", "notifications", [{ person: person.id, type: "system", channel: "push", title: "Location has stopped reporting", body: `Overland has not reported since ${when}. Open the Overland app on your phone and check it is running.`, url: "/health", tag }], { Prefer: "return=minimal" });
+  }
 }
 
 // The latest time before which consumed points may be deleted, or null when nothing may be. Pure so it can be tested.
@@ -286,5 +314,5 @@ function retentionBefore({ cutoff, oldestRaw, lastStopEnd }) {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
-export { cluster, distM, localParts, retentionBefore };
+export { cluster, distM, localParts, retentionBefore, gapState };
 if (process.argv[1] && process.argv[1].endsWith("location-agent.mjs")) main().catch((e) => { console.error(e); process.exit(1); });
