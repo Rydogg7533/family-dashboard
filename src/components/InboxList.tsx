@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxItem, DecidedItem, PaidWithContext } from "@/lib/data-inbox";
 import { SKIP, CLEAR } from "@/lib/paid-with";
 import { destination, folderWarnings, isFiledByCard, type DestRead } from "@/lib/destination";
+import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, type CapturedFile } from "@/app/inbox/actions";
@@ -124,6 +125,8 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
   const otherId = Object.keys(names).find((x) => x !== me) ?? null;
   const assignedName = item.assigned_to ? names[item.assigned_to] : null;
   const by = item.created_by && names[item.created_by] ? names[item.created_by] : item.requested_by;
+  const rrk = item.read_result as { kind?: string; error?: string } | null;
+  const showRead = !!item.file_path && !!rrk && !("error" in rrk) && ["receipt", "bill", "warranty", "service_report", "form", "other"].includes(String(rrk.kind ?? ""));
   async function hand(to: string | null) { setHandBusy(true); await assignInboxItem(item.id, to).catch(() => null); setHandBusy(false); router.refresh(); }
   return (
     <div className="card flex flex-col gap-2">
@@ -143,7 +146,7 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
           {thread && <div className="flex flex-col gap-1 text-xs mt-1">{item.thread.map((t, i) => <div key={i} className={t.who === "you" ? "text-fg" : "text-muted"}><span className="font-semibold">{t.who === "you" ? "You" : "Assistant"}:</span> {t.text}</div>)}</div>}
         </div>
       )}
-      <div className="text-sm font-semibold text-amber">{item.missing}</div>
+      {showRead && <ReadFields id={item.id} rr={item.read_result as ReadShape} />}
       {item.read_result?.plan && item.read_result.plan.length > 0 && (
         <div className="rounded-xl bg-soft px-3 py-2 text-xs">
           <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>
@@ -164,6 +167,7 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
       )}
       {inboxStatus(item) === "needs_answer" && isFiledByCard(item.read_result as DestRead) && <PaidWith item={item} known={paid.known} suggestion={paid.suggestions[item.id] ?? null} />}
       {item.read_result?.home && !isFiledByCard(item.read_result as DestRead) && <FolderFix item={item} />}
+      <div className="text-sm font-semibold text-amber">{item.missing}</div>
       <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
       </div>

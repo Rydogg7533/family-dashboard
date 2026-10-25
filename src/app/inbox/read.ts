@@ -11,6 +11,8 @@ import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 import { cleanDetails } from "@/lib/receipt-details";
+import { revalidatePath } from "next/cache";
+import { checkCorrection, noteCorrection, rebuildName, type Corrections, type EditableField } from "@/lib/read-correction";
 
 const READABLE = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -42,37 +44,14 @@ async function giveUp(sb: Awaited<ReturnType<typeof createClient>>, id: string, 
   return { ok: false, reason };
 }
 
-export async function readCapture(inboxId: string) {
-  if (!hasSupabaseEnv()) return { ok: true, sample: true };
-  const sb = await createClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return { ok: false, reason: "not signed in" };
-  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages,claim_id").eq("id", inboxId).maybeSingle();
-  if (!row?.file_path) return { ok: false, reason: "no stored file" };
-  if (row.read_at) return { ok: true, already: true };
-  // All pages of one document are read together, so the total and vendor come from the whole thing.
-  const pages = (row.pages as { path: string; mime: string; size: number }[] | null) ?? [{ path: row.file_path, mime: row.mime ?? "", size: row.size_bytes ?? 0 }];
-  const files: { mime: string; base64: string }[] = [];
-  for (const pg of pages) {
-    const mime = pg.mime === "image/jpg" ? "image/jpeg" : pg.mime;
-    if (!READABLE.includes(mime)) return giveUp(sb, inboxId, `cannot read ${pg.mime || "this type"}`);
-    if ((pg.size ?? 0) > MAX_BYTES) return giveUp(sb, inboxId, "file too large to read");
-    const { data: blob, error } = await sb.storage.from("captures").download(pg.path);
-    if (error || !blob) return giveUp(sb, inboxId, "could not open the stored file");
-    files.push({ mime, base64: Buffer.from(await blob.arrayBuffer()).toString("base64") });
-  }
-  let parsed: Record<string, unknown> | null = null;
-  try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v5", validate: jsonObjectValid });
-    const m = r.text.match(/\{[\s\S]*\}/);
-    parsed = m ? JSON.parse(m[0]) : null;
-  } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
-  if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
+type Sb = Awaited<ReturnType<typeof createClient>>;
 
+// The planning half of reading: from the facts in `parsed` work out the plan, the one question and its answers. It touches no model and no file, so it can run
+// again after a person corrects a field (see correctRead). Returns the update to store; the caller applies it.
+async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<string, unknown>): Promise<{ update: Record<string, unknown>; name: string | null; conf: number }> {
   // Line items: kept clean; two or more kinds of purchase make the receipt "mixed" (it is still filed whole, once).
   const lines = cleanLines(parsed.lines);
   parsed.lines = lines;
-  Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
   parsed.category = effectiveCategory(typeof parsed.category === "string" ? parsed.category : "other", lines);
   const vLines = vehicleLines(lines);
   const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;
@@ -99,8 +78,7 @@ export async function readCapture(inboxId: string) {
     const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
     if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}. File it?`; update.options = [FILE_YES, FILE_NO]; }
     else { update.missing = `Looks like a statement${bal}${parsed.card_last4 ? ` ending ····${String(parsed.card_last4).replace(/\D/g, "").slice(-4)}` : ""}, ${period}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
-    await sb.from("inbox_items").update(update).eq("id", inboxId);
-    return { ok: true, name: sName, confidence: conf };
+    return { update, name: sName as string | null, conf };
   }
 
   const { data: vehicles } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
@@ -145,8 +123,8 @@ export async function readCapture(inboxId: string) {
     plan.push({ t: "link", text: parsed.category === "mixed" && vLines.length ? `${vehicle.short} service history: ${vLines.map((l) => `${l.description}${l.amount != null ? ` $${l.amount.toFixed(2)}` : ""}`).join(", ")} (a line on this receipt; the receipt stays whole and the link opens it)` : `${vehicle.short} service history: ${parsed.item ?? "service"}` });
     if (parsed.warranty_note) plan.push({ t: "link", text: `${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)` });
   } else if (needsVehicle || parsed.warranty_relevant) plan.push({ t: "link", text: `No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; not linked to a service history until you say which` });
-  if (row.claim_id) {
-    const { data: cl } = await sb.from("claims").select("title").eq("id", row.claim_id).maybeSingle();
+  if (claimId) {
+    const { data: cl } = await sb.from("claims").select("title").eq("id", claimId).maybeSingle();
     if (cl) plan.push({ t: "link", text: `Claim "${cl.title}": added as a document` });
   } else if (vehicle && parsed.warranty_relevant) {
     plan.push({ t: "link", text: `If a reimbursement claim is open for the ${vehicle.short}, this is added to it as the original purchase` });
@@ -161,6 +139,72 @@ export async function readCapture(inboxId: string) {
     else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string; order?: string }; update.missing = nr.order ? `${summary} This is Amazon order ${nr.order}. The order total on file is $${nr.amount.toFixed(2)}, but this document says ${money.trim() || "a different amount"} (an invoice can cover part of an order). Attach it to that order?` : `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }
+  return { update, name, conf };
+}
+
+export async function readCapture(inboxId: string) {
+  if (!hasSupabaseEnv()) return { ok: true, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, reason: "not signed in" };
+  const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages,claim_id").eq("id", inboxId).maybeSingle();
+  if (!row?.file_path) return { ok: false, reason: "no stored file" };
+  if (row.read_at) return { ok: true, already: true };
+  // All pages of one document are read together, so the total and vendor come from the whole thing.
+  const pages = (row.pages as { path: string; mime: string; size: number }[] | null) ?? [{ path: row.file_path, mime: row.mime ?? "", size: row.size_bytes ?? 0 }];
+  const files: { mime: string; base64: string }[] = [];
+  for (const pg of pages) {
+    const mime = pg.mime === "image/jpg" ? "image/jpeg" : pg.mime;
+    if (!READABLE.includes(mime)) return giveUp(sb, inboxId, `cannot read ${pg.mime || "this type"}`);
+    if ((pg.size ?? 0) > MAX_BYTES) return giveUp(sb, inboxId, "file too large to read");
+    const { data: blob, error } = await sb.storage.from("captures").download(pg.path);
+    if (error || !blob) return giveUp(sb, inboxId, "could not open the stored file");
+    files.push({ mime, base64: Buffer.from(await blob.arrayBuffer()).toString("base64") });
+  }
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v5", validate: jsonObjectValid });
+    const m = r.text.match(/\{[\s\S]*\}/);
+    parsed = m ? JSON.parse(m[0]) : null;
+  } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
+  if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
+
+  Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
+  const { update, name, conf } = await planFromRead(sb, (row.claim_id as string | null) ?? null, parsed);
   await sb.from("inbox_items").update(update).eq("id", inboxId);
   return { ok: true, name, confidence: conf };
+}
+
+// A person corrects one field the reader got wrong (card redesign, decisions log (j) item 6). The plan and the question are rebuilt from the corrected facts
+// WITHOUT reading the file again; the model's first value is kept in read_result.corrections beside the new one. Only an open item can be corrected here
+// (editing a decided item is the next step). Nothing is deleted and nothing is filed.
+export async function correctRead(inboxId: string, field: string, raw: string): Promise<{ ok: boolean; error?: string }> {
+  if (!hasSupabaseEnv()) return { ok: false, error: "Not available in preview." };
+  const chk = checkCorrection(field, raw);
+  if (!chk.ok) return { ok: false, error: chk.error };
+  const f = field as EditableField;
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: prof } = await sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  const { data: row } = await sb.from("inbox_items").select("id,status,read_result,claim_id").eq("id", inboxId).maybeSingle();
+  if (!row) return { ok: false, error: "That item is gone." };
+  if (row.status !== "open") return { ok: false, error: "Already answered. Changing a decided item comes later." };
+  const rr = row.read_result as Record<string, unknown> | null;
+  if (!rr || "error" in rr || rr.kind === "statement") return { ok: false, error: "There is nothing to correct on this one." };
+  const by = (prof?.display_name as string | null) ?? user.email ?? "member";
+  const at = new Date().toISOString();
+  const next: Record<string, unknown> = { ...rr, [f]: chk.value, corrections: noteCorrection(rr.corrections as Corrections | undefined, f, rr[f], chk.value, by, at) };
+  for (const k of ["plan", "home", "claim_plan", "same_receipt", "near_receipt"]) delete next[k];   // worked out again below
+  if (f === "vendor" || f === "date" || f === "item") { const nm = rebuildName(next); if (nm) next.suggested_name = nm; }
+  if (next.confidence_read === undefined) next.confidence_read = typeof rr.confidence === "number" ? rr.confidence : null;   // the model's own figure, kept
+  next.confidence = Math.max(typeof rr.confidence === "number" ? rr.confidence : 0, 0.9);   // a person has looked at it
+  const { update } = await planFromRead(sb, (row.claim_id as string | null) ?? null, next);
+  delete update.read_at;
+  const { data: saved, error } = await sb.from("inbox_items").update(update).eq("id", inboxId).eq("status", "open").select("id").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!saved) return { ok: false, error: "It was answered while you were editing." };
+  await sb.from("activity_log").insert({ actor: user.email ?? by, action: "inbox_field_corrected", subject: `${f}: ${String(rr[f] ?? "(none)")} → ${String(chk.value)}`.slice(0, 80), undoable: false }).then(() => {}, () => {});
+  revalidatePath("/inbox");
+  return { ok: true };
 }
