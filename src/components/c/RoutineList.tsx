@@ -34,6 +34,8 @@ export function RoutineList({ items }: { items: RoutineItem[] }) {
             <span className={`text-[11px] shrink-0 ${i.overdue ? "text-amber font-bold" : "text-muted"}`}>{i.overdue ? "overdue · " : "by "}{shortDay(i.due)}</span>
           </div>
           {i.detail && <div className="text-xs text-muted">{i.detail}</div>}
+          {i.evidence && <div className={`text-xs ${i.evidence.met ? "text-green" : "text-amber"}`}>The app sees: {i.evidence.line}</div>}
+          {!i.evidence && <div className="text-[11px] text-muted">The app cannot check this one yet; mark it by hand.</div>}
           <div className="flex items-center gap-3 text-xs mt-1">
             <span className="text-muted">{i.owner === "either" ? "Either parent" : i.owner}</span>
             {i.href && <Link href={i.href} className="font-semibold text-accent">Open</Link>}
@@ -55,7 +57,7 @@ export function RoutineList({ items }: { items: RoutineItem[] }) {
           <div className="flex flex-col gap-1 mt-2">
             {closed.map((i) => (
               <div key={i.id} className="card !py-2 flex justify-between items-center gap-2 text-xs">
-                <div className="min-w-0"><span className="font-semibold">{i.label}</span><span className="text-muted"> · {i.run!.status === "done" ? "done" : `skipped: ${i.run!.skip_reason}`} by {i.run!.done_by}</span></div>
+                <div className="min-w-0"><span className="font-semibold">{i.label}</span><span className="text-muted"> · {i.run!.status === "done" ? "done" : `skipped: ${i.run!.skip_reason}`} by {i.run!.done_by}</span>{i.evidence && !i.evidence.met && <div className="text-amber">The app still sees: {i.evidence.line}</div>}</div>
                 <button disabled={pending} onClick={() => act(i.run!.id, "open")} className="text-accent font-semibold shrink-0">Reopen</button>
               </div>
             ))}
