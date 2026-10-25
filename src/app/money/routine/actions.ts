@@ -31,3 +31,23 @@ export async function setRoutineRun(runId: string, status: "done" | "skipped" | 
   touch();
   return { ok: true };
 }
+
+// "Yes, every month" turns a candidate into a routine step (source observed, owner either, due on the typical day); "No" declines it for good.
+export async function answerCandidate(key: string, yes: boolean): Promise<Res> {
+  if (!/^[a-z]+:[a-z_]+$/.test(key)) return { ok: false, error: "Unknown candidate." };
+  const w = await who(); if (!w) return { ok: false, error: "Not signed in or not available in preview." };
+  const { data: c } = await w.sb.from("money_routine_candidates").select("key,label,typical_day,status").eq("key", key).maybeSingle();
+  if (!c || c.status !== "proposed") return { ok: false, error: "That one has already been answered." };
+  const now = new Date().toISOString();
+  let stepId: string | null = null;
+  if (yes) {
+    const { data: s, error } = await w.sb.from("money_routine_steps").upsert({ key: `learned:${key}`, label: c.label, detail: "Added because the household did this two months running.", cadence: "monthly", anchor_day: c.typical_day ?? 15, owner: "either", source: "observed", sort: 200, created_by: w.name }, { onConflict: "key" }).select("id").maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    stepId = (s?.id as string) ?? null;
+  }
+  const { error } = await w.sb.from("money_routine_candidates").update({ status: yes ? "accepted" : "declined", step_id: stepId, answered_by: w.name, answered_at: now, updated_at: now }).eq("key", key);
+  if (error) return { ok: false, error: error.message };
+  await w.sb.from("activity_log").insert({ actor: w.actor, action: yes ? "routine_step_learned" : "routine_candidate_declined", subject: `${key}: ${c.label}`.slice(0, 80), undoable: false }).then(() => {}, () => {});
+  touch();
+  return { ok: true };
+}
