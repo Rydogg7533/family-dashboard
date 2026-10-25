@@ -101,3 +101,17 @@ export async function addPlaceHere(rawName: string, lat: number, lon: number): P
   revalidatePath("/places");
   return { ok: true };
 }
+
+// The map card for a named place: where it is and when you were there. Read only when the card is opened.
+export type PlaceDetail = { ok: true; name: string; lat: number; lon: number; radiusM: number; address: string | null; visits: { lat: number; lon: number; startedAt: string; endedAt: string; mins: number }[] } | { ok: false; error: string };
+export async function placeDetail(placeId: string): Promise<PlaceDetail> {
+  if (!hasSupabaseEnv()) return { ok: false, error: "Not available in sample mode." };
+  const me = await who(); if (!me) return { ok: false, error: "Not signed in." };
+  if (!/^[0-9a-f-]{36}$/i.test(placeId)) return { ok: false, error: "Not your place." };
+  const { data: pl } = await me.sb.from("places").select("id,name,person,lat,lon,radius_m").eq("id", placeId).maybeSingle();
+  if (!pl || pl.person !== me.id || pl.lat == null || pl.lon == null) return { ok: false, error: "This place has no location yet." };
+  const { data: stops } = await me.sb.from("location_stops").select("lat,lon,started_at,ended_at,address").eq("place_id", placeId).eq("person", me.id).order("started_at", { ascending: false }).limit(30);
+  const rows = (stops ?? []) as { lat: number; lon: number; started_at: string; ended_at: string; address: string | null }[];
+  return { ok: true, name: pl.name as string, lat: pl.lat as number, lon: pl.lon as number, radiusM: (pl.radius_m as number) ?? 100, address: rows.find((r) => r.address)?.address ?? null,
+    visits: rows.map((r) => ({ lat: r.lat, lon: r.lon, startedAt: r.started_at, endedAt: r.ended_at, mins: Math.round((Date.parse(r.ended_at) - Date.parse(r.started_at)) / 60000) })) };
+}

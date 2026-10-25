@@ -2,9 +2,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Candidate } from "@/lib/place-candidates";
+import { PlaceMap, mapsLink } from "@/components/c/PlaceMap";
 import { addPlaceHere, hideCandidate, nameCandidate, skipCandidate } from "@/app/places/actions";
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" });
+const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });
 const dur = (m: number) => (m >= 120 ? `${Math.round(m / 60)} h` : `${m} min`);
 
 // Places seen on GPS but not named. A suggestion shows its reason and needs a tap; nothing is named for you.
@@ -15,6 +17,7 @@ export function PlaceCandidates({ candidates }: { candidates: Candidate[] }) {
   const [err, setErr] = useState<{ key: string; msg: string } | null>(null);
   const [text, setText] = useState<Record<string, string>>({});
   const [done, setDone] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const [here, setHere] = useState(""); const [hereBusy, setHereBusy] = useState(false); const [hereErr, setHereErr] = useState<string | null>(null);
 
   async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>, msg: string) {
@@ -46,10 +49,18 @@ export function PlaceCandidates({ candidates }: { candidates: Candidate[] }) {
             const v = text[c.key] ?? "";
             return (
               <div key={c.key} className="card flex flex-col gap-2">
-                <div>
+                <button type="button" onClick={() => setOpen(open === c.key ? null : c.key)} aria-expanded={open === c.key} className="text-left">
                   <div className="font-semibold text-sm break-words">{c.address ?? `${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}`}</div>
                   <div className="text-xs text-muted">{c.visits} visit{c.visits === 1 ? "" : "s"} · {dur(c.minutes)} in all{c.when ? ` · ${c.when}` : ""} · last {day(c.lastAt)}</div>
-                </div>
+                  <div className="text-xs font-semibold text-accent mt-0.5">{open === c.key ? "Hide map ▴" : "Show on map ▾"}</div>
+                </button>
+                {open === c.key && (
+                  <div className="flex flex-col gap-2">
+                    <PlaceMap lat={c.lat} lon={c.lon} points={c.points.map((p) => ({ lat: p.lat, lon: p.lon, label: `${day(p.startedAt)}, ${clock(p.startedAt)} to ${clock(p.endedAt)}` }))} />
+                    <div className="text-xs">{c.points.slice().reverse().map((p, i) => <div key={i} className="flex justify-between border-b border-line last:border-b-0 py-1"><span>{day(p.startedAt)} · {clock(p.startedAt)} to {clock(p.endedAt)}</span><span className="text-muted">{dur(p.mins)}</span></div>)}</div>
+                    <a href={mapsLink(c.lat, c.lon, c.suggestion?.name ?? c.address)} target="_blank" rel="noreferrer" className="self-start text-xs font-semibold text-accent min-h-11 inline-flex items-center">Open in Maps ›</a>
+                  </div>
+                )}
                 {c.suggestion && (
                   <div className="rounded-xl border border-dashed border-amber bg-soft px-3 py-2 flex flex-col gap-1.5">
                     <div className="text-xs"><span className="font-bold tracking-wide text-amber">MAYBE </span><span className="font-semibold">{c.suggestion.name}</span></div>

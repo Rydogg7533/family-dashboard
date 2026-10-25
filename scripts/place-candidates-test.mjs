@@ -10,6 +10,7 @@ assert.equal(groupStops([a, b, far, short]).length, 2);
 const c = buildCandidates([a, b, far, short], [], []);
 assert.equal(c.length, 2); assert.equal(c[0].visits, 2); assert.equal(c[0].minutes, 75);
 assert.ok(!c.some((x) => x.ids.includes("d")));
+assert.equal(c[0].points.length, 2); assert.equal(c[0].points[0].mins, 30); assert.ok(Number.isFinite(c[0].points[1].lat));   // each visit keeps its own point for the map
 
 // Loose matching of vendor and map names.
 assert.equal(normName("Panda Express #0539"), "panda express");
@@ -84,6 +85,10 @@ assert.equal(contactSuggestion([house], [sarah, tom], 40.2000, -111.6000).name, 
 const bob = { ...sarah, cardId: "c3", name: "Bob Jones", lastName: "Jones" };
 assert.equal(contactSuggestion([house], [sarah, bob], 40.2000, -111.6000), null);                                                   // different families at one address: ambiguous
 assert.equal(contactSuggestion([house], [sarah, { ...sarah }], 40.2000, -111.6000).name, "Sarah Smith's home");                    // two rows, one card
+// Your own home is Home even when a family member's contact card has the same address.
+const nightHouse = (i) => mk("nh" + i, `2026-10-${20 + i}T06:00:00Z`, 600, 40.2000, -111.6000, "Family Center Drive, Orem");
+assert.equal(suggestName([nightHouse(1), nightHouse(2), nightHouse(3)], [], [], { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Home");
+assert.equal(suggestName([nightHouse(1), nightHouse(2), nightHouse(3)], [], [], { hasHome: true, contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Sarah Smith's home");
 // A contact outranks the map name; the calendar outranks a contact.
 const pe2 = { ...pe, lat: 40.2000, lon: -111.6000 };
 assert.equal(suggestName([pe2], [], [], { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Sarah Smith's home");
