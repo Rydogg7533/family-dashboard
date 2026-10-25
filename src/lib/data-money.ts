@@ -1,6 +1,7 @@
 // Money (F2, F7): types, sample data and readers. Money is recorded, never moved: nothing here pays,
 // transfers, cancels or disputes; every such action becomes a task. No account numbers beyond last-4.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { categorySpend, type SpendSummary, type SpendRow } from "@/lib/money-spend";
 
 export type Account = {
   id: string; kind: "credit" | "checking" | "savings" | "payment_app" | "business"; institution: string; last4: string;
@@ -129,6 +130,20 @@ export async function getCategorySpend(): Promise<CategorySpend[]> {
 }
 export async function getSpendingMonitor(): Promise<SpendingMonitor> {
   return sampleMonitor;
+}
+
+// Spending by category from the real ledger (this month, with a "typical" from earlier months). Samples only when not connected.
+export async function getSpendSummary(): Promise<SpendSummary> {
+  if (!hasSupabaseEnv()) return categorySpend(sampleCategories.flatMap((c) => [{ amount: c.spent, date: new Date().toISOString().slice(0, 10), category: c.category }, ...[1, 2, 3].flatMap((k) => Array.from({ length: 30 }, () => ({ amount: c.typical / 30, date: new Date(Date.now() - k * 32 * 86_400_000).toISOString().slice(0, 10), category: c.category })))]), new Date());
+  const sb = await createClient();
+  const since = new Date(); since.setMonth(since.getMonth() - 4); since.setDate(1);
+  const rows: SpendRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb.from("transactions").select("amount,date,category,status,merchant").gte("date", since.toISOString().slice(0, 10)).order("date", { ascending: false }).range(from, from + 999);
+    rows.push(...((data ?? []) as SpendRow[]));
+    if (!data || data.length < 1000) break;
+  }
+  return categorySpend(rows, new Date());
 }
 
 // ---- derived helpers ----
