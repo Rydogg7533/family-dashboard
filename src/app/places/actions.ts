@@ -1,5 +1,7 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import { checkPlaceName } from "@/lib/place-candidates";
 
 type Result = { ok: boolean; error?: string };
 
@@ -56,5 +58,44 @@ export async function forgetPlace(placeId: string): Promise<Result> {
   const { error } = await me.sb.from("places").delete().eq("id", placeId);
   if (error) return { ok: false, error: error.message };
   await me.sb.from("activity_log").insert({ actor: me.name, action: "place_forgotten", subject: `Forgot place ${pl.name}`, ref: placeId, undoable: false }).then(() => {}, () => {});
+  return { ok: true };
+}
+
+// Naming, hiding or skipping a group of unnamed stops uses the same answer the Day page records (status "answered" + the answer text);
+// the Mac mini's location agent turns it into a Place within about ten minutes and relabels the day record. One path, no second way to make a place.
+async function answerStops(ids: string[], answer: string, log: string): Promise<Result> {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const me = await who(); if (!me) return { ok: false, error: "Not signed in." };
+  const clean = Array.from(new Set((ids ?? []).filter((x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)))).slice(0, 500);
+  if (!clean.length) return { ok: false, error: "Nothing to update." };
+  const { data, error } = await me.sb.from("location_stops").update({ status: "answered", answer, updated_at: new Date().toISOString() }).in("id", clean).eq("status", "question").eq("person", me.id).select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Those stops were already answered." };
+  await me.sb.from("activity_log").insert({ actor: me.name, action: "place_stops_answered", subject: log.slice(0, 80), undoable: false }).then(() => {}, () => {});
+  revalidatePath("/places"); revalidatePath("/day");
+  return { ok: true };
+}
+export async function nameCandidate(ids: string[], rawName: string): Promise<Result> {
+  const n = checkPlaceName(rawName);
+  if (!n.ok) return { ok: false, error: n.error };
+  if (/^(skip|personal|private|this was private)$/i.test(n.value)) return { ok: false, error: "Pick a different name; that word is used for hiding stops." };
+  return answerStops(ids, n.value, `Named ${ids.length} stop${ids.length === 1 ? "" : "s"}: ${n.value}`);
+}
+export async function hideCandidate(ids: string[]): Promise<Result> { return answerStops(ids, "Private", `Marked ${ids.length} stop(s) private`); }
+export async function skipCandidate(ids: string[]): Promise<Result> { return answerStops(ids, "Skip", `Skipped ${ids.length} stop(s)`); }
+
+// "I'm here now": adds a confirmed place at the coordinates the browser reports. The agent recognises later visits within about 150 m.
+export async function addPlaceHere(rawName: string, lat: number, lon: number): Promise<Result> {
+  const n = checkPlaceName(rawName);
+  if (!n.ok) return { ok: false, error: n.error };
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return { ok: false, error: "Could not read your location." };
+  if (!hasSupabaseEnv()) return { ok: true };
+  const me = await who(); if (!me) return { ok: false, error: "Not signed in." };
+  const { data: dup } = await me.sb.from("places").select("id").eq("person", me.id).ilike("name", n.value).limit(1);
+  if (dup?.length) return { ok: false, error: "You already have a place with that name." };
+  const { error } = await me.sb.from("places").insert({ person: me.id, name: n.value, meaning: n.value, usual_activity: n.value, lat, lon, radius_m: 100, confirmed: true, added_by: "you", visits: 0 });
+  if (error) return { ok: false, error: error.message };
+  await me.sb.from("activity_log").insert({ actor: me.name, action: "place_added", subject: `Added place ${n.value}`, undoable: false }).then(() => {}, () => {});
+  revalidatePath("/places");
   return { ok: true };
 }

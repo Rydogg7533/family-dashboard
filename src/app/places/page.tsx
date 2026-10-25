@@ -3,17 +3,23 @@ import { Card, H1 } from "@/components/ui";
 import { OpenIn, PageSources, SectionTitle } from "@/components/registers";
 import { getActivities, getPeople, getPlaces, getViewer, type PersonId } from "@/lib/data-registers";
 import { PlacesList } from "@/components/c/PlacesList";
+import { PlaceCandidates } from "@/components/c/PlaceCandidates";
+import { getPlaceCandidates } from "@/lib/data-place-candidates";
 
 export const dynamic = "force-dynamic";
 
 export default async function Places() {
   const viewer = await getViewer();
   const people = await getPeople();
+  const { candidates } = await getPlaceCandidates();
   const [places, activities] = await Promise.all([getPlaces(viewer.id as PersonId), Promise.all(people.map(async (p) => ({ p, acts: await getActivities(p.id) })))]);
   return (
     <>
       <H1 right={`${viewer.name}'s`}>Schedule and activities</H1>
       <div className="rounded-xl px-4 py-3 bg-soft text-xs text-muted mb-4">Places are learned from your own location records and belong to you; they are never shown to anyone else unless you turn sharing on. Activities and their Always lists are per person.</div>
+
+      <SectionTitle right={`${candidates.length} to name`}>Seen, not named yet</SectionTitle>
+      <PlaceCandidates candidates={candidates} />
 
       <SectionTitle right={`${places.length} learned`}>Places</SectionTitle>
       <PlacesList places={places} />

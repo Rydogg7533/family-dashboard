@@ -117,7 +117,12 @@ async function processPerson(person, places, calendar, log) {
     if (page.length < 1000) break;
   }
   const usable = raw.filter((p) => p.accuracy_m == null || p.accuracy_m <= 100);
-  const [openStop] = await get(`location_stops?person=eq.${person.id}&status=eq.open&order=started_at.desc&limit=1`);
+  const openRows = await get(`location_stops?person=eq.${person.id}&status=eq.open&order=started_at.desc&select=id`);
+  const [openStop] = openRows.length ? await get(`location_stops?id=eq.${openRows[0].id}`) : [];
+  // Only the newest open stop is live. Older ones are short pauses that were never closed (under STOP_MIN_MINUTES, then the person moved on):
+  // mark them skipped (never deleted) so they stop piling up and never count as places.
+  const stale = openRows.slice(1).map((r) => r.id);
+  for (let i = 0; i < stale.length; i += 100) await patch(`location_stops?id=in.(${stale.slice(i, i + 100).join(",")})`, { status: "skipped", updated_at: new Date().toISOString() });
   if (!raw.length && !openStop) return;
 
   const { closed, open } = cluster(usable, openStop ? { id: openStop.id, started_at: openStop.started_at, ended_at: openStop.ended_at, lat: openStop.lat, lon: openStop.lon, points: openStop.points } : null);
