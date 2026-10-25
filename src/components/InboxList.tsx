@@ -2,14 +2,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { InboxItem } from "@/lib/data-inbox";
+import type { InboxItem, DecidedItem } from "@/lib/data-inbox";
+import { inboxStatus, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
-export function InboxList({ items, me = null, names = {}, pendingIds = [], capture, claimId, resolvedThisWeek }: { items: InboxItem[]; me?: string | null; names?: Record<string, string>; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
+export function InboxList({ items, me = null, names = {}, pendingIds = [], capture, claimId, resolvedThisWeek, decided = [] }: { items: InboxItem[]; me?: string | null; names?: Record<string, string>; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number; decided?: DecidedItem[] }) {
   const [open, setOpen] = useState(items);
   useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
@@ -30,7 +31,17 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   const sorted = [...open].sort((a, b) => Number(b.assigned_to === me) - Number(a.assigned_to === me));
   const handedToMe = sorted.filter((i) => me && i.assigned_to === me).length;
   const fromWho = (i: InboxItem, id: string) => i.created_by === id || i.requested_by === names[id];
-  const visible = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
+  const byPerson = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
+  // Status row (what is decided, what waits on you, what waits on a missing fact) and, once there are many items, a kind row (what went in).
+  const [st, setSt] = useState<"all" | "needs_answer" | "missing_info" | "handed" | "decided">("all");
+  const [kd, setKd] = useState<string>("all");
+  const stCount = { all: byPerson.length, needs_answer: byPerson.filter((i) => inboxStatus(i) === "needs_answer").length, missing_info: byPerson.filter((i) => inboxStatus(i) === "missing_info").length, handed: byPerson.filter((i) => i.assigned_to).length, decided: decided.length };
+  const byStatus = st === "all" || st === "decided" ? byPerson : st === "handed" ? byPerson.filter((i) => i.assigned_to) : byPerson.filter((i) => inboxStatus(i) === st);
+  const kindOf = (i: InboxItem) => docKind(i);
+  const kinds = KIND_ORDER.map((k) => ({ k, n: (st === "decided" ? decided.filter((d) => docKind({ read_result: { kind: d.kind } }) === k) : byStatus.filter((i) => kindOf(i) === k)).length })).filter((x) => x.n > 0);
+  const showKinds = (st === "decided" ? decided.length : byPerson.length) >= 20 && kinds.length > 1;
+  const visible = kd === "all" || !showKinds ? byStatus : byStatus.filter((i) => kindOf(i) === kd);
+  const decidedShown = (kd === "all" || !showKinds ? decided : decided.filter((d) => docKind({ read_result: { kind: d.kind } }) === kd));
   const shown = showAll ? visible : visible.slice(0, 5);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
@@ -58,7 +69,19 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
-        {ids.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2" role="group" aria-label="Filter by status">
+          {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || stCount[id] > 0).map(([id, label]) => (
+            <button key={id} onClick={() => { setSt(id); setKd("all"); setShowAll(false); }} aria-pressed={st === id} className={`px-3 py-1.5 rounded-full min-h-9 ${st === id ? "bg-accent text-white" : "bg-soft"}`}>{label} <b>{stCount[id]}</b></button>
+          ))}
+        </div>
+        {showKinds && (
+          <div className="flex gap-1.5 flex-wrap text-xs mb-2" role="group" aria-label="Filter by what it is">
+            {[{ k: "all", n: st === "decided" ? decided.length : byStatus.length }, ...kinds].map((x) => (
+              <button key={x.k} onClick={() => { setKd(x.k); setShowAll(false); }} aria-pressed={kd === x.k} className={`px-2.5 py-1 rounded-lg min-h-8 ${kd === x.k ? "bg-fg text-bg font-semibold" : "bg-soft"}`}>{x.k === "all" ? "Everything" : x.k} {x.n}</button>
+            ))}
+          </div>
+        )}
+        {ids.length > 1 && st !== "decided" && (
           <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2">
             {[{ id: "all", label: "All" }, ...ids.map((id) => ({ id, label: `From ${names[id]}` })), ...(handedToMe ? [{ id: "mine", label: `Handed to me (${handedToMe})` }] : [])].map((c) => (
               <button key={c.id} onClick={() => { setFilter(c.id); setShowAll(false); }} className={`px-3 py-1.5 rounded-full min-h-9 ${filter === c.id ? "bg-accent text-white" : "bg-soft"}`}>{c.label}</button>
@@ -66,7 +89,9 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           </div>
         )}
         {pendingIds.length > 0 && <div className="card text-sm text-muted mb-2 animate-pulse">Reading {pendingIds.length} new document{pendingIds.length === 1 ? "" : "s"}… it will appear here in a few seconds.</div>}
-        {open.length === 0 && pendingIds.length === 0 ? (
+        {st === "decided" ? (
+          <DecidedList items={decidedShown} names={names} />
+        ) : open.length === 0 && pendingIds.length === 0 ? (
           <div className="card text-muted">Nothing to identify, file or decide. Everything is where it belongs.</div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -100,7 +125,12 @@ function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string 
   return (
     <div className="card flex flex-col gap-2">
       <div>
-        <div className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</span>
+          {inboxStatus(item) === "needs_answer"
+            ? <span className="text-[11px] font-bold tracking-wide rounded-full bg-soft text-accent px-2 py-0.5">NEEDS YOUR ANSWER</span>
+            : <span className="text-[11px] font-bold tracking-wide rounded-full border border-amber text-amber px-2 py-0.5">MISSING: {missingNote(item).toUpperCase()}</span>}
+        </div>
         <div className="font-semibold">{item.title}</div>
         <div className="text-xs text-muted mt-0.5">{by === "System" ? "System" : by.includes("@") ? "Uploaded" : `${by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
       </div>
@@ -250,6 +280,25 @@ function FolderFix({ item }: { item: InboxItem }) {
           {canRule && <button type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await saveFilingRule(item.id).catch(() => ({ ok: false, message: "Could not save the rule." })); setBusy(false); setMsg(r.message); if (r.ok) setCanRule(false); }} className="min-h-10 rounded-xl border border-line text-sm font-semibold disabled:opacity-40">Always file this vendor here</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+// Decided: what you answered in the last 30 days, one line each. Everything stays on record; this is only the view.
+function DecidedList({ items, names }: { items: DecidedItem[]; names: Record<string, string> }) {
+  if (!items.length) return <div className="card text-muted">Nothing decided in the last {DECIDED_DAYS} days.</div>;
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" }) : "");
+  return (
+    <div className="card p-0 divide-y divide-line">
+      {items.map((d) => (
+        <div key={d.id} className="px-3 py-2.5 flex items-start gap-3">
+          <span className="text-green font-bold mt-0.5" aria-hidden="true">✓</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate">{d.title}</div>
+            <div className="text-xs text-muted">{decidedOutcome(d.filed, d.resolution)} · {when(d.resolved_at)}{d.resolved_by && names[d.resolved_by] ? ` · ${names[d.resolved_by]}` : ""}{d.file_path ? <> · <a href={`/api/capture/${d.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a></> : null}</div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

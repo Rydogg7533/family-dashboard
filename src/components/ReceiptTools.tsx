@@ -114,17 +114,17 @@ export function CardPicker({ r, known }: { r: Receipt; known: string[] }) {
     return (
       <div className="text-xs text-muted">
         {r.card_conflict && <span className="text-amber font-semibold">Sources disagree about the card. </span>}
-        {weak ? <>The receipt shows <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={async () => { const x = await setReceiptCard(r.id, card); if (x.ok) setConfirmed(true); }}>that&apos;s right</button> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></> : <>Charged to <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></>}
+        {weak ? <>The receipt shows <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={async () => { const x = await setReceiptCard(r.id, card); if (x.ok) setConfirmed(true); }}>that&apos;s right</button> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></> : <>Paid with <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></>}
       </div>
     );
   }
   const chips = Array.from(new Set([...known, "Cash"]));
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="text-xs font-semibold text-amber">Which card was this charged to?</div>
+      <div className="text-xs font-semibold text-amber">Paid with</div>
       <div className="flex flex-wrap gap-1.5">
         {chips.map((c) => <button key={c} disabled={busy} onClick={() => save(c)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{c}</button>)}
-        <button onClick={() => setTyping(true)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold text-accent">Another card</button>
+        <button onClick={() => setTyping(true)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold text-accent">Another card or account</button>
       </div>
       {typing && (
         <div className="flex gap-2">

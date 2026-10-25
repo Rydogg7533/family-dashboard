@@ -49,6 +49,15 @@ export async function getInboxItems(): Promise<InboxItem[]> {
 
 export const FRESH_MS = 3 * 60_000;
 
+// Decided: items answered in the last 30 days, newest first, as one line each. They stay on record; this is only the view.
+export type DecidedItem = { id: string; title: string; resolution: string | null; resolved_at: string | null; resolved_by: string | null; filed: Record<string, unknown> | null; file_path: string | null; kind: string | null };
+export async function getDecidedItems(days = 30): Promise<DecidedItem[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("inbox_items").select("id,title,resolution,resolved_at,resolved_by,filed,file_path,read_result").eq("status", "resolved").gte("resolved_at", new Date(Date.now() - days * 86_400_000).toISOString()).order("resolved_at", { ascending: false }).limit(300);
+  return (data ?? []).map((r) => ({ id: r.id, title: r.title, resolution: r.resolution, resolved_at: r.resolved_at, resolved_by: r.resolved_by, filed: r.filed, file_path: r.file_path, kind: (r.read_result as { kind?: string } | null)?.kind ?? null }));
+}
+
 // Uploaded files still being read: not listed yet, but the page reads them and tells the person.
 export async function getPendingReadIds(): Promise<string[]> {
   if (!hasSupabaseEnv()) return [];
