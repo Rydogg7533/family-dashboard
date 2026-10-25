@@ -10,6 +10,7 @@ const settings = [
   { href: "/settings/sitter", label: "Sitter sheet", sub: "What a babysitter needs, shown on the kitchen tablet on sitter nights" },
   { href: "/settings/tablet", label: "Kitchen tablet", sub: "Pair the tablet that shows the sitter sheet" },
   { href: "/settings/preonboard", label: "Pre-onboarding links", sub: "Send a prospective household a checklist and walkthrough before they set up" },
+  { href: "/settings/money", label: "Money rules", sub: "Amazon invoices: when to ask for them, what to wait for" },
   { href: "/money", label: "Money set-up", sub: "Accounts, entities, budget, rules, reconciliation (on Money)" },
   { href: "/places", label: "Schedule and activities", sub: "Places, activities and checklists, learning switches" },
   { href: "/settings#filing", label: "Filing rules", sub: "Folder tree, sender and keyword rules, review cadence" },
