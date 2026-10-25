@@ -36,4 +36,16 @@ assert.equal(suggestName([pe], [], []).name, "Peet's Coffee");
 assert.match(suggestName([pe], [], []).reason, /OpenStreetMap/);
 assert.equal(suggestName([pe], [{ merchant: "Home Depot", date: "2026-10-22" }], []).name, "Home Depot");   // a receipt outranks the map name
 assert.equal(suggestName([a], [], []), null);   // address is a street only: no suggestion
+// A receipt cannot name every place visited that day: a day at many spots offers no receipt name unless the map's name for the spot agrees.
+const many = [mk("m1", "2026-10-20T16:00:00Z", 20, 40.30, -111.70), mk("m2", "2026-10-20T18:00:00Z", 20, 40.31, -111.71), mk("m3", "2026-10-20T20:00:00Z", 20, 40.32, -111.72)];
+const aaa = [{ merchant: "AAA California Roadside Service", date: "2026-10-20" }];
+const cs = buildCandidates(many, aaa, []);
+assert.equal(cs.length, 3); assert.ok(cs.every((x) => x.suggestion === null));          // three spots that day: no receipt name
+const panda = [{ merchant: "Panda Express #0539", date: "2026-10-20" }];
+const withName = [{ ...many[0], address: "Panda Express, 100 Main St, Orem" }, many[1], many[2]];
+const c2 = buildCandidates(withName, panda, []);
+assert.equal(c2.find((x) => x.ids.includes("m1")).suggestion.name, "Panda Express #0539");   // both agree
+assert.equal(c2.find((x) => x.ids.includes("m2")).suggestion, null);                         // the other spots stay unnamed
+// One or two spots that day and one merchant: still offered.
+assert.equal(buildCandidates([many[0]], panda, [])[0].suggestion.name, "Panda Express #0539");
 console.log("place-candidates-test ok");
