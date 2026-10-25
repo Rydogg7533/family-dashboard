@@ -22,7 +22,7 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
   const cand = await getCandidateForTask(task.id);
   const draft = task.kind === "reply" ? await getDraftForTask(task.id) : null;
   const due = task.due_at ? new Date(task.due_at) : null;
-  const originLabel = task.origin_kind === "email" ? "Gmail" : task.origin_kind === "message" ? "Messages" : task.origin_kind === "receipt" ? "Money" : task.origin_kind === "calendar" ? "Calendar" : "Source";
+  const originLabel = task.origin_kind === "email" ? "Gmail" : task.origin_kind === "message" ? "Messages" : task.origin_kind === "receipt" ? "Money" : task.origin_kind === "calendar" ? "Calendar" : task.origin_ref === "/places" ? "Places" : "Source";
 
   return (
     <>

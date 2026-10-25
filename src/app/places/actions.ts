@@ -2,6 +2,7 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { checkPlaceName } from "@/lib/place-candidates";
+import { syncNamePlacesTask } from "@/lib/place-task";
 
 type Result = { ok: boolean; error?: string };
 
@@ -72,7 +73,8 @@ async function answerStops(ids: string[], answer: string, log: string): Promise<
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "Those stops were already answered." };
   await me.sb.from("activity_log").insert({ actor: me.name, action: "place_stops_answered", subject: log.slice(0, 80), undoable: false }).then(() => {}, () => {});
-  revalidatePath("/places"); revalidatePath("/day");
+  await syncNamePlacesTask(me.sb, me.id);
+  revalidatePath("/places"); revalidatePath("/day"); revalidatePath("/tasks");
   return { ok: true };
 }
 export async function nameCandidate(ids: string[], rawName: string): Promise<Result> {

@@ -271,6 +271,7 @@ async function main() {
   }
 
   await checkGaps(people).catch((e) => log.push(`gap check: ${e.message}`));
+  await syncNamePlacesTasks(people).catch((e) => log.push(`name-places task: ${e.message}`));
 
   const open = await get("location_stops?status=eq.question&select=id").catch(() => []);
   const summary = (log.length ? log.join("; ") : "no new points") + `; ${open.length} open question${open.length === 1 ? "" : "s"}`;
@@ -305,6 +306,27 @@ async function checkGaps(people) {
   }
 }
 
+// "Name N places" task. N = unnamed places as the Places page counts them: question stops of 8+ minutes, greedily grouped within 100 m.
+// Mirrors groupStops in src/lib/place-candidates.ts (scripts/place-groups-parity-test.mjs keeps the two equal). The task rules live in
+// the database function sync_name_places_task, shared with the app.
+function countUnnamed(stops) {
+  const groups = [];
+  const real = stops.filter((s) => minutes(s.started_at, s.ended_at) >= 8).sort((a, b) => a.started_at.localeCompare(b.started_at));
+  for (const s of real) {
+    let best = null, bestD = Infinity;
+    for (const g of groups) { const d = distM(s.lat, s.lon, g.lat, g.lon); if (d <= 100 && d < bestD) { best = g; bestD = d; } }
+    if (!best) { groups.push({ n: 1, lat: s.lat, lon: s.lon }); continue; }
+    best.n += 1; best.lat += (s.lat - best.lat) / best.n; best.lon += (s.lon - best.lon) / best.n;
+  }
+  return groups.map((g) => g.n);
+}
+async function syncNamePlacesTasks(people) {
+  for (const person of people) {
+    const stops = await get(`location_stops?person=eq.${person.id}&status=eq.question&order=started_at.asc&limit=2000&select=started_at,ended_at,lat,lon`);
+    await rest("POST", "rpc/sync_name_places_task", { p_person: person.id, p_count: countUnnamed(stops).length }, { Prefer: "return=minimal" });
+  }
+}
+
 // The latest time before which consumed points may be deleted, or null when nothing may be. Pure so it can be tested.
 function retentionBefore({ cutoff, oldestRaw, lastStopEnd }) {
   if (!lastStopEnd) return null;                                   // no stops yet: processing has not produced anything, keep everything
@@ -314,5 +336,5 @@ function retentionBefore({ cutoff, oldestRaw, lastStopEnd }) {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
-export { cluster, distM, localParts, retentionBefore, gapState };
+export { cluster, distM, localParts, retentionBefore, gapState, countUnnamed };
 if (process.argv[1] && process.argv[1].endsWith("location-agent.mjs")) main().catch((e) => { console.error(e); process.exit(1); });
