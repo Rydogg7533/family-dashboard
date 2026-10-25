@@ -2,11 +2,14 @@
 // Stops within CLUSTER_M of each other are one place. A name is only ever SUGGESTED, with its reason; a person taps to accept. Home is never assumed.
 export const CLUSTER_M = 100;
 export const MIN_STOP_MIN = 8;
+const HOME_MIN_NIGHTS = 3;      // a two-night hotel stay is not home
+const SAME_NAME_FAR_M = 300;    // a second place with an existing place's name, this far away, gets its city added
 const TZ = "America/Denver";
 
 export type Stop = { id: string; started_at: string; ended_at: string; lat: number; lon: number; address: string | null };
 export type Receipt = { merchant: string | null; date: string };
 export type Event = { date: string; start_time: string | null; end_time: string | null; title: string | null; place: string | null };
+export type Named = { name: string; lat: number | null; lon: number | null };
 export type Suggestion = { name: string; reason: string };
 export type Candidate = { key: string; ids: string[]; lat: number; lon: number; address: string | null; visits: number; minutes: number; lastAt: string; when: string; suggestion: Suggestion | null };
 
@@ -51,43 +54,35 @@ function whenText(stops: Stop[]): string {
   return `usually ${wk}${part}`;
 }
 
-const GENERIC = new Set(["store", "shop", "service", "services", "company", "the", "inc", "llc", "corp", "market", "center", "centre", "group", "express"]);
-const norm = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const nice = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-const isOvernight = (s: Stop) => { const a = localParts(s.started_at), b = localParts(s.ended_at); return a.hour <= 2 && b.hour >= 5 && mins(s.started_at, s.ended_at) >= 180; };
+// The local dates on which this stop covers 3 am, i.e. the nights spent here.
+function nightsOf(s: Stop): string[] {
+  const out = new Set<string>(), end = new Date(s.ended_at).getTime();
+  for (let t = new Date(s.started_at).getTime(); t <= end; t += 30 * 60000) { const p = localParts(new Date(t).toISOString()); if (p.hour === 3) out.add(p.date); }
+  return Array.from(out);
+}
 
-// A name for a place, only when the evidence points to exactly one. Never fills anything in by itself.
-export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[], spots: Map<string, number> = new Map()): Suggestion | null {
-  const visitDays = Array.from(new Set(stops.map((s) => localParts(s.started_at).date)));
-  // 1. A calendar event that overlaps the visit names the place (its location, else its title) when every visit with an event agrees.
-  const named = new Map<string, { name: string; date: string }>();
-  for (const s of stops) {
-    const a = localParts(s.started_at), b = localParts(s.ended_at);
-    const ev = events.find((e) => e.date === a.date && e.start_time && e.end_time && e.start_time.slice(0, 5) <= b.time && e.end_time.slice(0, 5) >= a.time && (e.place || e.title));
-    if (ev) { const nm = (ev.place || ev.title) as string; named.set(norm(nm), { name: nm, date: ev.date }); }
-  }
-  if (named.size === 1) { const v = Array.from(named.values())[0]; return { name: v.name, reason: `Your calendar has "${v.name}" at this time on ${nice(v.date)}` }; }
-  // 2. A receipt dated on a visit day. A receipt carries a date, not a time, so it can name a place only when (a) the map's name for the spot shares
-  //    a word with the merchant (both agree), or (b) you were at no more than two spots that day and only one merchant has a receipt.
-  //    Without that, a receipt would name every place visited that day (a day at 14 spots would offer the same name 14 times).
-  const dayReceipts = receipts.filter((r) => r.merchant && visitDays.includes(r.date));
-  const mapNames = stops.map((s) => mapName(s.address)).filter((x): x is string => !!x);
-  const words = (t: string) => norm(t).split(" ").filter((w) => w.length >= 4 && !GENERIC.has(w));
-  const strong = dayReceipts.filter((r) => mapNames.some((m) => words(m).some((w) => words(r.merchant as string).includes(w))));
-  const strongNames = new Map<string, { name: string; date: string }>();
-  for (const r of strong) strongNames.set(norm(r.merchant), { name: r.merchant as string, date: r.date });
-  if (strongNames.size === 1) { const v = Array.from(strongNames.values())[0]; return { name: v.name, reason: `A ${v.name} receipt is dated ${nice(v.date)}, and the map lists this spot under a matching name` }; }
-  const byMerchant = new Map<string, { name: string; date: string }>();
-  for (const r of dayReceipts) byMerchant.set(norm(r.merchant), { name: r.merchant as string, date: r.date });
-  if (byMerchant.size === 1 && visitDays.every((d) => (spots.get(d) ?? 1) <= 2)) { const v = Array.from(byMerchant.values())[0]; return { name: v.name, reason: `A ${v.name} receipt is dated ${nice(v.date)}, and you were at ${(spots.get(localParts(stops[0].started_at).date) ?? 1) === 1 ? "only this spot" : "two spots"} that day` }; }
-  // 3. Home is only offered, with its reason, when you stay overnight here more than once.
-  if (stops.filter(isOvernight).length >= 2) return { name: "Home", reason: "You stay here overnight" };
-  // 4. Lowest priority: the business or landmark OpenStreetMap lists at this spot (already in the stored address). A neighbour could be the real stop, so the reason says so.
-  const names = new Map<string, { name: string; n: number }>();
-  for (const s of stops) { const m = mapName(s.address); if (m) { const k = norm(m); names.set(k, { name: m, n: (names.get(k)?.n ?? 0) + 1 }); } }
-  const top = Array.from(names.values()).sort((a, b) => b.n - a.n)[0];
-  if (top) return { name: top.name, reason: `OpenStreetMap lists "${top.name}" at this spot. A business next door could be the real stop.` };
-  return null;
+// ---------- names ----------
+// Words that never decide a match on their own.
+const GENERIC = new Set(["store", "stores", "shop", "service", "services", "company", "the", "inc", "llc", "corp", "market", "center", "centre", "group", "express", "restaurant", "cafe", "grill", "bar", "station", "supply", "outlet", "mart", "super", "supercenter", "neighborhood", "wholesale", "fresh"]);
+const LODGING = /\b(hotel|inn|suites|resort|motel|lodge|hostel|airbnb|vacation rental)\b/i;
+
+// "Panda Express #0539" and "The Home Depot, Inc." reduce to a comparable form; "Wal-Mart" and "Walmart" meet in the compact form.
+export function normName(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/[’']/g, "").replace(/#\s*\d+/g, " ").replace(/\b(inc|llc|ltd|co|corp|corporation|company)\b\.?/g, " ").replace(/\bthe\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+const compact = (s: string) => s.replace(/\s+/g, "");
+const distinctive = (s: string) => normName(s).split(" ").filter((w) => w.length >= 4 && !GENERIC.has(w));
+
+// Do a receipt's merchant and the map's name for a spot refer to the same business? Loose on form, strict on the distinctive word.
+export function sameBusiness(merchant: string | null | undefined, mapNameText: string | null | undefined): boolean {
+  const a = normName(merchant), b = normName(mapNameText);
+  if (!a || !b) return false;
+  const ca = compact(a), cb = compact(b);
+  if (ca === cb) return true;                                                          // exact once punctuation and spacing are ignored (short names too)
+  if (ca.length >= 5 && cb.length >= 5 && (ca.includes(cb) || cb.includes(ca))) return true;   // "Home Depot" within "Home Depot Orem"
+  const da = distinctive(merchant ?? ""), db = distinctive(mapNameText ?? "");
+  return da.length > 0 && db.length > 0 && da[0] === db[0];                            // the same lead word ("Taco Bell" is not "Bell Tower Park")
 }
 
 // The business or landmark name at the front of a stored address ("Peet's Coffee, 123 Main St, Orem"), or null when the address starts with a house number or is only a street.
@@ -97,18 +92,53 @@ export function mapName(address: string | null | undefined): string | null {
   if (!first || /^\d/.test(first) || STREET_WORDS.test(first) || first.length > 60) return null;
   return first;
 }
+// A short place qualifier from a stored address ("Peet's Coffee, 800 N State St, Orem" gives "Orem"), else the street.
+export function cityOf(address: string | null | undefined): string | null {
+  const parts = (address ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 3 && parts[parts.length - 1].length <= 30 && !/\d/.test(parts[parts.length - 1])) return parts[parts.length - 1];
+  const street = parts.find((p) => /^\d/.test(p));
+  return street ? street.slice(0, 30) : null;
+}
 
-export function buildCandidates(stops: Stop[], receipts: Receipt[], events: Event[]): Candidate[] {
-  const groups = groupStops(stops);
-  // How many different spots you were at on each day (a receipt can name one of them, not all).
-  const spots = new Map<string, number>();
-  for (const g of groups) for (const d of new Set(g.stops.map((s) => localParts(s.started_at).date))) spots.set(d, (spots.get(d) ?? 0) + 1);
-  return groups.map((g) => {
+// A name for a place, only when the evidence points to exactly one. Never fills anything in by itself.
+// Order: calendar, then the map's name (a receipt that agrees is mentioned, never needed or used alone), then Home.
+export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[], opts: { named?: Named[]; hasHome?: boolean; lat?: number; lon?: number } = {}): Suggestion | null {
+  const visitDays = Array.from(new Set(stops.map((s) => localParts(s.started_at).date)));
+  // 1. A calendar event that overlaps the visit names the place (its location, else its title) when every visit with an event agrees.
+  const named = new Map<string, { name: string; date: string }>();
+  for (const s of stops) {
+    const a = localParts(s.started_at), b = localParts(s.ended_at);
+    const ev = events.find((e) => e.date === a.date && e.start_time && e.end_time && e.start_time.slice(0, 5) <= b.time && e.end_time.slice(0, 5) >= a.time && (e.place || e.title));
+    if (ev) { const nm = (ev.place || ev.title) as string; named.set(normName(nm), { name: nm, date: ev.date }); }
+  }
+  if (named.size === 1) { const v = Array.from(named.values())[0]; return { name: v.name, reason: `Your calendar has "${v.name}" at this time on ${nice(v.date)}` }; }
+  // 2. The map's name for the spot (already in the stored address), the one most of the visits agree on. A receipt dated on a visit day that matches it is added to the reason.
+  const names = new Map<string, { name: string; n: number }>();
+  for (const s of stops) { const m = mapName(s.address); if (m) { const k = normName(m); names.set(k, { name: m, n: (names.get(k)?.n ?? 0) + 1 }); } }
+  const top = Array.from(names.values()).sort((a, b) => b.n - a.n)[0];
+  if (top) {
+    const rc = receipts.find((r) => r.merchant && visitDays.includes(r.date) && sameBusiness(r.merchant, top.name));
+    let name = top.name;
+    // Another named place already has this name somewhere else: add the city so the two stay separate places.
+    const clash = (opts.named ?? []).some((p) => normName(p.name) === normName(name) && (p.lat == null || p.lon == null || opts.lat == null || opts.lon == null || distM(p.lat, p.lon, opts.lat, opts.lon) > SAME_NAME_FAR_M));
+    if (clash) { const c = cityOf(stops.find((s) => mapName(s.address) === top.name)?.address); if (c) name = `${name} (${c})`; }
+    const base = `OpenStreetMap lists "${top.name}" at this spot. A business next door could be the real stop.`;
+    return { name, reason: rc ? `A ${rc.merchant} receipt is dated ${nice(rc.date)}, a day you were here, and the map lists this spot under a matching name.` : base };
+  }
+  // 3. Home: only when no place is called Home yet, you stayed overnight here on three or more nights, and the spot is not a hotel, inn or rental.
+  const lodging = stops.some((s) => LODGING.test(s.address ?? ""));
+  if (!opts.hasHome && !lodging && new Set(stops.flatMap(nightsOf)).size >= HOME_MIN_NIGHTS) return { name: "Home", reason: "You stay here overnight" };
+  return null;
+}
+
+export function buildCandidates(stops: Stop[], receipts: Receipt[], events: Event[], named: Named[] = []): Candidate[] {
+  const hasHome = named.some((p) => normName(p.name) === "home");
+  return groupStops(stops).map((g) => {
     const addr = new Map<string, number>();
     for (const s of g.stops) if (s.address) addr.set(s.address, (addr.get(s.address) ?? 0) + 1);
     const address = Array.from(addr.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
     const last = g.stops.map((s) => s.ended_at).sort().pop() as string;
-    return { key: g.stops[0].id, ids: g.stops.map((s) => s.id), lat: g.lat, lon: g.lon, address, visits: g.stops.length, minutes: Math.round(g.stops.reduce((t, s) => t + mins(s.started_at, s.ended_at), 0)), lastAt: last, when: whenText(g.stops), suggestion: suggestName(g.stops, receipts, events, spots) };
+    return { key: g.stops[0].id, ids: g.stops.map((s) => s.id), lat: g.lat, lon: g.lon, address, visits: g.stops.length, minutes: Math.round(g.stops.reduce((t, s) => t + mins(s.started_at, s.ended_at), 0)), lastAt: last, when: whenText(g.stops), suggestion: suggestName(g.stops, receipts, events, { named, hasHome, lat: g.lat, lon: g.lon }) };
   }).sort((a, b) => b.visits - a.visits || b.minutes - a.minutes);
 }
 
