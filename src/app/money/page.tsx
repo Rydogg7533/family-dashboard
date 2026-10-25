@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section, OpenIn, SyncLine, Bar, ProofDot } from "@/components/money";
+import { getRoutine } from "@/lib/data-money-routine";
 import { getAccounts, getTransactions, getReceipts, getReconciliations, getRecurring, getCategorySpend, getSpendingMonitor, getProofs, buildNeedsMe, money, shortDate, daysUntil, accountLabel, proofState } from "@/lib/data-money";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 export default async function Money() {
   const [accounts, tx, receipts, recs, recurring, cats, monitor, proofs] = await Promise.all([getAccounts(), getTransactions(), getReceipts(), getReconciliations(), getRecurring(), getCategorySpend(), getSpendingMonitor(), getProofs()]);
   const needs = buildNeedsMe(tx, receipts, recs, recurring, accounts);
+  const routine = await getRoutine();
+  const routineOverdue = routine?.items.filter((i) => i.overdue).length ?? 0;
   const top = needs.slice(0, 5);
   const spent = cats.reduce((n, c) => n + c.spent, 0), typical = cats.reduce((n, c) => n + c.typical, 0);
   const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings" || a.kind === "business").reduce((n, a) => n + (a.balance_current ?? 0), 0);
@@ -25,6 +28,12 @@ export default async function Money() {
       <H1 right={<SyncLine at={synced} />}>Money</H1>
 
       <Section title="Needs me" right={needs.length ? `${needs.length} open` : "all good"}>
+        {routine && routine.total > 0 && (
+          <Link href="/money/routine" className="card flex justify-between items-center gap-2 mb-2">
+            <div><div className="text-[11px] font-bold tracking-wide text-accent">MONTHLY ROUTINE</div><div className="font-semibold text-sm">{routine.label}: {routine.done} of {routine.total} done</div>{routineOverdue > 0 && <div className="text-xs text-amber font-semibold">{routineOverdue} overdue</div>}</div>
+            <span className="text-muted" aria-hidden>›</span>
+          </Link>
+        )}
         {top.length === 0 ? <div className="card text-muted">Nothing needs you. Every charge has a receipt or an explanation.</div> : (
           <div className="flex flex-col gap-2">
             {top.map((n) => (
