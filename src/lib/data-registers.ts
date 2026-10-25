@@ -185,8 +185,8 @@ async function table<T>(name: string, sample: T[], filter?: (q: any) => any): Pr
     let q = sb.from(name).select("*");
     if (filter) q = filter(q);
     const { data } = await q;
-    return data && data.length ? (data as T[]) : sample;
-  } catch { return sample; }
+    return (data ?? []) as T[]; // live mode: an empty table is empty, never the sample
+  } catch { return []; }
 }
 
 // The household's people. Real mode reads profiles (parents first); each gets a short id from the first name ("Ryan" -> "ryan", a second "Sam" -> "sam-2")
@@ -244,7 +244,7 @@ export async function getVehicles(): Promise<Vehicle[]> {
 }
 export async function getDevices(): Promise<Device[]> {
   const rows = await table<Device>("devices", sampleDevices);
-  if (!hasSupabaseEnv() || rows === sampleDevices) return rows;
+  if (!hasSupabaseEnv()) return rows;
   const people = await getPeople(); // real rows carry the profile uuid (null = household); the pages use the short ids
   return rows.map((d) => { const u = d.person as unknown as string | null; return { ...d, person: u ? people.find((p) => p.uuid === u)?.id ?? u : "household" } as Device; });
 }
