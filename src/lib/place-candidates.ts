@@ -10,6 +10,8 @@ const TZ = "America/Denver";
 export type Stop = { id: string; started_at: string; ended_at: string; lat: number; lon: number; address: string | null };
 export type Receipt = { merchant: string | null; date: string };
 export type Event = { date: string; start_time: string | null; end_time: string | null; title: string | null; place: string | null };
+// The few GEvent fields the place rules need (src/lib/google-calendar.ts is server-only, so this stays a plain structural type).
+export type CalEvent = { title: string; location: string | null; allDay: boolean; date: string; endDate: string; start: string | null; end: string | null; attendees: { email: string; status: string | null }[] };
 export type Named = { name: string; lat: number | null; lon: number | null };
 // A contact's address as coordinates. validUntil set = an older address of that contact (kept so old visits still match).
 export type ContactSpot = { cardId: string; name: string; lastName: string | null; org: string | null; label: string | null; lat: number; lon: number; address: string; validUntil: string | null };
@@ -121,10 +123,33 @@ export function contactSuggestion(stops: Stop[], contacts: ContactSpot[], lat: n
   return null;
 }
 
+// Google events to the shape suggestName reads. Only timed, single-day events that could name a place: an event you declined, an online meeting
+// or a bare "Call"/"Focus time" with no location says nothing about where you were. A location that is just a street address is skipped as a name
+// (the title is used instead).
+const ONLINE = /(https?:\/\/|zoom|meet\.google|teams\.microsoft|webex|phone|call me|online|virtual)/i;
+const NOISE_TITLE = /^(call|calls|zoom|meeting|focus( time)?|busy|block|hold|reminder|birthday|travel|flight|out of office|ooo|lunch|dinner|breakfast)\b/i;
+export function eventsForPlaces(list: CalEvent[], selfEmail?: string): Event[] {
+  const me = (selfEmail ?? "").toLowerCase();
+  const out: Event[] = [];
+  for (const e of list) {
+    if (e.allDay || !e.start || !e.end || e.date !== e.endDate) continue;
+    if (me && e.attendees.some((a) => a.email.toLowerCase() === me && a.status === "declined")) continue;
+    const loc = (e.location ?? "").trim(), title = (e.title ?? "").trim();
+    if (ONLINE.test(loc) || ONLINE.test(title)) continue;
+    const venue = loc && !/^\d/.test(loc) ? loc.split(",")[0].trim() : "";
+    if (!venue && (!title || NOISE_TITLE.test(title))) continue;
+    out.push({ date: e.date, start_time: e.start, end_time: e.end, title: title || null, place: venue || null });
+  }
+  return out;
+}
+
 // A name for a place, only when the evidence points to exactly one. Never fills anything in by itself.
 // Order: calendar, then the map's name (a receipt that agrees is mentioned, never needed or used alone), then Home.
 export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[], opts: { named?: Named[]; hasHome?: boolean; lat?: number; lon?: number; contacts?: ContactSpot[] } = {}): Suggestion | null {
   const visitDays = Array.from(new Set(stops.map((s) => localParts(s.started_at).date)));
+  const names = new Map<string, { name: string; n: number }>();
+  for (const s of stops) { const m = mapName(s.address); if (m) { const k = normName(m); names.set(k, { name: m, n: (names.get(k)?.n ?? 0) + 1 }); } }
+  const top = Array.from(names.values()).sort((a, b) => b.n - a.n)[0];
   // 1. A calendar event that overlaps the visit names the place (its location, else its title) when every visit with an event agrees.
   const named = new Map<string, { name: string; date: string }>();
   for (const s of stops) {
@@ -132,13 +157,12 @@ export function suggestName(stops: Stop[], receipts: Receipt[], events: Event[],
     const ev = events.find((e) => e.date === a.date && e.start_time && e.end_time && e.start_time.slice(0, 5) <= b.time && e.end_time.slice(0, 5) >= a.time && (e.place || e.title));
     if (ev) { const nm = (ev.place || ev.title) as string; named.set(normName(nm), { name: nm, date: ev.date }); }
   }
-  if (named.size === 1) { const v = Array.from(named.values())[0]; return { name: v.name, reason: `Your calendar has "${v.name}" at this time on ${nice(v.date)}` }; }
+  // A calendar name is dropped when the map names a business at this spot that is not the event: the plan and what happened differ, which is for the day comparison to show, not for a place name.
+  const v1 = named.size === 1 ? Array.from(named.values())[0] : null;
+  if (v1 && !(top && !sameBusiness(v1.name, top.name))) { const v = v1; return { name: v.name, reason: `Your calendar has "${v.name}" at this time on ${nice(v.date)}` }; }
   // 2. A contact's address at this spot: more specific than the map's nearest-feature guess, so it ranks first of the two.
   if (opts.contacts?.length && opts.lat != null && opts.lon != null) { const c = contactSuggestion(stops, opts.contacts, opts.lat, opts.lon); if (c) return c; }
   // 3. The map's name for the spot (already in the stored address), the one most of the visits agree on. A receipt dated on a visit day that matches it is added to the reason.
-  const names = new Map<string, { name: string; n: number }>();
-  for (const s of stops) { const m = mapName(s.address); if (m) { const k = normName(m); names.set(k, { name: m, n: (names.get(k)?.n ?? 0) + 1 }); } }
-  const top = Array.from(names.values()).sort((a, b) => b.n - a.n)[0];
   if (top) {
     const rc = receipts.find((r) => r.merchant && visitDays.includes(r.date) && sameBusiness(r.merchant, top.name));
     let name = top.name;

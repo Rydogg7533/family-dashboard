@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCandidates, groupStops, suggestName, checkPlaceName, mapName, normName, sameBusiness, cityOf, contactSuggestion } from "../src/lib/place-candidates.ts";
+import { buildCandidates, groupStops, suggestName, checkPlaceName, mapName, normName, sameBusiness, cityOf, contactSuggestion, eventsForPlaces } from "../src/lib/place-candidates.ts";
 // Denver is UTC-6 in October (MDT). 2026-10-22 18:00Z = 12:00 local.
 const mk = (id, startZ, mins, lat = 40.2969, lon = -111.6946, address = null) => ({ id, started_at: startZ, ended_at: new Date(Date.parse(startZ) + mins * 60000).toISOString(), lat, lon, address });
 const a = mk("a", "2026-10-22T18:00:00Z", 30, 40.2969, -111.6946, "800 N State St, Orem");
@@ -34,7 +34,8 @@ assert.equal(r2.name, "The Home Depot"); assert.match(r2.reason, /OpenStreetMap/
 
 // Calendar wins.
 const ev = [{ date: "2026-10-22", start_time: "11:30:00", end_time: "12:45:00", title: "Dentist", place: null }];
-assert.equal(suggestName([hd], [], ev).name, "Dentist");
+assert.equal(suggestName([a], [], ev).name, "Dentist");                                    // street-only spot: the calendar names it
+assert.match(suggestName([hd], [], ev).reason, /OpenStreetMap/);                          // the map says Home Depot, the plan said Dentist: the calendar does not name it
 
 // Home: needs 3 overnight stays, no existing Home, and not a hotel.
 const n = (i) => mk("n" + i, `2026-10-${20 + i}T06:00:00Z`, 600);   // 00:00-10:00 local, covers 3 am
@@ -88,4 +89,19 @@ const pe2 = { ...pe, lat: 40.2000, lon: -111.6000 };
 assert.equal(suggestName([pe2], [], [], { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Sarah Smith's home");
 const ev2 = [{ date: "2026-10-22", start_time: "11:30:00", end_time: "12:45:00", title: "Dentist", place: null }];
 assert.equal(suggestName([house], [], ev2, { contacts: [sarah], lat: 40.2000, lon: -111.6000 }).name, "Dentist");
+const ev3 = [{ date: "2026-10-22", start_time: "11:30", end_time: "12:45", title: "Lunch", place: "Home Depot" }];
+assert.equal(suggestName([hd], [], ev3).name, "Home Depot");                                // plan and map agree
+
+// Google events to the shape the rules read.
+const g = (o) => ({ title: "Dentist", location: null, allDay: false, date: "2026-10-22", endDate: "2026-10-22", start: "14:00", end: "15:00", attendees: [], ...o });
+assert.equal(eventsForPlaces([g({})]).length, 1);
+assert.equal(eventsForPlaces([g({ allDay: true })]).length, 0);
+assert.equal(eventsForPlaces([g({ endDate: "2026-10-24" })]).length, 0);                                    // multi-day (a trip)
+assert.equal(eventsForPlaces([g({ title: "Focus time" })]).length, 0);
+assert.equal(eventsForPlaces([g({ title: "Standup", location: "https://zoom.us/j/1" })]).length, 0);
+assert.equal(eventsForPlaces([g({ title: "Call with Sam" })]).length, 0);
+assert.equal(eventsForPlaces([g({ attendees: [{ email: "me@x.com", status: "declined" }] })], "me@x.com").length, 0);
+assert.equal(eventsForPlaces([g({ attendees: [{ email: "me@x.com", status: "accepted" }] })], "me@x.com").length, 1);
+assert.equal(eventsForPlaces([g({ title: "Soccer", location: "Orem Rec Center, 500 N State St" })])[0].place, "Orem Rec Center");
+assert.equal(eventsForPlaces([g({ title: "Soccer", location: "500 N State St, Orem" })])[0].place, null);   // an address is not a name; the title is used
 console.log("place-candidates-test ok");
