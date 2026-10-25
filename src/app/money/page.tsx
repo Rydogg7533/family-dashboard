@@ -49,7 +49,7 @@ export default async function Money() {
       <Section title="Needs me" right={needsMe.length ? `${needsMe.length} open` : "all good"}>
         {routine && routine.total > 0 && (
           <Link href="/money/routine" className="card flex justify-between items-center gap-2 mb-2">
-            <div><div className="text-[11px] font-bold tracking-wide text-accent">MONTHLY ROUTINE</div><div className="font-semibold text-sm">{routine.label}: {routine.done} of {routine.total} done</div>{routineOverdue > 0 && <div className="text-xs text-amber font-semibold">{routineOverdue} overdue</div>}</div>
+            <div><div className="text-[11px] font-bold tracking-wide text-accent">MONTHLY ROUTINE</div><div className="font-semibold text-sm">{routine.label}: {routine.complete ? "closed" : `${routine.done} of ${routine.total} done`}</div>{routine.gate && !routine.gate.ok && <div className="text-xs text-amber font-semibold">Tiller: {routine.gate.good} of {routine.gate.total} accounts good</div>}{routineOverdue > 0 && <div className="text-xs text-amber font-semibold">{routineOverdue} overdue</div>}</div>
             <span className="text-muted" aria-hidden>›</span>
           </Link>
         )}

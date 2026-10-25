@@ -2,22 +2,27 @@
 // this period and, when it is not, a short line saying what the app still sees. Rules only ever CLOSE an open step; a person's Done
 // or Skip is never overwritten, and a step that becomes unmet again later stays done for that month.
 import type { createClient } from "@/lib/supabase/server";
+import { getTillerHealth } from "@/lib/data-tiller-health";
+import type { TillerHealth } from "@/lib/tiller-health";
 import { AMAZON_INVOICES_KEY, AMAZON_INVOICE_DEFAULT, checkAmazonInvoiceSetting } from "@/lib/amazon-invoice-setting";
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
 export type Evidence = { met: boolean; line: string };           // line: what the app sees, in plain words
 const DAY = 86400_000;
-const todayDenver = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(new Date());
 const daysAgoIso = (n: number) => new Date(Date.now() - n * DAY).toISOString();
-const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY);
 
-async function tillerFill(sb: Sb): Promise<Evidence> {
-  const { data } = await sb.from("transactions").select("date").order("date", { ascending: false }).limit(1);
-  const newest = data?.[0]?.date as string | undefined;
-  if (!newest) return { met: false, line: "no charges loaded yet" };
-  const age = daysBetween(newest, todayDenver());
-  return age <= 7 ? { met: true, line: `newest charge ${newest}` } : { met: false, line: `the app still sees ${newest} as the newest charge (${age} days old)` };
+// The Tiller step is met only when EVERY Tiller-fed account has delivered its charges (see tiller-health.ts); one healthy account no longer hides a dead one.
+function healthEvidence(h: TillerHealth): Evidence {
+  if (h.ok) return { met: true, line: `${h.good} of ${h.total} Tiller accounts delivered their charges` };
+  const bad = h.failing.map((f) => f.label).join(", ");
+  const parts = [h.failing.length ? `${h.good} of ${h.total} accounts good; check ${bad}` : null, h.syncLine].filter(Boolean);
+  return { met: false, line: parts.join(". ") || "no Tiller accounts to check" };
 }
+async function tillerFill(sb: Sb, period: string, gate?: TillerHealth | null): Promise<Evidence> {
+  return healthEvidence(gate ?? await getTillerHealth(sb, period));
+}
+// Steps that only make sense once every charge is in. While the Tiller check fails they cannot be proven (or marked) done.
+export const NEEDS_COMPLETE_CHARGES = ["charges:unmatched", "transfers:confirm"];
 async function amazonInvoices(sb: Sb): Promise<Evidence> {
   const { data: s } = await sb.from("household_settings").select("value").eq("key", AMAZON_INVOICES_KEY).maybeSingle();
   const min = (checkAmazonInvoiceSetting(s?.value) ?? AMAZON_INVOICE_DEFAULT).ask_min_amount;
@@ -67,8 +72,9 @@ async function statement(sb: Sb, period: string, last4: string | null, accountId
 }
 
 // null = the app cannot prove this step yet (manual only).
-export async function evidenceFor(sb: Sb, key: string, period: string, accountLast4: string | null, accountId: string | null = null): Promise<Evidence | null> {
-  if (key === "tiller:fill") return tillerFill(sb);
+export async function evidenceFor(sb: Sb, key: string, period: string, accountLast4: string | null, accountId: string | null = null, gate: TillerHealth | null = null): Promise<Evidence | null> {
+  if (key === "tiller:fill") return tillerFill(sb, period, gate);
+  if (gate && !gate.ok && NEEDS_COMPLETE_CHARGES.includes(key)) return { met: false, line: `waiting on the Tiller check (${gate.good} of ${gate.total} accounts good)` };
   if (key === "amazon:invoices") return amazonInvoices(sb);
   if (key === "inbox:answer") return inboxAnswer(sb);
   if (key === "charges:unmatched") return chargesUnmatched(sb);
