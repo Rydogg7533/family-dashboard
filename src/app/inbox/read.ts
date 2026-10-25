@@ -2,7 +2,8 @@
 // Reads a stored capture once, right after upload: what is it, who from, how much, what for, and a proposed filename.
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { findSameReceipt } from "@/lib/receipt-match";
+import { findSameReceipt, findNearReceipt } from "@/lib/receipt-match";
+import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
@@ -86,7 +87,9 @@ export async function readCapture(inboxId: string) {
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
     const dup = await findSameReceipt(sb, String(parsed.vendor), parsed.amount as number, String(parsed.date));
     if (dup) parsed.same_receipt = { id: dup.id, merchant: dup.merchant };
-    plan.push({ t: "link", text: dup ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
+    const near = dup ? null : await findNearReceipt(sb, String(parsed.vendor), parsed.amount as number, String(parsed.date));
+    if (near) parsed.near_receipt = { id: near.id, merchant: near.merchant, amount: Number(near.amount), date: String(near.date) };
+    plan.push({ t: "link", text: dup ? `Money › Receipts: already there; this file will be linked to it, not added twice` : near ? `Money › Receipts: may be the same purchase as ${near.merchant} $${Number(near.amount).toFixed(2)} on ${near.date}; you choose whether to attach it there or file it separately` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
   }
   if (vehicle) {
     plan.push({ t: "link", text: `${vehicle.short} service history: ${parsed.item ?? "service"}` });
@@ -105,6 +108,7 @@ export async function readCapture(inboxId: string) {
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
     if (needsVehicle && !parsed.for_vehicle_hint) { update.missing = `${summary} Which vehicle is it for?`; update.options = vNames.length ? [...vNames, "Something else"] : ["Something else"]; }
+    else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string }; update.missing = `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }
   await sb.from("inbox_items").update(update).eq("id", inboxId);

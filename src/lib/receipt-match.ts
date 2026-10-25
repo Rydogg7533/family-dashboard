@@ -49,3 +49,18 @@ export async function attachDocument(sb: { from: (t: string) => any }, receiptId
   if (cur.some((d) => d.inbox_id === doc.inbox_id)) return;
   await sb.from("receipts").update({ documents: [...cur, { ...doc, added_at: new Date().toISOString() }] }).eq("id", receiptId);
 }
+
+const DAY = 86400_000;
+const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+// Amounts count as close when within 25% (a pre-tip photo against the final total) or $1, whichever is larger. Claude's inference; tune from the asked/accepted counts.
+export const amountsClose = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.25 * Math.max(a, b));
+
+// A likely repeat that is not exact: same normalized vendor, date within one day, amount close. Never decided silently; the person is asked.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function findNearReceipt(sb: { from: (t: string) => any }, vendor: string, amount: number, date: string): Promise<SameRow | null> {
+  const key = normalizeVendor(vendor);
+  const t = Date.parse(`${date}T00:00:00Z`);
+  if (!key || Number.isNaN(t)) return null;
+  const { data } = await sb.from("receipts").select("*").gte("date", iso(t - DAY)).lte("date", iso(t + DAY)).is("duplicate_of", null).order("created_at", { ascending: true }).limit(40);
+  return ((data ?? []) as SameRow[]).find((x) => normalizeVendor(x.merchant) === key && !(x.date === date && Number(x.amount) === amount) && amountsClose(Number(x.amount), amount)) ?? null;
+}

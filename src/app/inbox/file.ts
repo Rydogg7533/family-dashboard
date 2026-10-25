@@ -5,7 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
-import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
 import { findSameReceipt, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
@@ -36,7 +36,12 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
   if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
-    const same = await findSameReceipt(sb, String(r.vendor), r.amount, String(r.date));
+    // Exact matches link silently. A near match waits for the person's answer: same purchase, or a different one.
+    let same = answer === FILE_DIFFERENT ? null : await findSameReceipt(sb, String(r.vendor), r.amount, String(r.date));
+    if (!same && answer === FILE_SAME) {
+      const nid = (r as { near_receipt?: { id?: string } }).near_receipt?.id;
+      if (nid) same = ((await sb.from("receipts").select("*").eq("id", nid).is("duplicate_of", null).maybeSingle()).data as typeof same) ?? null;
+    }
     if (same) {
       // Same purchase already filed: keep that row (first wins), fill only its empty fields, link this document to it.
       const patch = blanksToFill(same, { file_path: row.file_path, captured_by: who });
