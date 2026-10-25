@@ -1,0 +1,21 @@
+// Needs Node 22.18+. Offline.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { destination, folderWarnings, prettyFolder, copyState, isFiledByCard, HOLD_DAYS } from "../src/lib/destination.ts";
+assert.equal(HOLD_DAYS, Number(/export const HOLD_DAYS = (\d+)/.exec(readFileSync(new URL("./filing-agent.mjs", import.meta.url), "utf8"))[1]));
+assert.equal(prettyFolder("Organized/Personal/Documents/Finance/2026/Receipts/"), "Finance / 2026 / Receipts");
+assert.equal(prettyFolder("Organized/Personal/Documents/Vehicles/Tahoe/2026/x.pdf"), "Vehicles / Tahoe / 2026");
+const rc = { kind: "receipt", vendor: "Costco", amount: 86.4, date: "2026-10-20", home: "Organized/Personal/Documents/Finance/2026/Receipts/", confidence: 0.9 };
+assert.ok(isFiledByCard(rc));
+assert.match(destination(rc).text, /^Finance \/ 2026 \/ \[the card that paid\] \/ 2026-10\./);
+assert.match(destination({ ...rc, card_last4: "4417", card_brand: "Visa" }).text, /Finance \/ 2026 \/ Visa 4417 \/ 2026-10\. The card is only on the paper/);
+assert.equal(destination({ kind: "bill", vendor: null, amount: null, home: "Organized/Personal/Documents/Home/2026/" }).text, "Home / 2026");
+assert.equal(destination({ error: "x" }), null);
+assert.deepEqual(folderWarnings(rc), []);
+assert.deepEqual(folderWarnings({ ...rc, confidence: 0.6, date: null }), ["I am only 60% sure of this read.", "No date on the paper, so it is filed under this year."]);
+assert.deepEqual(folderWarnings({ kind: "bill", vendor: null, amount: null, date: "2026-01-01", home: "x" }), ["No vendor found, so the folder is a guess."]);
+assert.equal(copyState({ copied_path: "Organized/Personal/Documents/Finance/2026/Visa 4417/2026-10/a.pdf", is_receipt: true }), "Copied to Finance / 2026 / Visa 4417 / 2026-10");
+assert.equal(copyState({ is_receipt: true, receipt_card: null }), "Waiting for a card before it is copied");
+assert.equal(copyState({ is_receipt: true, receipt_card: "Visa 4417" }), "Kept in the app; the Mac mini copy is pending");
+assert.match(copyState({ copy_error: "disk full", is_receipt: false }), /^Copy failed: disk full/);
+console.log("destination: all checks passed");

@@ -1,6 +1,9 @@
 // Inbox (ongoing ingestion, F2 bulk drops, F4 unplaced Ask threads): items that need a person to identify,
 // file or decide. Each item asks exactly what is missing and stays until resolved; nothing expires.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { copyState, isFiledByCard, type DestRead } from "@/lib/destination";
+import { normalizeVendor } from "@/lib/receipt-match";
+import { suggestCard, suggestionReason, CASH, type CardHistory } from "@/lib/paid-with";
 
 export type InboxItem = {
   id: string;
@@ -22,7 +25,7 @@ export type InboxItem = {
   file_path?: string | null;   // stored capture (private bucket)
   read_at?: string | null;     // set once the file has been read
   suggested_name?: string | null;
-  read_result?: { home?: string; plan?: ({ t: "file" | "link"; text: string } | string)[]; claim_plan?: string } | null;
+  read_result?: { vendor?: string | null; kind?: string; paid_with?: { value?: string; skipped?: boolean }; home?: string; plan?: ({ t: "file" | "link"; text: string } | string)[]; claim_plan?: string } | null;
 };
 
 const now = Date.now();
@@ -49,13 +52,44 @@ export async function getInboxItems(): Promise<InboxItem[]> {
 
 export const FRESH_MS = 3 * 60_000;
 
+// "Paid with" on open receipt cards: the cards the household uses, and a suggestion only when this person's last three receipts
+// from the same vendor agree on one card. It pre-fills a choice; the person still taps.
+export type PaidWithContext = { known: string[]; suggestions: Record<string, { card: string; reason: string }> };
+export async function getPaidWithContext(items: InboxItem[]): Promise<PaidWithContext> {
+  if (!hasSupabaseEnv()) return { known: ["Cash"], suggestions: {} };
+  const sb = await createClient();
+  const [{ data: rc }, { data: accts }] = await Promise.all([
+    sb.from("receipts").select("merchant,card,uploaded_by,created_at").not("card", "is", null).order("created_at", { ascending: false }).limit(800),
+    sb.from("accounts").select("institution,last4,kind,retired_at"),
+  ]);
+  const history: CardHistory[] = (rc ?? []).map((r) => ({ card: r.card as string, person: (r.uploaded_by as string | null) ?? null, vendorKey: normalizeVendor(r.merchant as string), at: String(r.created_at) }));
+  const known = Array.from(new Set([...(accts ?? []).filter((a) => !a.retired_at && a.kind !== "checking" && a.kind !== "savings").map((a) => `${a.institution} ${a.last4}`), ...history.map((h) => h.card).filter((c): c is string => !!c && c !== CASH), CASH]));
+  const suggestions: PaidWithContext["suggestions"] = {};
+  for (const it of items) {
+    const rr = it.read_result as DestRead | null;
+    if (!isFiledByCard(rr)) continue;
+    const s = suggestCard(history, normalizeVendor(rr?.vendor), it.created_by ?? null);
+    if (s) suggestions[it.id] = { card: s.card, reason: suggestionReason(s, String(rr?.vendor)) };
+  }
+  return { known, suggestions };
+}
+
 // Decided: items answered in the last 30 days, newest first, as one line each. They stay on record; this is only the view.
-export type DecidedItem = { id: string; title: string; resolution: string | null; resolved_at: string | null; resolved_by: string | null; filed: Record<string, unknown> | null; file_path: string | null; kind: string | null };
+export type DecidedItem = { id: string; title: string; resolution: string | null; resolved_at: string | null; resolved_by: string | null; filed: Record<string, unknown> | null; file_path: string | null; kind: string | null; folder_note: string | null };
 export async function getDecidedItems(days = 30): Promise<DecidedItem[]> {
   if (!hasSupabaseEnv()) return [];
   const sb = await createClient();
-  const { data } = await sb.from("inbox_items").select("id,title,resolution,resolved_at,resolved_by,filed,file_path,read_result").eq("status", "resolved").gte("resolved_at", new Date(Date.now() - days * 86_400_000).toISOString()).order("resolved_at", { ascending: false }).limit(300);
-  return (data ?? []).map((r) => ({ id: r.id, title: r.title, resolution: r.resolution, resolved_at: r.resolved_at, resolved_by: r.resolved_by, filed: r.filed, file_path: r.file_path, kind: (r.read_result as { kind?: string } | null)?.kind ?? null }));
+  const { data } = await sb.from("inbox_items").select("id,title,resolution,resolved_at,resolved_by,filed,file_path,read_result,copied_path,copy_error").eq("status", "resolved").gte("resolved_at", new Date(Date.now() - days * 86_400_000).toISOString()).order("resolved_at", { ascending: false }).limit(300);
+  const rows = data ?? [];
+  const rids = rows.map((r) => (r.filed as { receipt_id?: string } | null)?.receipt_id).filter((x): x is string => !!x);
+  const { data: rcs } = rids.length ? await sb.from("receipts").select("id,card").in("id", rids) : { data: [] as { id: string; card: string | null }[] };
+  const cardOf = new Map((rcs ?? []).map((r) => [r.id as string, r.card as string | null]));
+  return rows.map((r) => {
+    const rid = (r.filed as { receipt_id?: string } | null)?.receipt_id;
+    const isStatement = (r.read_result as { kind?: string } | null)?.kind === "statement";
+    return { id: r.id, title: r.title, resolution: r.resolution, resolved_at: r.resolved_at, resolved_by: r.resolved_by, filed: r.filed, file_path: r.file_path, kind: (r.read_result as { kind?: string } | null)?.kind ?? null,
+      folder_note: r.file_path && !isStatement ? copyState({ copied_path: r.copied_path, copy_error: r.copy_error, receipt_card: rid ? cardOf.get(rid) ?? null : null, is_receipt: !!rid }) : null };
+  });
 }
 
 // Uploaded files still being read: not listed yet, but the page reads them and tells the person.

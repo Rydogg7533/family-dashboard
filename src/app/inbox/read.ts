@@ -1,6 +1,7 @@
 "use server";
 // Reads a stored capture once, right after upload: what is it, who from, how much, what for, and a proposed filename.
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
+import { cleanLines, effectiveCategory, vehicleLines } from "@/lib/receipt-lines";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
 import { matchAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
@@ -18,7 +19,8 @@ Return ONLY a JSON object with these keys:
 kind: "receipt" | "bill" | "statement" | "form" | "warranty" | "service_report" | "other". A document showing payment made (paid, charged, card approved, balance $0, thank you for your payment) is a "receipt" even if titled invoice; "bill" only when money is still owed
 vendor: string|null; amount: number|null (total, dollars); date: "YYYY-MM-DD"|null
 item: short plain description of what was bought or done (e.g. "car battery replacement")|null
-category: one of "vehicle","home","appliance_electronics","health","grocery_food","dining","fuel","other"
+category: one of "vehicle","home","appliance_electronics","health","grocery_food","dining","fuel","other","mixed"; use "mixed" when the receipt holds clearly different kinds of purchase (for example groceries and tires)
+lines: the line items you can read clearly, at most 15, each {"description": short text, "amount": number|null, "category": same list as category except mixed}; use [] for a single-purpose receipt, a bill or a document with no readable lines
 for_vehicle_hint: any vehicle named or implied (make/model/year/plate last digits)|null
 warranty_relevant: true if this is a repair, part, appliance, electronics, tool or home-system purchase, or it states a warranty/return/claim window
 card_last4: the last four digits of the card paid with if printed (e.g. "1004"), else null; card_brand: "Visa"|"Mastercard"|"Amex"|"Discover"|null
@@ -57,16 +59,21 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v3", validate: jsonObjectValid });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v4", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
   if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
 
+  // Line items: kept clean; two or more kinds of purchase make the receipt "mixed" (it is still filed whole, once).
+  const lines = cleanLines(parsed.lines);
+  parsed.lines = lines;
+  parsed.category = effectiveCategory(typeof parsed.category === "string" ? parsed.category : "other", lines);
+  const vLines = vehicleLines(lines);
   const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;
   const money = typeof parsed.amount === "number" ? ` $${parsed.amount.toFixed(2)}` : "";
   const what = [parsed.vendor, parsed.item].filter(Boolean).join(", ");
-  const kindLabel = String(parsed.kind ?? "other").replace("_", " ");
+  const kindLabel = parsed.category === "mixed" && parsed.kind === "receipt" ? "mixed receipt" : String(parsed.kind ?? "other").replace("_", " ");
   const veh = typeof parsed.for_vehicle_hint === "string" && parsed.for_vehicle_hint ? ` for the ${parsed.for_vehicle_hint}` : "";
   const summary = what ? `Looks like a ${kindLabel}: ${what}${veh}${money}${parsed.date ? `, ${parsed.date}` : ""}.` : null;
   const name = typeof parsed.suggested_name === "string" ? parsed.suggested_name.replace(/[\\/:*?"<>|]/g, "").slice(0, 70) : null;
@@ -93,7 +100,7 @@ export async function readCapture(inboxId: string) {
 
   const { data: vehicles } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
   const vlist = (vehicles ?? []) as VRow[];
-  const needsVehicle = parsed.category === "vehicle";
+  const needsVehicle = parsed.category === "vehicle" || vLines.length > 0;
   const vNames = vlist.map((v) => v.name);
   const vehicle = needsVehicle || parsed.warranty_relevant ? matchVehicle(parsed.for_vehicle_hint as string | null, vlist) : null;
 
@@ -130,7 +137,7 @@ export async function readCapture(inboxId: string) {
     plan.push({ t: "link", text: dup ? `Money › Receipts: already there; this file will be linked to it, not added twice` : near ? `Money › Receipts: may be the same purchase as ${near.merchant} $${Number(near.amount).toFixed(2)} on ${near.date}; you choose whether to attach it there or file it separately` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
   }
   if (vehicle) {
-    plan.push({ t: "link", text: `${vehicle.short} service history: ${parsed.item ?? "service"}` });
+    plan.push({ t: "link", text: parsed.category === "mixed" && vLines.length ? `${vehicle.short} service history: ${vLines.map((l) => `${l.description}${l.amount != null ? ` $${l.amount.toFixed(2)}` : ""}`).join(", ")} (a line on this receipt; the receipt stays whole and the link opens it)` : `${vehicle.short} service history: ${parsed.item ?? "service"}` });
     if (parsed.warranty_note) plan.push({ t: "link", text: `${vehicle.short} warranty list: ${parsed.item ?? "item"} (the end date is not on the paper; you add it)` });
   } else if (needsVehicle || parsed.warranty_relevant) plan.push({ t: "link", text: `No vehicle matched${parsed.for_vehicle_hint ? ` "${parsed.for_vehicle_hint}"` : ""}; not linked to a service history until you say which` });
   if (row.claim_id) {
@@ -145,7 +152,7 @@ export async function readCapture(inboxId: string) {
 
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
-    if (needsVehicle && !vehicle) { update.missing = `${summary} Which vehicle is it for?`; update.options = [...vNames, NOT_VEHICLE]; }
+    if (needsVehicle && !vehicle) { update.missing = parsed.category === "mixed" && vLines.length ? `${summary} Which vehicle is the ${vLines[0].description} line for?` : `${summary} Which vehicle is it for?`; update.options = [...vNames, NOT_VEHICLE]; }
     else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string; order?: string }; update.missing = nr.order ? `${summary} This is Amazon order ${nr.order}. The order total on file is $${nr.amount.toFixed(2)}, but this document says ${money.trim() || "a different amount"} (an invoice can cover part of an order). Attach it to that order?` : `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }

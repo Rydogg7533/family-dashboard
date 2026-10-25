@@ -11,9 +11,10 @@ import { findSameReceipt, findOrderReceipt, extractOrderNumber, amountsMatch, bl
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
+import { vehicleLines, lineLabel, type Line } from "@/lib/receipt-lines";
 import { matchAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
-type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
+type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();
@@ -59,12 +60,12 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   //     otherwise ask again. "Not a vehicle receipt" is the only way out: it becomes an ordinary receipt, shown for one more tap.
   const { data: vs } = await sb.from("vehicles").select("id,name,short,make,model,year,details");
   if (answer === NOT_VEHICLE) {
-    const rr: Record<string, unknown> = { ...(row.read_result as Record<string, unknown>), category: "other", warranty_relevant: false };
+    const rr: Record<string, unknown> = { ...(row.read_result as Record<string, unknown>), category: "other", warranty_relevant: false, lines: (((row.read_result as { lines?: Line[] }).lines) ?? []).map((l) => (l.category === "vehicle" ? { ...l, category: "other" } : l)) };
     rr.plan = ((rr.plan as ({ t: string; text: string } | string)[] | undefined) ?? []).filter((p) => !/service history|warranty list|No vehicle matched/.test(typeof p === "string" ? p : p.text));
     await sb.from("inbox_items").update({ read_result: rr, missing: "Filing it as an ordinary receipt, not a vehicle one. Is that right?", options: ["Yes, file it", "Not quite"] }).eq("id", inboxId);
     return { ok: true, summary: "Okay, treating it as an ordinary receipt. Tap Yes to file it.", kept: true };
   }
-  if (r.category === "vehicle" && !vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[])) {
+  if ((r.category === "vehicle" || vehicleLines(r.lines).length > 0) && !vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[])) {
     const names = ((vs ?? []) as VRow[]).map((v) => v.name);
     await sb.from("inbox_items").update({ missing: "Which vehicle is it for? A vehicle receipt needs one before it can be filed.", options: [...names, NOT_VEHICLE] }).eq("id", inboxId);
     return { ok: true, summary: "Which vehicle is it for?", kept: true };
@@ -105,15 +106,27 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     await sb.rpc("record_card_vote", { p_receipt: filed.receipt_id as string, p_source: "receipt_text", p_card: known ?? `${r.card_brand && r.card_brand !== "null" ? r.card_brand : "Card"} ${r.card_last4}`, p_conf: "medium" });
   }
 
+  // 1c. "Paid with", chosen on the card, outranks the card printed on the paper. Skipped = left without a card for now.
+  if (filed.receipt_id && !filed.duplicate_of && r.paid_with?.value) {
+    const v = r.paid_with.value.slice(0, 40);
+    const { error: ve } = await sb.rpc("record_card_vote", { p_receipt: filed.receipt_id as string, p_source: "you", p_card: v, p_conf: "high" });
+    if (!ve) done.push(`paid with ${v}`);
+  } else if (filed.receipt_id && !filed.duplicate_of && r.paid_with?.skipped) filed.card_skipped = true;
+
   // 2. The vehicle: service history and any warranty the paper states.
   let vehicle: VRow | null = null;
-  if (r.category === "vehicle" || r.warranty_relevant) vehicle = vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[]);
+  if (r.category === "vehicle" || vehicleLines(r.lines).length > 0 || r.warranty_relevant) vehicle = vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[]);
   if (vehicle) {
     const d = { ...(vehicle.details ?? {}) } as Record<string, unknown>;
     const log = ((d.serviceLog as Array<Record<string, string>>) ?? []).slice();
     const what = r.item ?? "Service";
-    const sameLine = (e: Record<string, string>) => e.date === (r.date ?? "") && (e.what === what || (r.amount != null && Number(e.cost) === Number(r.amount) && normalizeVendor(e.shop) === normalizeVendor(r.vendor)));
-    if (!log.some(sameLine)) log.push({ date: r.date ?? "", miles: "", what, shop: r.vendor ?? "", cost: r.amount != null ? String(r.amount) : "", proof: name });
+    // A mixed receipt links only its vehicle lines (each with its own amount); the proof is the whole receipt. Otherwise one entry for the receipt.
+    const vl = r.category === "mixed" ? vehicleLines(r.lines) : [];
+    const entries = vl.length ? vl.map((l) => ({ what: lineLabel(l, r), cost: l.amount })) : [{ what, cost: r.amount ?? null }];
+    for (const en of entries) {
+      const sameLine = (e: Record<string, string>) => e.date === (r.date ?? "") && (e.what === en.what || (en.cost != null && Number(e.cost) === Number(en.cost) && normalizeVendor(e.shop) === normalizeVendor(r.vendor)));
+      if (!log.some(sameLine)) log.push({ date: r.date ?? "", miles: "", what: en.what, shop: r.vendor ?? "", cost: en.cost != null ? String(en.cost) : "", proof: name });
+    }
     d.serviceLog = log;
     if (r.warranty_note) {
       const w = ((d.warranties as Array<Record<string, string>>) ?? []).slice();
