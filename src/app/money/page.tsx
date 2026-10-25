@@ -3,18 +3,20 @@ import { H1 } from "@/components/ui";
 import { Section, SyncLine, Bar, ProofDot } from "@/components/money";
 import { getRoutine } from "@/lib/data-money-routine";
 import { splitToFinish } from "@/lib/receipts-to-finish";
-import { getAccounts, getTransactions, getReceipts, getReconciliations, getRecurring, getSpendSummary, getProofs, buildNeedsMe, money, shortDate, daysUntil, accountLabel, proofState } from "@/lib/data-money";
+import { getAccounts, getTransactions, getReceipts, getReconciliations, getRecurring, getSpendSummary, getUnmatchedCharges, getProofs, buildNeedsMe, money, shortDate, daysUntil, accountLabel, proofState } from "@/lib/data-money";
 
 export const dynamic = "force-dynamic";
 
 export default async function Money() {
   const [accounts, tx, receipts, recs, recurring, summary, proofs] = await Promise.all([getAccounts(), getTransactions(), getReceipts(), getReconciliations(), getRecurring(), getSpendSummary(), getProofs()]);
+  const unmatched = await getUnmatchedCharges();
   const needs = buildNeedsMe(tx, receipts, recs, recurring, accounts);
   const routine = await getRoutine();
   const routineOverdue = routine?.items.filter((i) => i.overdue).length ?? 0;
   const finish = splitToFinish(receipts, Date.now());
   const matchedCount = receipts.filter((r) => r.status === "matched").length;
-  const top = needs.slice(0, 5);
+  const needsMe = needs.filter((n) => n.kind !== "unmatched");   // missing-receipt cards live in the Receipts card and their own page
+  const top = needsMe.slice(0, 5);
   const cats = summary.rows, spent = summary.spent, typical = summary.typical;
   const hasBalances = accounts.some((a) => a.balance_current !== null);
   const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings" || a.kind === "business").reduce((n, a) => n + (a.balance_current ?? 0), 0);
@@ -33,13 +35,16 @@ export default async function Money() {
     <>
       <H1 right={<SyncLine at={synced} />}>Money</H1>
 
-      <Link href="/money/receipts-to-finish" className={`card flex flex-col gap-2 mb-5 min-h-11 ${finish.total ? "border-amber bg-amber-bg" : "border-green"}`}>
-        <div className="flex justify-between items-center gap-2"><span className="text-lg font-bold">Receipts to finish</span><span className={`text-3xl font-bold ${finish.total ? "text-amber" : "text-green"}`}>{finish.total}</span></div>
-        {finish.total ? <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-amber-bg px-2.5 py-1 text-amber">{finish.noCard.length} need a card</span><span className="rounded-full bg-soft px-2.5 py-1">{finish.waiting.length} waiting for the charge</span></div> : <div className="text-sm text-green font-semibold">All settled</div>}
-        <span className="text-sm font-semibold text-accent">Open ›</span>
-      </Link>
+      <section className="card mb-5 p-0 overflow-hidden" aria-label="Receipts">
+        <Link href="/money/receipts-to-finish" className={`flex flex-col gap-1.5 p-4 min-h-14 ${finish.total ? "bg-amber-bg" : ""}`}>
+          <div className="flex justify-between items-center gap-2"><span className="text-base font-bold">Receipts to finish</span><span className={`text-2xl font-bold ${finish.total ? "text-amber" : "text-green"}`}>{finish.total}</span></div>
+          {finish.total ? <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-soft px-2.5 py-1 text-amber">{finish.noCard.length} need a card</span><span className="rounded-full bg-soft px-2.5 py-1">{finish.waiting.length} waiting for the charge</span></div> : <div className="text-sm text-green font-semibold">All settled</div>}
+        </Link>
+        <Link href="/money/no-receipt" className="flex justify-between items-center gap-2 p-4 min-h-14 border-t border-line"><span><span className="text-base font-bold">Charges with no receipt</span><span className="block text-xs text-muted">from Tiller, newest first</span></span><span className="text-2xl font-bold">{unmatched.length}</span></Link>
+        <Link href="/money/receipts?view=matched" className="flex justify-between items-center gap-2 p-4 min-h-14 border-t border-line"><span><span className="text-base font-bold">Matched</span><span className="block text-xs text-muted">receipt linked to its charge</span></span><span className="text-2xl font-bold text-green">{matchedCount}</span></Link>
+      </section>
 
-      <Section title="Needs me" right={needs.length ? `${needs.length} open` : "all good"}>
+      <Section title="Needs me" right={needsMe.length ? `${needsMe.length} open` : "all good"}>
         {routine && routine.total > 0 && (
           <Link href="/money/routine" className="card flex justify-between items-center gap-2 mb-2">
             <div><div className="text-[11px] font-bold tracking-wide text-accent">MONTHLY ROUTINE</div><div className="font-semibold text-sm">{routine.label}: {routine.done} of {routine.total} done</div>{routineOverdue > 0 && <div className="text-xs text-amber font-semibold">{routineOverdue} overdue</div>}</div>
@@ -59,12 +64,12 @@ export default async function Money() {
                 <div className="text-[11px] text-muted">{n.who}</div>
               </Link>
             ))}
-            {needs.length > top.length && <Link href="/money/receipts" className="text-sm font-semibold text-accent px-1">and {needs.length - top.length} more</Link>}
+            {needsMe.length > top.length && <Link href="/money/receipts" className="text-sm font-semibold text-accent px-1">and {needsMe.length - top.length} more</Link>}
           </div>
         )}
       </Section>
 
-      <Section title="At a glance" right={<Link href="/money/receipts?view=matched" className="font-semibold text-accent min-h-11 inline-flex items-center">{matchedCount} matched receipt{matchedCount === 1 ? "" : "s"} ›</Link>}>
+      <Section title="At a glance">
         <div className="grid grid-cols-2 gap-2">
           <div className="card"><div className="text-[11px] text-muted">Month to date</div><div className="font-semibold">{money(spent)}</div><div className="text-[11px] text-muted">{typical === null ? "no earlier months to compare yet" : `typical ${money(typical)} (last ${summary.priorMonths} month${summary.priorMonths === 1 ? "" : "s"})`}</div></div>
           <div className="card"><div className="text-[11px] text-muted">Cash across accounts</div>{hasBalances ? <><div className="font-semibold">{money(cash)}</div><div className="text-[11px] text-muted">as of last sync</div></> : <><div className="font-semibold text-muted">Not loaded</div><div className="text-[11px] text-muted">balances are not coming from Tiller yet</div></>}</div>
