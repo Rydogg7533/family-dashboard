@@ -27,7 +27,7 @@ export function QuickBar() {
           {plus && (
             <div className="absolute bottom-12 right-0 card shadow-lg flex flex-col gap-1 w-48 text-sm font-semibold">
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=photo")}>Take photo</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload file</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload photo or file</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=bulk")}>Bulk drop</button>
               <div className="border-t border-line my-0.5" />
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/ask")}>Ask</button>

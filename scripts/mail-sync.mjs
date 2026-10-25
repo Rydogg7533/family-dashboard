@@ -32,7 +32,7 @@ async function rest(method, path, body, extra = {}) {
 const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 
 // Sign-in files for other purposes (google-<address>.contacts.json, .calendar.json, .sheets.json) are not mailboxes.
-export const isMailboxToken = (file) => { const m = file.match(/^google-(.+@.+)\.json$/); return m && !/\.(contacts|calendar|sheets)$/.test(m[1]) ? m[1] : null; };
+export const isMailboxToken = (file) => { const m = file.match(/^google-(.+@.+)\.json$/); return m && !/\.(contacts|calendar|sheets|mail)$/.test(m[1]) ? m[1] : null; };
 
 async function syncAccount(account, person, log) {
   const { api } = openGmail(["--account", account], { allowWrite: false });

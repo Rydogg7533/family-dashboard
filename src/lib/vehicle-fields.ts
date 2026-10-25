@@ -83,7 +83,9 @@ export const VEHICLE_SECTIONS: VSection[] = [
 
 // Repeatable lists. Warranties are what the receipt filing links to; the service log is what it appends to.
 export type Warranty = { item: string; provider: string; start: string; end: string; miles: string; terms: string; proof: string };
-export type ServiceEntry = { date: string; miles: string; what: string; shop: string; cost: string; proof: string };
+export type ServiceEntry = { date: string; miles: string; what: string; shop: string; cost: string; proof: string; duplicate_of?: string };
+// A line retired as a repeat of another carries duplicate_of (the kept line's proof). It is hidden, never deleted.
+export const liveService = (l: ServiceEntry[] | undefined) => (l ?? []).filter((e) => !e.duplicate_of);
 export const EMPTY_WARRANTY: Warranty = { item: "", provider: "", start: "", end: "", miles: "", terms: "", proof: "" };
 export const EMPTY_SERVICE: ServiceEntry = { date: "", miles: "", what: "", shop: "", cost: "", proof: "" };
 

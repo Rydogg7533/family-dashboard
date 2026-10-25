@@ -2,14 +2,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { InboxItem } from "@/lib/data-inbox";
+import type { InboxItem, DecidedItem, PaidWithContext } from "@/lib/data-inbox";
+import { SKIP, CLEAR } from "@/lib/paid-with";
+import { destination, folderWarnings, isFiledByCard, type DestRead } from "@/lib/destination";
+import { inboxStatus, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
-export function InboxList({ items, me = null, names = {}, pendingIds = [], capture, claimId, resolvedThisWeek }: { items: InboxItem[]; me?: string | null; names?: Record<string, string>; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number }) {
+export function InboxList({ items, me = null, names = {}, pendingIds = [], capture, claimId, resolvedThisWeek, decided = [], paid = { known: [], suggestions: {} } }: { items: InboxItem[]; me?: string | null; names?: Record<string, string>; pendingIds?: string[]; capture: string | null; claimId?: string | null; resolvedThisWeek: number; decided?: DecidedItem[]; paid?: PaidWithContext }) {
   const [open, setOpen] = useState(items);
   useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
@@ -30,7 +33,17 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   const sorted = [...open].sort((a, b) => Number(b.assigned_to === me) - Number(a.assigned_to === me));
   const handedToMe = sorted.filter((i) => me && i.assigned_to === me).length;
   const fromWho = (i: InboxItem, id: string) => i.created_by === id || i.requested_by === names[id];
-  const visible = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
+  const byPerson = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
+  // Status row (what is decided, what waits on you, what waits on a missing fact) and, once there are many items, a kind row (what went in).
+  const [st, setSt] = useState<"all" | "needs_answer" | "missing_info" | "handed" | "decided">("all");
+  const [kd, setKd] = useState<string>("all");
+  const stCount = { all: byPerson.length, needs_answer: byPerson.filter((i) => inboxStatus(i) === "needs_answer").length, missing_info: byPerson.filter((i) => inboxStatus(i) === "missing_info").length, handed: byPerson.filter((i) => i.assigned_to).length, decided: decided.length };
+  const byStatus = st === "all" || st === "decided" ? byPerson : st === "handed" ? byPerson.filter((i) => i.assigned_to) : byPerson.filter((i) => inboxStatus(i) === st);
+  const kindOf = (i: InboxItem) => docKind(i);
+  const kinds = KIND_ORDER.map((k) => ({ k, n: (st === "decided" ? decided.filter((d) => docKind({ read_result: { kind: d.kind } }) === k) : byStatus.filter((i) => kindOf(i) === k)).length })).filter((x) => x.n > 0);
+  const showKinds = (st === "decided" ? decided.length : byPerson.length) >= 20 && kinds.length > 1;
+  const visible = kd === "all" || !showKinds ? byStatus : byStatus.filter((i) => kindOf(i) === kd);
+  const decidedShown = (kd === "all" || !showKinds ? decided : decided.filter((d) => docKind({ read_result: { kind: d.kind } }) === kd));
   const shown = showAll ? visible : visible.slice(0, 5);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
@@ -50,6 +63,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   return (
     <>
       {capture && <CapturePanel kind={capture} claimId={claimId ?? null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
+      {!capture && <CapturePanel kind="file" compact claimId={null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
 
       <section className="mb-4">
         <div className="flex items-baseline justify-between mb-2">
@@ -57,7 +71,19 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
-        {ids.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2" role="group" aria-label="Filter by status">
+          {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || stCount[id] > 0).map(([id, label]) => (
+            <button key={id} onClick={() => { setSt(id); setKd("all"); setShowAll(false); }} aria-pressed={st === id} className={`px-3 py-1.5 rounded-full min-h-9 ${st === id ? "bg-accent text-white" : "bg-soft"}`}>{label} <b>{stCount[id]}</b></button>
+          ))}
+        </div>
+        {showKinds && (
+          <div className="flex gap-1.5 flex-wrap text-xs mb-2" role="group" aria-label="Filter by what it is">
+            {[{ k: "all", n: st === "decided" ? decided.length : byStatus.length }, ...kinds].map((x) => (
+              <button key={x.k} onClick={() => { setKd(x.k); setShowAll(false); }} aria-pressed={kd === x.k} className={`px-2.5 py-1 rounded-lg min-h-8 ${kd === x.k ? "bg-fg text-bg font-semibold" : "bg-soft"}`}>{x.k === "all" ? "Everything" : x.k} {x.n}</button>
+            ))}
+          </div>
+        )}
+        {ids.length > 1 && st !== "decided" && (
           <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2">
             {[{ id: "all", label: "All" }, ...ids.map((id) => ({ id, label: `From ${names[id]}` })), ...(handedToMe ? [{ id: "mine", label: `Handed to me (${handedToMe})` }] : [])].map((c) => (
               <button key={c.id} onClick={() => { setFilter(c.id); setShowAll(false); }} className={`px-3 py-1.5 rounded-full min-h-9 ${filter === c.id ? "bg-accent text-white" : "bg-soft"}`}>{c.label}</button>
@@ -65,11 +91,13 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           </div>
         )}
         {pendingIds.length > 0 && <div className="card text-sm text-muted mb-2 animate-pulse">Reading {pendingIds.length} new document{pendingIds.length === 1 ? "" : "s"}… it will appear here in a few seconds.</div>}
-        {open.length === 0 && pendingIds.length === 0 ? (
+        {st === "decided" ? (
+          <DecidedList items={decidedShown} names={names} />
+        ) : open.length === 0 && pendingIds.length === 0 ? (
           <div className="card text-muted">Nothing to identify, file or decide. Everything is where it belongs.</div>
         ) : (
           <div className="flex flex-col gap-2">
-            {shown.map((it) => <InboxCard key={it.id} item={it} me={me} names={names} onAnswer={(a) => resolve(it, a)} />)}
+            {shown.map((it) => <InboxCard key={it.id} item={it} me={me} names={names} paid={paid} onAnswer={(a) => resolve(it, a)} />)}
             {!showAll && visible.length > 5 && <button onClick={() => setShowAll(true)} className="text-sm font-semibold text-accent px-1 text-left min-h-10">and {visible.length - 5} more</button>}
           </div>
         )}
@@ -87,7 +115,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   );
 }
 
-function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string | null; names: Record<string, string>; onAnswer: (a: string) => void }) {
+function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: string | null; names: Record<string, string>; paid: PaidWithContext; onAnswer: (a: string) => void }) {
   const [text, setText] = useState("");
   const [thread, setThread] = useState(false);
   const router = useRouter();
@@ -99,7 +127,12 @@ function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string 
   return (
     <div className="card flex flex-col gap-2">
       <div>
-        <div className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-bold tracking-wide text-accent">{KIND[item.kind]}</span>
+          {inboxStatus(item) === "needs_answer"
+            ? <span className="text-[11px] font-bold tracking-wide rounded-full bg-soft text-accent px-2 py-0.5">NEEDS YOUR ANSWER</span>
+            : <span className="text-[11px] font-bold tracking-wide rounded-full border border-amber text-amber px-2 py-0.5">MISSING: {missingNote(item).toUpperCase()}</span>}
+        </div>
         <div className="font-semibold">{item.title}</div>
         <div className="text-xs text-muted mt-0.5">{by === "System" ? "System" : by.includes("@") ? "Uploaded" : `${by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
       </div>
@@ -114,6 +147,10 @@ function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string 
         <div className="rounded-xl bg-soft px-3 py-2 text-xs">
           <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>
           <ul className="flex flex-col gap-1">{item.read_result.plan.map((p, i) => { const o = typeof p === "string" ? { t: "link" as const, text: p } : p; return (<li key={i} className="flex gap-2"><span className={`shrink-0 rounded px-1.5 text-[10px] font-bold leading-5 ${o.t === "file" ? "bg-accent text-white" : "bg-line text-muted"}`}>{o.t === "file" ? "FILED" : "LINK"}</span><span>{o.text}</span></li>); })}</ul>
+          {(() => { const d = destination(item.read_result as DestRead | null); const w = folderWarnings(item.read_result as DestRead | null); return (<>
+            {d && <div className="mt-1.5"><span className="font-bold tracking-wide text-muted">FOLDER </span>{d.text}</div>}
+            {w.length > 0 && <div className="mt-1 font-semibold text-amber">Check the folder: {w.join(" ")}</div>}
+          </>); })()}
           {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan.replace("LINK ", "link: ")}</div>}
         </div>
       )}
@@ -124,7 +161,8 @@ function InboxCard({ item, me, names, onAnswer }: { item: InboxItem; me: string 
           {item.assigned_to && item.assigned_to !== null && <button disabled={handBusy} onClick={() => hand(item.assigned_to === me ? null : me)} className="font-semibold text-accent min-h-8 disabled:opacity-50">{item.assigned_to === me ? "Hand back to anyone" : "Take it"}</button>}
         </div>
       )}
-      {item.read_result?.home && <FolderFix item={item} />}
+      {inboxStatus(item) === "needs_answer" && isFiledByCard(item.read_result as DestRead) && <PaidWith item={item} known={paid.known} suggestion={paid.suggestions[item.id] ?? null} />}
+      {item.read_result?.home && !isFiledByCard(item.read_result as DestRead) && <FolderFix item={item} />}
       <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
       </div>
@@ -152,7 +190,7 @@ async function storeFile(f: File): Promise<CapturedFile> {
 }
 
 // Photo and Upload file take ONE document (add pages to it afterwards); Bulk drop takes many, each its own item.
-function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string | null; onDone: (n: number) => void }) {
+function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string; claimId: string | null; onDone: (n: number) => void; compact?: boolean }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLInputElement>(null);
@@ -167,15 +205,17 @@ function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string
 
   async function take(list: FileList | null) {
     if (!list || !list.length) return;
-    const picked = bulk ? Array.from(list) : [list[0]];
+    // Several files dropped at once become separate documents (like Bulk drop); the picker itself still takes one document.
+    const asBulk = bulk || list.length > 1;
+    const picked = asBulk ? Array.from(list) : [list[0]];
     setNames(picked.map((f) => f.name)); setStatus("Saving…"); setDocId(null); setPageCount(0);
     const out: CapturedFile[] = [];
     for (const f of picked) out.push(await storeFile(f));
-    const r = await recordCapture(kind as "photo" | "file" | "bulk", out, claimId);
+    const r = await recordCapture(asBulk ? "bulk" : (kind as "photo" | "file" | "bulk"), out, claimId);
     const bad = r.failed?.length ?? 0;
     setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""} Reading…`);
     onDone(out.length);
-    if (!bulk && r.ids?.[0]) { setDocId(r.ids[0]); setPageCount(1); }
+    if (!asBulk && r.ids?.[0]) { setDocId(r.ids[0]); setPageCount(1); }
     // One at a time: concurrent server actions can be dropped by the refresh that follows the first.
     void (async () => { for (const id of r.ids ?? []) { await readCapture(id).catch(() => null); } setStatus((s) => s.replace(" Reading…", " Read.")); router.refresh(); })();
   }
@@ -192,17 +232,17 @@ function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string
   }
 
   return (
-    <div className="card mb-4 flex flex-col gap-2 border-accent">
-      <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>
+    <div className={`card mb-4 flex flex-col gap-2 ${compact ? "" : "border-accent"}`}>
+      {!compact && <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>}
       {claimId && <p className="text-xs font-semibold text-accent">This will be added to the open claim.</p>}
-      <p className="text-xs text-muted">{hint}</p>
-      {bulk ? (
-        <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}
-          className={`min-h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
-          Drop files here, or tap to choose
+      {!compact && <p className="text-xs text-muted">{hint}</p>}
+      {kind !== "photo" ? (
+        <div role="button" tabIndex={0} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
+          className={`${compact ? "min-h-16" : "min-h-32"} rounded-xl border-2 border-dashed flex items-center justify-center text-center px-3 text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
+          {bulk ? "Drop files here, or tap to choose" : compact ? "Drop or choose a photo or file to add" : "Drop a file or image here, or tap to choose from your Photos or Files"}
         </div>
       ) : (
-        <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">{kind === "photo" ? "Open camera" : "Choose file"}</button>
+        <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">Open camera</button>
       )}
       <input ref={inputRef} type="file" className="hidden" multiple={bulk} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void take(e.target.files); e.target.value = ""; }} />
       <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
@@ -246,6 +286,66 @@ function FolderFix({ item }: { item: InboxItem }) {
           {msg && <div className="text-sm">{msg}</div>}
           {canRule && <button type="button" disabled={busy} onClick={async () => { setBusy(true); const r = await saveFilingRule(item.id).catch(() => ({ ok: false, message: "Could not save the rule." })); setBusy(false); setMsg(r.message); if (r.ok) setCanRule(false); }} className="min-h-10 rounded-xl border border-line text-sm font-semibold disabled:opacity-40">Always file this vendor here</button>}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Decided: what you answered in the last 30 days, one line each. Everything stays on record; this is only the view.
+function DecidedList({ items, names }: { items: DecidedItem[]; names: Record<string, string> }) {
+  if (!items.length) return <div className="card text-muted">Nothing decided in the last {DECIDED_DAYS} days.</div>;
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" }) : "");
+  return (
+    <div className="card p-0 divide-y divide-line">
+      {items.map((d) => (
+        <div key={d.id} className="px-3 py-2.5 flex items-start gap-3">
+          <span className="text-green font-bold mt-0.5" aria-hidden="true">✓</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate">{d.title}</div>
+            <div className="text-xs text-muted">{decidedOutcome(d.filed, d.resolution)} · {when(d.resolved_at)}{d.resolved_by && names[d.resolved_by] ? ` · ${names[d.resolved_by]}` : ""}{d.file_path ? <> · <a href={`/api/capture/${d.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a></> : null}</div>
+            {d.folder_note && <div className="text-xs text-muted">{d.folder_note}</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// "Paid with": optional, chosen before the Yes tap. A suggestion (only when this person's last three receipts from the vendor agree) is
+// highlighted with its reason; Skip for now leaves the receipt without a card (the matcher or the 7-day question settles it later).
+function PaidWith({ item, known, suggestion }: { item: InboxItem; known: string[]; suggestion: { card: string; reason: string } | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState("");
+  const pw = item.read_result?.paid_with;
+  const printed = (item.read_result as { card_last4?: string | null; card_brand?: string | null } | null);
+  async function choose(v: string) { setBusy(true); await setInboxPaidWith(item.id, v).catch(() => null); setBusy(false); setTyping(false); setText(""); router.refresh(); }
+  const chip = "min-h-10 px-3 rounded-full border text-sm font-semibold disabled:opacity-50";
+  if (pw?.value || pw?.skipped) {
+    return (
+      <div className="text-xs flex items-center gap-2 flex-wrap">
+        <span className="font-bold tracking-wide text-muted">PAID WITH</span>
+        <span className="font-semibold">{pw.value ?? "No card yet (skipped for now)"}</span>
+        <button disabled={busy} onClick={() => choose(CLEAR)} className="font-semibold text-accent min-h-8 disabled:opacity-50">Change</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="text-xs"><span className="font-bold tracking-wide text-muted">PAID WITH </span><span className="text-muted">(optional){printed?.card_last4 ? ` · the paper shows ${printed.card_brand && printed.card_brand !== "null" ? printed.card_brand + " " : ""}${printed.card_last4}` : ""}</span></div>
+      {suggestion && <div className="text-xs text-muted">{suggestion.reason}.</div>}
+      <div className="flex flex-wrap gap-1.5">
+        {suggestion && <button disabled={busy} onClick={() => choose(suggestion.card)} className={`${chip} border-accent bg-accent text-white`}>{suggestion.card} (likely)</button>}
+        {known.filter((c) => c !== suggestion?.card).map((c) => <button key={c} disabled={busy} onClick={() => choose(c)} className={`${chip} border-line`}>{c}</button>)}
+        <button onClick={() => setTyping(true)} className={`${chip} border-line text-accent`}>Another card or account</button>
+        <button disabled={busy} onClick={() => choose(SKIP)} className={`${chip} border-line text-muted`}>Skip for now</button>
+      </div>
+      {typing && (
+        <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) void choose(text.trim()); }} className="flex gap-2">
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name and last four, e.g. Amex 1004" className="min-h-10 flex-1 rounded-lg border border-line bg-bg px-3 text-sm" />
+          <button type="submit" disabled={busy || !text.trim()} className="min-h-10 px-3 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50">Save</button>
+        </form>
       )}
     </div>
   );

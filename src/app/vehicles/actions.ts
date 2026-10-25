@@ -25,7 +25,13 @@ export async function saveVehicle(id: string | null, v: VehicleInput): Promise<{
   const warranties = v.warranties.filter((w) => clean(w.item) || clean(w.provider) || w.end);
   const service = v.service.filter((s) => clean(s.what) || s.date);
   if (warranties.length) details.warranties = warranties;
-  if (service.length) details.serviceLog = service;
+  // Lines retired as repeats are not in the form; carry them over so saving never drops them.
+  let retired: ServiceEntry[] = [];
+  if (id) {
+    const cur = (await sb.from("vehicles").select("details").eq("id", id).maybeSingle()).data as { details: Record<string, unknown> | null } | null;
+    retired = ((cur?.details?.serviceLog as ServiceEntry[]) ?? []).filter((e) => e.duplicate_of);
+  }
+  if (service.length || retired.length) details.serviceLog = [...service, ...retired];
 
   type Exp = { label: string };
   let existing: { expiries: Exp[] } | null = null;

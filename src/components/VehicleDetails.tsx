@@ -1,13 +1,13 @@
 import type { Vehicle } from "@/lib/a-shared";
 import { fmtDate } from "@/lib/a-shared";
 import { Fold } from "@/components/Fold";
-import { VEHICLE_SECTIONS, type ServiceEntry, type Warranty } from "@/lib/vehicle-fields";
+import { VEHICLE_SECTIONS, liveService, type ServiceEntry, type Warranty } from "@/lib/vehicle-fields";
 
 // Read-only view of everything the form holds. Only filled fields are shown; empty sections do not appear.
 export function VehicleDetails({ v }: { v: Vehicle }) {
   const d = (v.details ?? {}) as Record<string, unknown>;
   const warranties = (d.warranties as Warranty[]) ?? [];
-  const service = (d.serviceLog as ServiceEntry[]) ?? [];
+  const service = liveService(d.serviceLog as ServiceEntry[]);
   const sections = VEHICLE_SECTIONS.map((s) => ({ s, rows: s.fields.filter((f) => d[f.key] != null && String(d[f.key]) !== "") })).filter((x) => x.rows.length);
   if (!sections.length && !warranties.length && !service.length && !v.vinPointer) return <div className="card text-sm text-muted mt-3">No details yet. Tap Edit details to add insurance, roadside help, warranties and specs.</div>;
   const val = (type: string | undefined, x: unknown) => (type === "date" ? fmtDate(String(x)) : String(x));

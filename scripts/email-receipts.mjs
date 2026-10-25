@@ -4,7 +4,8 @@
 //   node scripts/email-receipts.mjs --account admin@shvr.co --apply         # records sightings, copies attachments into the app Inbox
 //   node scripts/email-receipts.mjs --account ryanrossiter@icloud.com --apply   # iCloud (IMAP) works the same way
 //   options: --months 12 (how far back; default 12)   --window 12-24 (a slice, in months ago: here the year before last year)   --min-kb 20 (images smaller than this are logos, skipped)
-// For every inbox message the free rules call "money" (receipt, order, invoice, statement) in the window:
+// For every message in the inbox (Gmail: anywhere except spam, trash, sent, drafts; iCloud: INBOX plus Dashboard/Money, Records and Handled, where the triage files
+// receipts) that the free rules call "money" (receipt, order, invoice, statement) in the window:
 //   1. SIGHTING  one recurring_observations row (source 'receipt', merchant key, date, visible amount, ref = message id). Append-only; a
 //                re-run adds nothing twice. This is what Subscriptions reads to spot repeat charges.
 //   2. DOCUMENT  each attached PDF or image (the kinds the Inbox reader can read, ≤ 20 MB) is copied into the private "captures" bucket
@@ -65,10 +66,10 @@ const isIcloud = /@(icloud|me|mac)\.com$/i.test(account);
 async function* moneyMail() {
   if (!isIcloud) {
     const { api } = openGmail(["--account", account], { allowWrite: false });
-    const q = `in:inbox after:${since.toISOString().slice(0, 10).replace(/-/g, "/")}${before ? ` before:${before.toISOString().slice(0, 10).replace(/-/g, "/")}` : ""}`;
+    const q = `-in:spam -in:trash -in:sent -in:drafts after:${since.toISOString().slice(0, 10).replace(/-/g, "/")}${before ? ` before:${before.toISOString().slice(0, 10).replace(/-/g, "/")}` : ""}`;
     const ids = []; let page = "";
     do { const r = await api(`/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=500${page ? `&pageToken=${page}` : ""}`); for (const m of r.messages || []) ids.push(m.id); page = r.nextPageToken || ""; } while (page);
-    console.log(`${ids.length} inbox messages, ${WIN_TXT}`);
+    console.log(`${ids.length} messages (everything but spam, trash, sent and drafts), ${WIN_TXT}`);
     let n = 0;
     for (const id of ids) {
       if (++n % 200 === 0) process.stdout.write(`\r  checked ${n}/${ids.length}`);
@@ -86,18 +87,21 @@ async function* moneyMail() {
     if (!me.ICLOUD_MAIL_USER || !me.ICLOUD_MAIL_APP_PASSWORD) { console.error("STOP: icloud-ryan.env missing"); process.exit(2); }
     const c = new ImapFlow({ host: "imap.mail.me.com", port: 993, secure: true, auth: { user: me.ICLOUD_MAIL_USER, pass: me.ICLOUD_MAIL_APP_PASSWORD }, logger: false });
     await c.connect();
-    const lock = await c.getMailboxLock("INBOX", { readOnly: true });
+    // The triage moves receipts and confirmations out of the inbox, so look there too: Dashboard/Money (the triage already called these money)
+    // and Dashboard/Records and Dashboard/Handled (only what the receipt rules call money; Handled held receipts that carried an unsubscribe link). Sightings are recorded for the inbox only; moved mail adds documents.
+    for (const FOLDER of ["INBOX", "Dashboard/Money", "Dashboard/Records", "Dashboard/Handled"]) {
+    let lock; try { lock = await c.getMailboxLock(FOLDER, { readOnly: true }); } catch { console.log(`  (folder ${FOLDER} not found, skipped)`); continue; }
     try {
       const uidv = String(c.mailbox.uidValidity);
       const uids = await c.search(before ? { since, before } : { since }, { uid: true });
-      console.log(`${uids.length} inbox messages, ${WIN_TXT}`);
+      console.log(`${uids.length} messages in ${FOLDER}, ${WIN_TXT}`);
       const money = [];
       for (let i = 0; i < uids.length; i += 500) {
         for await (const m of c.fetch(uids.slice(i, i + 500).join(","), { uid: true, envelope: true, internalDate: true, headers: ["list-unsubscribe", "precedence", "auto-submitted", "authentication-results", "reply-to"] }, { uid: true })) {
           const hv = String(m.headers || ""); const h = (n) => (hv.match(new RegExp(`^${n}:[ \\t]*(.*)`, "im")) || [])[1] || "";
           const ev = m.envelope || {}; const f = ev.from?.[0] || {}; const address = (f.address || "").toLowerCase();
           const e = { subject: ev.subject || "", snippet: "", folder: "inbox", address, name: f.name || "", domain: address.split("@")[1] || "", listUnsubscribe: !!h("list-unsubscribe"), precedenceBulk: /bulk|list|junk/i.test(h("precedence")), autoSubmitted: !!h("auto-submitted") && !/^no$/i.test(h("auto-submitted")), date: new Date(ev.date || m.internalDate).toISOString().slice(0, 10) };
-          if (decide(e).action === "money") { if (suspicion({ ...e, authFail: authFailed(hv), replyDomain: replyDomainOf(hv) }).length) { skippedSus++; continue; } money.push({ uid: m.uid, e }); }
+          if (FOLDER === "Dashboard/Money" || decide(e).action === "money") { if (suspicion({ ...e, authFail: authFailed(hv), replyDomain: replyDomainOf(hv) }).length) { skippedSus++; continue; } money.push({ uid: m.uid, e }); }
         }
         process.stdout.write(`\r  checked ${Math.min(i + 500, uids.length)}/${uids.length}`);
       }
@@ -107,9 +111,11 @@ async function* moneyMail() {
         const dl = await c.download(uid.toString(), undefined, { uid: true }).catch(() => null);
         if (dl) { const chunks = []; for await (const ch of dl.content) chunks.push(ch); const src = Buffer.concat(chunks);
           if (src.length <= MAX_BYTES) { const p = await simpleParser(src); snippet = (p.text || "").replace(/\s+/g, " ").slice(0, 300); files = (p.attachments || []).filter((a) => READABLE[(a.contentType || "").toLowerCase()]).map((a) => ({ name: a.filename || "attachment", mime: a.contentType.toLowerCase(), size: a.size || a.content.length, get: async () => a.content })); } }
-        yield { ref: `icloud:${account}:${uidv}-${uid}`, link: null, date: e.date, subject: e.subject, snippet, name: e.name, address: e.address, domain: e.domain, files };
+        yield { ref: FOLDER === "INBOX" ? `icloud:${account}:${uidv}-${uid}` : `icloud:${account}:${FOLDER}:${uidv}-${uid}`, sighting: FOLDER === "INBOX", link: null, date: e.date, subject: e.subject, snippet, name: e.name, address: e.address, domain: e.domain, files };
       }
-    } finally { lock.release(); try { await c.logout(); } catch { /* closed */ } }
+    } finally { lock.release(); }
+    }
+    try { await c.logout(); } catch { /* closed */ }
   }
 }
 
@@ -121,8 +127,8 @@ async function main() {
   for await (const m of moneyMail()) {
     stats.money++;
     // 1. sighting
-    const have = (await rest("GET", `recurring_observations?source=eq.receipt&ref=eq.${encodeURIComponent(m.ref)}&select=id`)).length;
-    if (have) stats.seen++; else { stats.sightings++; if (APPLY) await rest("POST", "recurring_observations", [{ recurring_id: null, merchant_key: merchantKey(m.name, m.domain), source: "receipt", signal: "charge", observed_on: m.date, amount: amountOf(m), ref: m.ref, mailbox: account }], { Prefer: "return=minimal" }); }
+    const have = m.sighting === false ? 1 : (await rest("GET", `recurring_observations?source=eq.receipt&ref=eq.${encodeURIComponent(m.ref)}&select=id`)).length;
+    if (have) { if (m.sighting !== false) stats.seen++; } else { stats.sightings++; if (APPLY) await rest("POST", "recurring_observations", [{ recurring_id: null, merchant_key: merchantKey(m.name, m.domain), source: "receipt", signal: "charge", observed_on: m.date, amount: amountOf(m), ref: m.ref, mailbox: account }], { Prefer: "return=minimal" }); }
     // 2. documents
     const usable = m.files.filter((f) => f.size <= MAX_BYTES && (f.mime === "application/pdf" || f.size >= MIN_KB * 1024));
     stats.skipped += m.files.length - usable.length;

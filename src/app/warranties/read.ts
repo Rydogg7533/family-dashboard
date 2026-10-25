@@ -1,6 +1,6 @@
 "use server";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { callModelVision } from "@/lib/ai";
+import { callModelVision, jsonObjectValid } from "@/lib/ai";
 
 export type WarrantySuggestion = { item?: string; provider?: string; start?: string; end?: string; terms?: string; endNote?: string };
 
@@ -28,7 +28,7 @@ export async function readWarrantyInfo(paths: string[]): Promise<{ ok: boolean; 
   if (!files.length) return { ok: false, message: "I could not open those files to read them." };
   let out: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: "Read this warranty document and return the JSON.", files, maxTokens: 1500, feature: "warranty-read" });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: "Read this warranty document and return the JSON.", files, maxTokens: 1500, feature: "warranty-read", promptVersion: "warranty-read-v1", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     out = m ? JSON.parse(m[0]) : null;
   } catch { return { ok: false, message: "Reading failed. You can fill the form in by hand." }; }

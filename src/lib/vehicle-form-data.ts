@@ -1,7 +1,7 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import type { Vehicle, Person } from "@/lib/a-shared";
 import type { VehicleInput } from "@/app/vehicles/actions";
-import { EXPIRY_KEYS, type ServiceEntry, type Warranty } from "@/lib/vehicle-fields";
+import { EXPIRY_KEYS, type ServiceEntry, type Warranty, liveService } from "@/lib/vehicle-fields";
 
 export const blankInput = (): VehicleInput => ({ year: "", make: "", model: "", short: "", plate: "", vinPointer: "", driver: "", mileage: "", mileageAt: "", details: {}, warranties: [], service: [] });
 
@@ -14,7 +14,7 @@ export function vehicleToInput(v: Vehicle): VehicleInput {
   return {
     year: v.year ? String(v.year) : "", make: v.make, model: v.model, short: v.short, plate: v.plate === "not recorded" ? "" : v.plate, vinPointer: v.vinPointer ?? "",
     driver: v.driverId ?? "", mileage: v.mileageKnown ? String(v.mileage) : "", mileageAt: v.mileageAt, details,
-    warranties: (d.warranties as Warranty[]) ?? [], service: (d.serviceLog as ServiceEntry[]) ?? [],
+    warranties: (d.warranties as Warranty[]) ?? [], service: liveService(d.serviceLog as ServiceEntry[]),
   };
 }
 

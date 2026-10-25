@@ -12,6 +12,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
   const mode = typeof sp.do === "string" ? sp.do : null;
   const itemId = typeof sp.item === "string" ? sp.item : null;
   const history = sp.view === "history";
+  const allMatched = sp.view === "matched";
   const [accounts, tx, receipts, proofs, subj] = await Promise.all([getAccounts(), getTransactions(), getReceipts(), getProofs(), getSubjects()]);
   const target = forId ? tx.find((t) => t.id === forId) : null;
   const asks = receipts.filter((r) => r.status === "needs_info");
@@ -20,6 +21,22 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
   const knownCards = Array.from(new Set([...accounts.filter((a) => !a.retired_at && a.kind !== "checking" && a.kind !== "savings").map((a) => `${a.institution} ${a.last4}`), ...receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")]));
   const matched = receipts.filter((r) => r.status === "matched");
   const resolved = matched.length, total = matched.length + asks.length + expecting.length + queue.length;
+
+  const MATCHED_DAYS = 30;
+  const cutoff = new Date(Date.now() - MATCHED_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const recentMatched = matched.filter((r) => r.date >= cutoff);
+  const matchedRow = (r: (typeof matched)[number]) => (
+    <div key={r.id} className="flex items-center gap-2 py-2 border-b border-line last:border-0"><ProofDot state={proofState(r.transaction_id ?? "", proofs).state} /><div className="min-w-0 flex-1"><div className="font-semibold">{r.merchant} {money(r.amount)}</div><div className="text-xs text-muted truncate">{r.captured_by} · {shortDate(r.date)} · {r.file_path}</div></div></div>
+  );
+
+  if (allMatched) return (
+    <>
+      <Link href="/money/receipts" className="text-xs font-semibold text-accent min-h-11 inline-flex items-center">‹ Receipts</Link>
+      <H1 right={`${matched.length}`}>All matched receipts</H1>
+      <p className="text-xs text-muted mb-3">Every receipt linked to its charge, newest first. Nothing is removed from this list.</p>
+      <div className="card flex flex-col text-sm">{matched.length === 0 ? <span className="text-muted">None yet.</span> : matched.map(matchedRow)}</div>
+    </>
+  );
 
   if (history) return (
     <>
@@ -51,7 +68,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
         )}
       </Section>
 
-      <Section title="Expecting a charge" right={`${expecting.length}`}>
+      <Section title="Expecting a charge" right={<Link href="/money/receipts-to-finish" className="font-semibold text-accent">Receipts to finish ›</Link>}>
         {expecting.length === 0 ? <div className="card text-muted text-sm">No receipts waiting for their charge.</div> : (
           <div className="flex flex-col gap-2">{expecting.map((r) => (
             <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives{r.home_path ? <> · filed at {r.home_path.replace(/^.*\/Organized\//, "Organized/")}</> : " · filed by card and month once you say which card"}</div><CardPicker r={r} known={knownCards} /><SubjectPicker r={r} subjects={subj.subjects} linked={subj.links.filter((l) => l.receipt_id === r.id).map((l) => l.subject_id)} /></div>
@@ -63,10 +80,8 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
         <div className="card"><BulkDrop /></div>
       </Section>
 
-      <Section title="Recently matched" right={<OpenIn label="Files" />}>
-        <div className="card flex flex-col text-sm">{matched.map((r) => (
-          <div key={r.id} className="flex items-center gap-2 py-2 border-b border-line last:border-0"><ProofDot state={proofState(r.transaction_id ?? "", proofs).state} /><div className="min-w-0 flex-1"><div className="font-semibold">{r.merchant} {money(r.amount)}</div><div className="text-xs text-muted truncate">{r.captured_by} · {r.file_path}</div></div></div>
-        ))}</div>
+      <Section title="Recently matched" right={<Link href="/money/receipts?view=matched" className="font-semibold text-accent">See all {matched.length} ›</Link>}>
+        <div className="card flex flex-col text-sm">{recentMatched.length === 0 ? <span className="text-muted">Nothing matched in the last {MATCHED_DAYS} days.</span> : recentMatched.map(matchedRow)}</div>
       </Section>
     </>
   );

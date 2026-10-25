@@ -21,9 +21,11 @@ export function openGmail(args, { allowWrite }) {
   try { const j = JSON.parse(readFileSync(option(args, "--client") || join(dir, "google-oauth-client.json"), "utf8")); client = j.installed || j.web; } catch (e) { die(`cannot read the OAuth client file: ${e.message}`); }
   try { tok = JSON.parse(readFileSync(join(dir, `google-${account}.json`), "utf8")); } catch { die(`no saved sign-in for ${account}. Run scripts/google-auth.mjs --account ${account} first.`); }
   let accessToken = null;
+  // Node reports every dropped connection as just "fetch failed"; the reason (ECONNRESET, ENOTFOUND, a timeout) is in e.cause, so it is added to the message.
+  const describeNetError = (e, url) => { const c = e?.cause; const why = c?.code || c?.message || ""; let host = ""; try { host = new URL(url).host; } catch { /* not a URL */ } return `${e?.message || "network error"}${why ? ` (${why})` : ""}${host ? ` talking to ${host}` : ""}`; };
   // A dropped connection ("fetch failed") is retried quietly; only a real answer from Google (or four failures in a row) counts as an error.
   async function netFetch(url, init) {
-    for (let i = 1; ; i++) { try { return await fetch(url, init); } catch (e) { if (i >= 4) throw e; await sleep(1500 * i); } }
+    for (let i = 1; ; i++) { try { return await fetch(url, init); } catch (e) { if (i >= 4) throw new Error(describeNetError(e, url)); await sleep(1500 * i); } }
   }
   async function refresh() {
     const r = await netFetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -50,7 +52,8 @@ export function openGmail(args, { allowWrite }) {
 }
 
 // ---------- the free rules ----------
-const RECEIPT_RE = /\b(receipt|your order|order confirmation|invoice|payment received|e-?receipt|statement is (ready|available)|your statement)\b/i;
+const RECEIPT_RE = /\b(receipt|your order|order confirmation|invoice|payment received|e-?receipt|statement is (ready|available)|your statement|ordered \d+ items?|amazon\.com order|thank(s| you) for your (order|purchase))\b/i;
+const PROMO_RE = /(\bsales?\b|\d+\s?% off|\bdeals?\b|\bsave\b|coupon|offer|discount|free shipping|don'?t miss|last chance|limited time|waiting for you|reminder|rewards?|\bearn\b)/i;
 const SHIPPING_RE = /\b(shipped|out for delivery|delivered|tracking)\b/i;
 const CODE_RE = /\b(verification code|one-time|security code|sign-in code|2fa)\b/i;
 const CALENDAR_RE = /\b(invitation|invite|accepted|declined|tentative):|\.ics\b|calendar invitation/i;
@@ -59,6 +62,8 @@ const NOREPLY_RE = /^(no-?reply|do-?not-?reply|noreply|notifications?|mailer-dae
 
 export function decide(e) {
   if (["spam", "junk", "promotions", "social"].includes(e.folder)) return { stage: "provider", action: "skip", reason: `in ${e.folder}` };
+  // A receipt is not marketing just because the sender adds an unsubscribe link (most stores do). Promotional wording keeps it marketing.
+  if ((e.listUnsubscribe || e.precedenceBulk) && RECEIPT_RE.test(e.subject) && !PROMO_RE.test(e.subject)) return { stage: "money", action: "money", reason: "receipt or statement (sender adds an unsubscribe link)" };
   if (e.listUnsubscribe || e.precedenceBulk) return { stage: "headers", action: "archive", reason: e.listUnsubscribe ? "marketing (List-Unsubscribe)" : "bulk precedence" };
   if (CODE_RE.test(e.subject)) return { stage: "headers", action: "archive", reason: "one-time code" };
   if (CALENDAR_RE.test(e.subject)) return { stage: "calendar", action: "calendar", reason: "calendar invite" };
