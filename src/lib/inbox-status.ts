@@ -14,6 +14,12 @@ export function inboxStatus(i: StatusInput): InboxStatus {
   return "missing_info";
 }
 
+// An open item whose "Paid with" question was skipped (nothing chosen). It stays in the Inbox until the person answers; this only gathers them.
+export function isPaidWithSkipped(i: Pick<StatusInput, "read_result">): boolean {
+  const pw = (i.read_result as { paid_with?: { skipped?: boolean; value?: string } } | null | undefined)?.paid_with;
+  return !!pw && pw.skipped === true && !pw.value;
+}
+
 // A few words naming what is missing, for the tag on a missing-info row.
 export function missingNote(i: Pick<StatusInput, "missing" | "read_result">): string {
   const m = (i.missing ?? "").toLowerCase();

@@ -1,6 +1,6 @@
 // node scripts/filing-receipts-test.mjs : pure-function checks for card/month filing and the vehicle index.
 import assert from "node:assert/strict";
-import { receiptHome, receiptFileName, vehicleIndexHtml, indexKey, indexLocation, HOLD_DAYS } from "./filing-agent.mjs";
+import { receiptHome, receiptFileName, vehicleIndexHtml, indexKey, indexLocation, HOLD_DAYS, detailsOf, monthIndexPlan, monthIndexHtml } from "./filing-agent.mjs";
 const now = Date.parse("2026-10-23T12:00:00Z");
 const fresh = { date: "2026-10-20", created_at: "2026-10-22T10:00:00Z", card: null };
 assert.equal(receiptHome(fresh, now), null, "no card, fresh: waits");
@@ -24,4 +24,23 @@ assert.equal(indexKey("vehicle", "Sienna"), indexKey("vehicle", "sienna"), "same
 assert.deepEqual(indexLocation("vehicle", "Sienna"), { folder: "Organized/Personal/Documents/Vehicles/Sienna/", file: "Sienna - index.html" });
 assert.deepEqual(indexLocation("trip", "Moab trip"), { folder: "Organized/Personal/Documents/Indexes/Trips and events/", file: "Moab trip - index.html" });
 assert.equal(indexLocation("hobby", "Kayak").folder, "Organized/Personal/Documents/Indexes/hobby/", "unknown kinds still get a folder");
+// Details (what the paper says it paid for) and the month-folder index.
+assert.equal(detailsOf({ covers: "Google Workspace, medrepdesk.io", period: "Oct 2026", reference: "INV-1" }, null), "Covers: Google Workspace, medrepdesk.io · Period: Oct 2026 · Ref: INV-1");
+assert.equal(detailsOf({ covers: null, period: null, reference: null }, null), "");
+assert.equal(detailsOf(null, { external_ref: "amazon:112-3456789-1234567" }), "Ref: Amazon order 112-3456789-1234567");
+assert.equal(detailsOf({ reference: "INV-9" }, { external_ref: "amazon:1" }), "Ref: INV-9", "the paper's reference wins");
+assert.ok(html.includes("<th>Details</th>"));
+const fin = "/h/Organized/Personal/Documents/Finance";
+const plan = monthIndexPlan([
+  { date: "2026-10-22", title: "Moapa <Paiute>", amount: 21.98, details: "Covers: park fee", file: `${fin}/2026/Mastercard 1752/2026-10/2026-10-22 Moapa.jpg` },
+  { date: "2026-10-20", title: "AAA", amount: 242.88, details: "", file: `${fin}/2026/Mastercard 1752/2026-10/2026-10-20 AAA.jpeg` },
+  { date: "2026-10-23", title: "GitHub", amount: 4.3, file: null },                                        // not filed: left out
+  { date: "2026-10-01", title: "Elsewhere", amount: 1, file: "/h/Organized/Personal/Documents/Vehicles/Sienna/x.jpg" },   // outside Finance: left out
+  { date: "2026-10-02", title: "Loose", amount: 1, file: `${fin}/loose.jpg` },                            // directly in the Finance root: left out
+], fin);
+assert.deepEqual([...plan.keys()], [`${fin}/2026/Mastercard 1752/2026-10`]);
+const mh = monthIndexHtml(`${fin}/2026/Mastercard 1752/2026-10`, plan.get(`${fin}/2026/Mastercard 1752/2026-10`));
+assert.ok(mh.indexOf("AAA") < mh.indexOf("Moapa"), "oldest first");
+assert.ok(mh.includes("Moapa &lt;Paiute&gt;") && mh.includes("2026-10-22%20Moapa.jpg") && mh.includes("Covers: park fee"));
+assert.ok(mh.includes("2 receipts, $264.86 in all") && mh.includes("Mastercard 1752 · 2026-10"));
 console.log("filing receipts: all checks passed");

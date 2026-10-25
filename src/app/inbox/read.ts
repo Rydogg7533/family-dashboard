@@ -10,6 +10,7 @@ import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
+import { cleanDetails } from "@/lib/receipt-details";
 
 const READABLE = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -28,6 +29,9 @@ warranty_note: warranty or claim terms stated on it (e.g. "36-month free replace
 reimbursement_hint: true if it mentions reimbursement or a claim being owed back
 statement_period: for a statement, the month it covers as "YYYY-MM"|null; closing_date: the statement closing date "YYYY-MM-DD"|null; statement_balance: the new or statement balance in dollars|null; due_date: the payment due date "YYYY-MM-DD"|null
 order_number: the marketplace order number exactly as printed (Amazon: three digits, seven digits, seven digits joined by hyphens, like 123-1234567-1234567)|null
+covers: what this paid for, only if the paper states it: the account, workspace, domain, organization, plan, policy or property (e.g. "Google Workspace, medrepdesk.io, 3 seats", "GitHub org veil-labs, Pro plan", "AAA Club Assist membership"); short; never an account or card number|null
+period: the dates the payment covers if stated (e.g. "Oct 2026", "Oct 1 to Oct 31, 2026", "policy year 2026-2027"); one visit or one purchase = null
+reference: the invoice, order or confirmation number as printed (never an account, card or ID number)|null
 suggested_name: "YYYY-MM-DD Vendor what-it-is" in plain words, max 70 chars, no slashes
 confidence: 0 to 1 for how sure you are of kind, vendor and item
 If something is unreadable use null; do not guess.`;
@@ -59,7 +63,7 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v4", validate: jsonObjectValid });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v5", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
@@ -68,6 +72,7 @@ export async function readCapture(inboxId: string) {
   // Line items: kept clean; two or more kinds of purchase make the receipt "mixed" (it is still filed whole, once).
   const lines = cleanLines(parsed.lines);
   parsed.lines = lines;
+  Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
   parsed.category = effectiveCategory(typeof parsed.category === "string" ? parsed.category : "other", lines);
   const vLines = vehicleLines(lines);
   const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;

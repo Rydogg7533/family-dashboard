@@ -1,8 +1,14 @@
 // Needs Node 22.18+ (imports the TypeScript modules directly). Offline.
 import assert from "node:assert/strict";
-import { inboxStatus, missingNote, docKind, countBy, READY_ANSWERS } from "../src/lib/inbox-status.ts";
+import { inboxStatus, isPaidWithSkipped, missingNote, docKind, countBy, READY_ANSWERS } from "../src/lib/inbox-status.ts";
 import { FILE_YES, FILE_SAME } from "../src/lib/inbox-answers.ts";
-assert.deepEqual(READY_ANSWERS, [FILE_YES, FILE_SAME]);   // keep in step with the real answers
+assert.deepEqual(READY_ANSWERS, [FILE_YES, FILE_SAME]);
+// "Skipped": only an open question skipped with nothing chosen.
+assert.equal(isPaidWithSkipped({ read_result: { paid_with: { skipped: true } } }), true);
+assert.equal(isPaidWithSkipped({ read_result: { paid_with: { value: "Amex 1008" } } }), false);
+assert.equal(isPaidWithSkipped({ read_result: { paid_with: { skipped: true, value: "Amex 1008" } } }), false);
+assert.equal(isPaidWithSkipped({ read_result: {} }), false);
+assert.equal(isPaidWithSkipped({ read_result: null }), false);   // keep in step with the real answers
 
 const item = (o) => ({ kind: "file", file_path: "x", options: [], missing: "", read_result: null, ...o });
 assert.equal(inboxStatus(item({ options: [FILE_YES, "Not quite"] })), "needs_answer");

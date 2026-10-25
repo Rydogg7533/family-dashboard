@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxItem, DecidedItem, PaidWithContext } from "@/lib/data-inbox";
 import { SKIP, CLEAR } from "@/lib/paid-with";
 import { destination, folderWarnings, isFiledByCard, type DestRead } from "@/lib/destination";
-import { inboxStatus, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
+import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
@@ -35,10 +35,10 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   const fromWho = (i: InboxItem, id: string) => i.created_by === id || i.requested_by === names[id];
   const byPerson = filter === "all" ? sorted : filter === "mine" ? sorted.filter((i) => me && i.assigned_to === me) : sorted.filter((i) => fromWho(i, filter));
   // Status row (what is decided, what waits on you, what waits on a missing fact) and, once there are many items, a kind row (what went in).
-  const [st, setSt] = useState<"all" | "needs_answer" | "missing_info" | "handed" | "decided">("all");
+  const [st, setSt] = useState<"all" | "needs_answer" | "missing_info" | "skipped" | "handed" | "decided">("all");
   const [kd, setKd] = useState<string>("all");
-  const stCount = { all: byPerson.length, needs_answer: byPerson.filter((i) => inboxStatus(i) === "needs_answer").length, missing_info: byPerson.filter((i) => inboxStatus(i) === "missing_info").length, handed: byPerson.filter((i) => i.assigned_to).length, decided: decided.length };
-  const byStatus = st === "all" || st === "decided" ? byPerson : st === "handed" ? byPerson.filter((i) => i.assigned_to) : byPerson.filter((i) => inboxStatus(i) === st);
+  const stCount = { all: byPerson.length, needs_answer: byPerson.filter((i) => inboxStatus(i) === "needs_answer").length, missing_info: byPerson.filter((i) => inboxStatus(i) === "missing_info").length, skipped: byPerson.filter((i) => isPaidWithSkipped(i)).length, handed: byPerson.filter((i) => i.assigned_to).length, decided: decided.length };
+  const byStatus = st === "all" || st === "decided" ? byPerson : st === "handed" ? byPerson.filter((i) => i.assigned_to) : st === "skipped" ? byPerson.filter((i) => isPaidWithSkipped(i)) : byPerson.filter((i) => inboxStatus(i) === st);
   const kindOf = (i: InboxItem) => docKind(i);
   const kinds = KIND_ORDER.map((k) => ({ k, n: (st === "decided" ? decided.filter((d) => docKind({ read_result: { kind: d.kind } }) === k) : byStatus.filter((i) => kindOf(i) === k)).length })).filter((x) => x.n > 0);
   const showKinds = (st === "decided" ? decided.length : byPerson.length) >= 20 && kinds.length > 1;
@@ -72,7 +72,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
         <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2" role="group" aria-label="Filter by status">
-          {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || stCount[id] > 0).map(([id, label]) => (
+          {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["skipped", "Skipped"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || id === st || stCount[id] > 0).map(([id, label]) => (
             <button key={id} onClick={() => { setSt(id); setKd("all"); setShowAll(false); }} aria-pressed={st === id} className={`px-3 py-1.5 rounded-full min-h-9 ${st === id ? "bg-accent text-white" : "bg-soft"}`}>{label} <b>{stCount[id]}</b></button>
           ))}
         </div>
@@ -97,6 +97,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <div className="card text-muted">Nothing to identify, file or decide. Everything is where it belongs.</div>
         ) : (
           <div className="flex flex-col gap-2">
+            {shown.length === 0 && st === "skipped" && <div className="card text-muted text-sm">Nothing skipped right now. Receipts you already said Yes to without a card are under Money › Receipts to finish › No card yet.</div>}
             {shown.map((it) => <InboxCard key={it.id} item={it} me={me} names={names} paid={paid} onAnswer={(a) => resolve(it, a)} />)}
             {!showAll && visible.length > 5 && <button onClick={() => setShowAll(true)} className="text-sm font-semibold text-accent px-1 text-left min-h-10">and {visible.length - 5} more</button>}
           </div>
