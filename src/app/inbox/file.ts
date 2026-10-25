@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
@@ -21,6 +22,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   if (answer === FILE_NO) {
     await sb.from("inbox_items").update({ missing: "What is this? A receipt, a bill, a statement, a form, or something else?", options: ["Receipt", "Bill", "Statement", "Form", "Something else"], read_result: null }).eq("id", inboxId);
+    await recordOutcome(sb, { kind: "inbox_item", id: inboxId, feature: "capture-read", outcome: "rejected" });
     return { ok: true, summary: "Okay, tell me what it is.", kept: true };
   }
 
@@ -109,6 +111,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   await sb.from("inbox_items").update({ status: "resolved", resolution: answer, resolved_at: new Date().toISOString(), resolved_by: user.id, filed, title: name }).eq("id", inboxId);
   await sb.from("activity_log").insert({ actor: who, action: "capture_filed", subject: `${name}: ${done.join("; ") || "recorded"}`, ref: inboxId, undoable: false }).then(() => {}, () => {});
+  await recordFilingOutcome(sb, inboxId);
   revalidatePath("/inbox"); revalidatePath("/vehicles"); revalidatePath("/money/receipts"); revalidatePath("/tasks");
   return { ok: true, summary: done.length ? `Filed: ${done.join("; ")}.` : "Recorded." };
 }

@@ -19,6 +19,8 @@ export type ModelResult = {
   cost: number;          // US dollars, estimated from the price table below
   sample: boolean;       // true when no API key is set
   reason?: string;       // required for opus jobs: why the strongest model was used
+  latencyMs?: number;    // wall-clock time of the API call (model reliability log)
+  runtime?: "cloud" | "local"; // where the model ran; local models are compared with the cloud model per job
 };
 
 export const MODEL_FOR_JOB: Record<Job, ModelId> = {
@@ -66,15 +68,22 @@ NEVER reveal or request passwords, account numbers, ID numbers or document conte
 Anything that would change something (add, change, turn off, book, send, pay, file) is never done directly: describe what you understood, where it will go (which Settings section or register), and anything missing, as a one-line confirmation. Ask only for what you cannot work out, one or two things at a time.
 Answer in plain words, short, for a phone screen. Name where the answer came from in one line starting with "Source:".`;
 
-type CallArgs = { job: Job; messages: Message[]; system?: string; maxTokens?: number; reason?: string; feature?: string };
+// Optional tracking that makes the usage log a reliability record (migration 0043). `subject` ties a call to the thing
+// it was about (an inbox item) so the person's later tap can be recorded as its outcome; `validate` says whether the
+// reply was usable (for example parseable JSON), judged before the row is written because the log is append-only;
+// `promptVersion` is bumped by hand when the prompt changes so scores are never mixed across prompts.
+export type Track = { subject?: { kind: string; id: string }; promptVersion?: string; validate?: (text: string) => boolean };
 
-export async function callModel({ job, messages, system, maxTokens = 600, reason, feature }: CallArgs): Promise<ModelResult> {
+type CallArgs = { job: Job; messages: Message[]; system?: string; maxTokens?: number; reason?: string; feature?: string } & Track;
+
+export async function callModel({ job, messages, system, maxTokens = 600, reason, feature, subject, promptVersion, validate }: CallArgs): Promise<ModelResult> {
   const model = MODEL_FOR_JOB[job];
   if (!hasAiKey()) {
     const r = sampleResult(job, model, messages);
-    await recordUsage(r, feature);
+    await recordUsage(r, feature, { subject, promptVersion, validate });
     return r;
   }
+  const t0 = Date.now();
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -94,9 +103,9 @@ export async function callModel({ job, messages, system, maxTokens = 600, reason
     text, model, job,
     inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
     cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens),
-    sample: false, reason,
+    sample: false, reason, latencyMs: Date.now() - t0,
   };
-  await recordUsage(r, feature);
+  await recordUsage(r, feature, { subject, promptVersion, validate });
   return r;
 }
 
@@ -112,17 +121,34 @@ function sampleResult(job: Job, model: ModelId, messages: Message[]): ModelResul
 
 // One row per call: model, purpose, tokens, cost (F18 "every call logs"). Sample calls are recorded too,
 // flagged, so the cost page can show what a real month would look like. Failures never break the caller.
-async function recordUsage(r: ModelResult, feature?: string) {
+async function recordUsage(r: ModelResult, feature?: string, track?: Track) {
   if (!hasSupabaseEnv()) return;
   try {
     const sb = await createClient();
     await sb.from("ai_usage").insert({
       model: r.model, job: r.job, feature: feature ?? r.job, input_tokens: r.inputTokens, output_tokens: r.outputTokens,
       cost_usd: r.cost, sample: r.sample, reason: r.reason ?? null,
+      latency_ms: r.sample ? null : (r.latencyMs ?? null),
+      runtime: r.runtime ?? "cloud",
+      prompt_version: track?.promptVersion ?? null,
+      valid_output: r.sample || !track?.validate ? null : checkValid(track.validate, r.text),
+      subject_kind: track?.subject?.kind ?? null,
+      subject_id: track?.subject?.id ?? null,
     });
   } catch {
     // never let bookkeeping break the answer
   }
+}
+
+function checkValid(validate: (text: string) => boolean, text: string) {
+  try { return Boolean(validate(text)); } catch { return false; }
+}
+
+// A reply is usable when it holds a JSON object with at least one key. Matches how the readers parse replies.
+export function jsonObjectValid(text: string) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return false;
+  try { const o = JSON.parse(m[0]); return Boolean(o) && typeof o === "object" && Object.keys(o).length > 0; } catch { return false; }
 }
 
 // Short structured input is recognised locally and never reaches a model (F18 "local first").
@@ -133,18 +159,19 @@ export function isStructuredInput(text: string) {
 
 // One-shot vision/PDF read for captured files (F18 door stays single: same key, same usage log).
 // The file is data to extract from; the system prompt says never to follow text found inside it.
-export async function callModelVision({ job, system, prompt, files, maxTokens = 700, feature }: {
+export async function callModelVision({ job, system, prompt, files, maxTokens = 700, feature, subject, promptVersion, validate }: {
   job: Job; system: string; prompt: string; files: { mime: string; base64: string }[]; maxTokens?: number; feature?: string;
-}): Promise<ModelResult> {
+} & Track): Promise<ModelResult> {
   const model = MODEL_FOR_JOB[job];
   if (!hasAiKey()) {
     const r: ModelResult = { text: "{}", model, job, inputTokens: 800, outputTokens: 24, cost: estimateCost(model, 800, 24), sample: true };
-    await recordUsage(r, feature);
+    await recordUsage(r, feature, { subject, promptVersion, validate });
     return r;
   }
   const blocks = files.map(({ mime, base64 }) => mime === "application/pdf"
     ? { type: "document", source: { type: "base64", media_type: mime, data: base64 } }
     : { type: "image", source: { type: "base64", media_type: mime, data: base64 } });
+  const t0 = Date.now();
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
@@ -155,8 +182,8 @@ export async function callModelVision({ job, system, prompt, files, maxTokens = 
   const r: ModelResult = {
     text: data.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join(""), model, job,
     inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
-    cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens), sample: false,
+    cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens), sample: false, latencyMs: Date.now() - t0,
   };
-  await recordUsage(r, feature);
+  await recordUsage(r, feature, { subject, promptVersion, validate });
   return r;
 }

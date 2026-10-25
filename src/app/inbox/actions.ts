@@ -4,7 +4,7 @@ import { fileCapture } from "@/app/inbox/file";
 import { readCapture } from "@/app/inbox/read";
 import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 import { filingFolders, vendorKey, toTemplate } from "@/lib/filing-folders";
-import { callModel } from "@/lib/ai";
+import { callModel, jsonObjectValid } from "@/lib/ai";
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
 export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
@@ -134,7 +134,7 @@ export async function changeFiling(id: string, input: { folder?: string; request
   if (!request) return { ok: false, message: "Say what you want to know or change." };
   const facts = JSON.stringify({ vendor: rr.vendor, item: rr.item, category: rr.category, amount: rr.amount, date: rr.date, kind: rr.kind });
   const r = await callModel({
-    job: "file", maxTokens: 400, feature: "filing-folder",
+    job: "file", maxTokens: 400, feature: "filing-folder", subject: { kind: "inbox_item", id }, promptVersion: "filing-folder-v1", validate: jsonObjectValid,
     system: `You help choose the folder for one scanned document in a household filing system. Folders are ONLY from this list (exact strings):\n${choices.join("\n")}\nRules: restaurants and takeout go to Dining; other purchase receipts to Receipts; vehicle repairs and parts to that vehicle's folder; home repairs to Home. Reply with JSON only: {"action":"answer"|"change","folder":<exact string from the list or null>,"reply":<one or two short sentences>}. Use "answer" when the person is asking whether the current folder is right (say yes or no and why); use "change" only when they tell you to move it or you must correct an obvious mistake.`,
     messages: [{ role: "user", content: `Document facts: ${facts}\nCurrent folder: ${home}\nPerson says: ${request}` }],
   });

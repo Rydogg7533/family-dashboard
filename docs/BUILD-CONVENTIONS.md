@@ -11,3 +11,11 @@ Rules from docs/requirements.md that every page must follow: phone first (max-w-
 AI calls: all go through `src/lib/ai.ts` (to be created by the Ask slice): `callModel({ job, messages })` routes by job to haiku/sonnet/opus per F18, uses `ANTHROPIC_API_KEY` if set, otherwise returns a deterministic sample reply tagged `{ sample: true }`. Other slices import it; never call the API directly.
 
 Verification: `npx next build` must pass with zero errors before you finish. Then screenshot every page you added at 390x844 with /tmp/claude-0/shot.mjs (edit the route list; chromium at /opt/pw-browsers/chromium-1194/chrome-linux/chrome; app on a port of your choosing via `npx next start -p PORT`; never use pkill, stop the server with `kill <pid>` of the process you started). Read each screenshot and fix anything broken or ugly. Commit your work with a clear message ending in the attribution lines in this repo's recent commits (git log -1).
+
+## Model reliability log (added 2026-10-24, migration 0043/0044)
+- Every model call goes through `callModel` / `callModelVision` in `src/lib/ai.ts` and writes one `ai_usage` row, now with `latency_ms`, `runtime` (cloud or local), `prompt_version`, `valid_output`, `subject_kind` and `subject_id`.
+- Pass `subject` (the thing the call was about), `promptVersion` and `validate` (for example `jsonObjectValid`) on any call whose result a person will act on. Validity is judged before the row is written because the log is append-only.
+- Bump `promptVersion` by hand whenever the prompt text changes, so scores are never mixed across prompts.
+- Record what the person did with the result in `ai_outcomes` through `src/lib/ai-outcomes.ts` (`recordOutcome`, `recordFilingOutcome`): accepted, edited (field names only) or rejected. Never update or delete outcome rows.
+- `model_scorecard` (view) is the per-job, per-model, per-prompt-version summary. Switch a job to a different or local model only after the new model is replayed against past results and matches or beats the current one; log the decision in the decisions log.
+- Telemetry that leaves a household is shape only and opt-in: counts, rates, latency, field names. Never values or documents.
