@@ -51,7 +51,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
         )}
       </Section>
 
-      <Section title="Expecting a charge" right={`${expecting.length}`}>
+      <Section title="Expecting a charge" right={<Link href="/money/receipts-to-finish" className="font-semibold text-accent">Receipts to finish ›</Link>}>
         {expecting.length === 0 ? <div className="card text-muted text-sm">No receipts waiting for their charge.</div> : (
           <div className="flex flex-col gap-2">{expecting.map((r) => (
             <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives{r.home_path ? <> · filed at {r.home_path.replace(/^.*\/Organized\//, "Organized/")}</> : " · filed by card and month once you say which card"}</div><CardPicker r={r} known={knownCards} /><SubjectPicker r={r} subjects={subj.subjects} linked={subj.links.filter((l) => l.receipt_id === r.id).map((l) => l.subject_id)} /></div>

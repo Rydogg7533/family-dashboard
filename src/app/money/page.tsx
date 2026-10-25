@@ -2,6 +2,7 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section, OpenIn, SyncLine, Bar, ProofDot } from "@/components/money";
 import { getRoutine } from "@/lib/data-money-routine";
+import { splitToFinish } from "@/lib/receipts-to-finish";
 import { getAccounts, getTransactions, getReceipts, getReconciliations, getRecurring, getCategorySpend, getSpendingMonitor, getProofs, buildNeedsMe, money, shortDate, daysUntil, accountLabel, proofState } from "@/lib/data-money";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function Money() {
   const needs = buildNeedsMe(tx, receipts, recs, recurring, accounts);
   const routine = await getRoutine();
   const routineOverdue = routine?.items.filter((i) => i.overdue).length ?? 0;
+  const finish = splitToFinish(receipts, Date.now());
   const top = needs.slice(0, 5);
   const spent = cats.reduce((n, c) => n + c.spent, 0), typical = cats.reduce((n, c) => n + c.typical, 0);
   const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings" || a.kind === "business").reduce((n, a) => n + (a.balance_current ?? 0), 0);
@@ -26,6 +28,12 @@ export default async function Money() {
   return (
     <>
       <H1 right={<SyncLine at={synced} />}>Money</H1>
+
+      <Link href="/money/receipts-to-finish" className={`card flex flex-col gap-2 mb-5 min-h-11 ${finish.total ? "border-amber bg-amber-bg" : "border-green"}`}>
+        <div className="flex justify-between items-center gap-2"><span className="text-lg font-bold">Receipts to finish</span><span className={`text-3xl font-bold ${finish.total ? "text-amber" : "text-green"}`}>{finish.total}</span></div>
+        {finish.total ? <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-amber-bg px-2.5 py-1 text-amber">{finish.noCard.length} need a card</span><span className="rounded-full bg-soft px-2.5 py-1">{finish.waiting.length} waiting for the charge</span></div> : <div className="text-sm text-green font-semibold">All settled</div>}
+        <span className="text-sm font-semibold text-accent">Open ›</span>
+      </Link>
 
       <Section title="Needs me" right={needs.length ? `${needs.length} open` : "all good"}>
         {routine && routine.total > 0 && (
