@@ -3,6 +3,8 @@
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
+import { matchAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
+import { FILE_YES } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
@@ -22,6 +24,7 @@ warranty_relevant: true if this is a repair, part, appliance, electronics, tool 
 card_last4: the last four digits of the card paid with if printed (e.g. "1004"), else null; card_brand: "Visa"|"Mastercard"|"Amex"|"Discover"|null
 warranty_note: warranty or claim terms stated on it (e.g. "36-month free replacement")|null
 reimbursement_hint: true if it mentions reimbursement or a claim being owed back
+statement_period: for a statement, the month it covers as "YYYY-MM"|null; closing_date: the statement closing date "YYYY-MM-DD"|null; statement_balance: the new or statement balance in dollars|null; due_date: the payment due date "YYYY-MM-DD"|null
 order_number: the marketplace order number exactly as printed (Amazon: three digits, seven digits, seven digits joined by hyphens, like 123-1234567-1234567)|null
 suggested_name: "YYYY-MM-DD Vendor what-it-is" in plain words, max 70 chars, no slashes
 confidence: 0 to 1 for how sure you are of kind, vendor and item
@@ -54,7 +57,7 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v2", validate: jsonObjectValid });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v3", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
@@ -67,6 +70,26 @@ export async function readCapture(inboxId: string) {
   const veh = typeof parsed.for_vehicle_hint === "string" && parsed.for_vehicle_hint ? ` for the ${parsed.for_vehicle_hint}` : "";
   const summary = what ? `Looks like a ${kindLabel}: ${what}${veh}${money}${parsed.date ? `, ${parsed.date}` : ""}.` : null;
   const name = typeof parsed.suggested_name === "string" ? parsed.suggested_name.replace(/[\\/:*?"<>|]/g, "").slice(0, 70) : null;
+
+  // A statement is filed with its account, under Statements, never as a receipt.
+  if (parsed.kind === "statement") {
+    const { data: accts } = await sb.from("accounts").select("id,institution,last4,retired_at");
+    const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
+    const acct = matchAccount(list, parsed.card_last4);
+    const period = statementPeriod(parsed as { statement_period?: unknown; closing_date?: unknown; date?: unknown }) ?? new Date().toISOString().slice(0, 7);
+    parsed.statement_period = period;
+    parsed.statement_account = acct ? { id: acct.id, label: accountLabel(acct) } : null;
+    const sName = acct ? statementName(period, acct) : (name ?? `${period} statement`);
+    const sHome = acct ? statementHome(period, acct) : `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/`;
+    parsed.plan = [{ t: "file", text: `${sName} → kept in the app; a copy goes to ${sHome} when the Mac mini filing agent is running` }, { t: "link", text: acct ? `Money › ${accountLabel(acct)}: statement for ${period} on the account; the monthly routine step ticks itself` : "Not linked to an account until you say which" }];
+    parsed.home = sHome;
+    const bal = typeof parsed.statement_balance === "number" ? `, balance $${(parsed.statement_balance as number).toFixed(2)}` : "";
+    const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
+    if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}. File it?`; update.options = [FILE_YES, FILE_NO]; }
+    else { update.missing = `Looks like a statement${bal}${parsed.card_last4 ? ` ending ····${String(parsed.card_last4).replace(/\D/g, "").slice(-4)}` : ""}, ${period}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
+    await sb.from("inbox_items").update(update).eq("id", inboxId);
+    return { ok: true, name: sName, confidence: conf };
+  }
 
   const { data: vehicles } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
   const vlist = (vehicles ?? []) as VRow[];

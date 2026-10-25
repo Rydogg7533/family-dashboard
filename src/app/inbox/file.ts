@@ -11,8 +11,9 @@ import { findSameReceipt, findOrderReceipt, extractOrderNumber, amountsMatch, bl
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
+import { matchAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
-type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null };
+type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();
@@ -33,6 +34,26 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const done: string[] = [];
   const filed: Record<string, unknown> = {};
   const wantClaim = answer === FILE_CLAIM;
+
+  // 0. A statement: linked to its account for the period, filed under Statements, never turned into a receipt.
+  if (r.kind === "statement") {
+    const { data: accts } = await sb.from("accounts").select("id,institution,last4,retired_at");
+    const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
+    const acct = accountFromAnswer(list, answer) ?? matchAccount(list, r.card_last4);
+    if (!acct) {
+      await sb.from("inbox_items").update({ missing: "Which account is this statement for?", options: [...list.map((a) => `${a.institution} ····${a.last4}`), "Something else"] }).eq("id", inboxId);
+      return { ok: true, summary: "Which account is it for?", kept: true };
+    }
+    const period = (r.statement_period && /^\d{4}-\d{2}$/.test(r.statement_period) ? r.statement_period : null) ?? (r.closing_date ?? r.date ?? new Date().toISOString()).slice(0, 7);
+    const sName = statementName(period, acct);
+    const { data: st, error } = await sb.from("account_statements").upsert({ account_id: acct.id, period, inbox_id: inboxId, file_path: row.file_path, name: sName, closing_date: r.closing_date ?? null, statement_balance: typeof r.statement_balance === "number" ? r.statement_balance : null, due_date: r.due_date ?? null, filed_by: who }, { onConflict: "inbox_id" }).select("id").maybeSingle();
+    if (error) return { ok: false, summary: `Could not file the statement: ${error.message}` };
+    filed.statement_id = st?.id ?? null; filed.account_id = acct.id; filed.period = period;
+    await sb.from("inbox_items").update({ status: "resolved", resolution: answer, resolved_at: new Date().toISOString(), resolved_by: user.id, filed, title: sName }).eq("id", inboxId);
+    await sb.from("activity_log").insert({ actor: who, action: "statement_filed", subject: sName.slice(0, 80), ref: inboxId, undoable: false }).then(() => {}, () => {});
+    await recordOutcome(sb, { kind: "inbox_item", id: inboxId, feature: "capture-read", outcome: "accepted" }).catch(() => null);
+    return { ok: true, summary: `Filed: ${sName}. The monthly routine step for this account ticks itself.` };
+  }
 
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
   const orderNo = extractOrderNumber(r.order_number);

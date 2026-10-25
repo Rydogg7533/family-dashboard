@@ -50,7 +50,14 @@ async function sharedAcknowledge(sb: Sb): Promise<Evidence> {
   return count ? { met: false, line: `${count} change${count === 1 ? "" : "s"} waiting for the other parent` } : { met: true, line: "no acknowledgements waiting" };
 }
 // A statement for this account and period: an Inbox document the reader called a statement, carrying the account's last four, captured this month or the next.
-async function statement(sb: Sb, period: string, last4: string | null): Promise<Evidence> {
+async function statement(sb: Sb, period: string, last4: string | null, accountId: string | null): Promise<Evidence> {
+  // First choice: a filed statement row for this account (any period filed this month or the one before counts; statements close on their own cycle).
+  if (accountId) {
+    const [y, m] = period.split("-").map(Number);
+    const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
+    const { data } = await sb.from("account_statements").select("period, name").eq("account_id", accountId).in("period", [period, prev]).limit(1);
+    if (data?.length) return { met: true, line: `filed: ${data[0].name}` };
+  }
   if (!last4) return { met: false, line: "no last four on this account; mark it by hand" };
   const [y, m] = period.split("-").map(Number);
   const from = new Date(Date.UTC(y, m - 1, 1)).toISOString(), to = new Date(Date.UTC(y, m + 1, 1)).toISOString();
@@ -60,7 +67,7 @@ async function statement(sb: Sb, period: string, last4: string | null): Promise<
 }
 
 // null = the app cannot prove this step yet (manual only).
-export async function evidenceFor(sb: Sb, key: string, period: string, accountLast4: string | null): Promise<Evidence | null> {
+export async function evidenceFor(sb: Sb, key: string, period: string, accountLast4: string | null, accountId: string | null = null): Promise<Evidence | null> {
   if (key === "tiller:fill") return tillerFill(sb);
   if (key === "amazon:invoices") return amazonInvoices(sb);
   if (key === "inbox:answer") return inboxAnswer(sb);
@@ -68,6 +75,6 @@ export async function evidenceFor(sb: Sb, key: string, period: string, accountLa
   if (key === "transfers:confirm") return transfersConfirm(sb);
   if (key === "recurring:candidates") return recurringCandidates(sb);
   if (key === "shared:acknowledge") return sharedAcknowledge(sb);
-  if (key.startsWith("statement:")) return statement(sb, period, accountLast4 ?? key.match(/(\d{4})$/)?.[1] ?? null);
+  if (key.startsWith("statement:")) return statement(sb, period, accountLast4 ?? key.match(/(\d{4})$/)?.[1] ?? null, accountId);
   return null;   // amazon:history waits for the order-history reader
 }

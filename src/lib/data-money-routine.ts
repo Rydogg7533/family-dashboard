@@ -36,7 +36,7 @@ export async function getRoutine(period = currentPeriod()): Promise<Routine | nu
   { const { data: a } = await sb.from("accounts").select("id,last4"); for (const x of a ?? []) accts.set(x.id as string, (x.last4 as string | null) ?? null); }
   const evid = new Map<string, Evidence | null>();
   for (const s of live) {
-    const e = await evidenceFor(sb, s.key, period, s.account_id ? accts.get(s.account_id) ?? null : null).catch(() => null);
+    const e = await evidenceFor(sb, s.key, period, s.account_id ? accts.get(s.account_id) ?? null : null, s.account_id).catch(() => null);
     evid.set(s.id, e);
     const run = byStep.get(s.id);
     if (e?.met && run && run.status === "open") {
