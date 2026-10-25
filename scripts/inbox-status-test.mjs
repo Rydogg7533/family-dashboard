@@ -34,3 +34,11 @@ assert.equal(decidedOutcome({ statement_id: "s" }, null), "Statement filed");
 assert.equal(decidedOutcome(null, "Personal"), "Answered: Personal");
 assert.equal(decidedOutcome(null, null), "Resolved");
 console.log("decidedOutcome: all checks passed");
+import { vehicleFor } from "../src/lib/match-vehicle.ts";
+const V = [{ id: "t", name: "2016 Chevrolet Tahoe", short: "Tahoe", make: "Chevrolet", model: "Tahoe", year: 2016, details: null }, { id: "s", name: "2018 Toyota Sienna", short: "Sienna", make: "Toyota", model: "Sienna", year: 2018, details: null }];
+assert.equal(vehicleFor("car implied by car wash service", "2016 Chevrolet Tahoe", V).id, "t");   // the hint fails, the tapped answer wins
+assert.equal(vehicleFor("2018 Toyota Sienna", "Yes, file it", V).id, "s");                          // the paper names it; a plain Yes keeps it
+assert.equal(vehicleFor(null, "Yes, file it", V), null);                                            // nothing names a vehicle: the filer must ask
+assert.equal(vehicleFor(null, "Not a vehicle receipt", V), null);
+assert.equal(vehicleFor("car", "the Tahoe or the Sienna", V), null);                                 // two fit: ask
+console.log("vehicleFor: all checks passed");

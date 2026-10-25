@@ -7,3 +7,8 @@ export function matchVehicle(hint: string | null | undefined, vs: VRow[]): VRow 
   const hits = vs.filter((v) => [v.short, v.model, v.name].some((t) => t && h.includes(t.toLowerCase())));
   return hits.length === 1 ? hits[0] : null;
 }
+
+// The vehicle for a receipt: what the paper says, else what the person answered (a tapped name or words). Null when neither fits exactly one.
+export function vehicleFor(hint: string | null | undefined, answer: string | null | undefined, vs: VRow[]): VRow | null {
+  return matchVehicle(hint, vs) ?? matchVehicle(answer, vs);
+}

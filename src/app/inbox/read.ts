@@ -4,7 +4,7 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
 import { matchAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
-import { FILE_YES } from "@/lib/inbox-answers";
+import { FILE_YES, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
@@ -145,7 +145,7 @@ export async function readCapture(inboxId: string) {
 
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
-    if (needsVehicle && !parsed.for_vehicle_hint) { update.missing = `${summary} Which vehicle is it for?`; update.options = vNames.length ? [...vNames, "Something else"] : ["Something else"]; }
+    if (needsVehicle && !vehicle) { update.missing = `${summary} Which vehicle is it for?`; update.options = [...vNames, NOT_VEHICLE]; }
     else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string; order?: string }; update.missing = nr.order ? `${summary} This is Amazon order ${nr.order}. The order total on file is $${nr.amount.toFixed(2)}, but this document says ${money.trim() || "a different amount"} (an invoice can cover part of an order). Attach it to that order?` : `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }

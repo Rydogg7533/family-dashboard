@@ -5,3 +5,5 @@ export const FILE_NO = "Not quite";
 // Near match (same vendor, date within a day, amount close): the person decides.
 export const FILE_SAME = "Same purchase, attach it";
 export const FILE_DIFFERENT = "Different purchase, file it";
+// A vehicle receipt cannot be filed without a vehicle; this is the honest way out: it was never a vehicle receipt.
+export const NOT_VEHICLE = "Not a vehicle receipt";

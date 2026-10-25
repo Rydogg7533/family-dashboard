@@ -5,12 +5,12 @@
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
-import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
+import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
 import { findSameReceipt, findOrderReceipt, extractOrderNumber, amountsMatch, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
-import { matchVehicle, type VRow } from "@/lib/match-vehicle";
+import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
 import { matchAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
@@ -55,6 +55,21 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     return { ok: true, summary: `Filed: ${sName}. The monthly routine step for this account ticks itself.` };
   }
 
+  // 0b. A vehicle receipt is never filed without a vehicle. The paper's hint or the person's answer must name exactly one;
+  //     otherwise ask again. "Not a vehicle receipt" is the only way out: it becomes an ordinary receipt, shown for one more tap.
+  const { data: vs } = await sb.from("vehicles").select("id,name,short,make,model,year,details");
+  if (answer === NOT_VEHICLE) {
+    const rr: Record<string, unknown> = { ...(row.read_result as Record<string, unknown>), category: "other", warranty_relevant: false };
+    rr.plan = ((rr.plan as ({ t: string; text: string } | string)[] | undefined) ?? []).filter((p) => !/service history|warranty list|No vehicle matched/.test(typeof p === "string" ? p : p.text));
+    await sb.from("inbox_items").update({ read_result: rr, missing: "Filing it as an ordinary receipt, not a vehicle one. Is that right?", options: ["Yes, file it", "Not quite"] }).eq("id", inboxId);
+    return { ok: true, summary: "Okay, treating it as an ordinary receipt. Tap Yes to file it.", kept: true };
+  }
+  if (r.category === "vehicle" && !vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[])) {
+    const names = ((vs ?? []) as VRow[]).map((v) => v.name);
+    await sb.from("inbox_items").update({ missing: "Which vehicle is it for? A vehicle receipt needs one before it can be filed.", options: [...names, NOT_VEHICLE] }).eq("id", inboxId);
+    return { ok: true, summary: "Which vehicle is it for?", kept: true };
+  }
+
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
   const orderNo = extractOrderNumber(r.order_number);
   if (orderNo || (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date)) {
@@ -92,8 +107,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   // 2. The vehicle: service history and any warranty the paper states.
   let vehicle: VRow | null = null;
-  const { data: vs } = await sb.from("vehicles").select("id,name,short,make,model,year,details");
-  if (r.category === "vehicle" || r.warranty_relevant) vehicle = matchVehicle(r.for_vehicle_hint, (vs ?? []) as VRow[]);
+  if (r.category === "vehicle" || r.warranty_relevant) vehicle = vehicleFor(r.for_vehicle_hint, answer, (vs ?? []) as VRow[]);
   if (vehicle) {
     const d = { ...(vehicle.details ?? {}) } as Record<string, unknown>;
     const log = ((d.serviceLog as Array<Record<string, string>>) ?? []).slice();
