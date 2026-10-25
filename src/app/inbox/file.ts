@@ -7,12 +7,12 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
-import { findSameReceipt, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
+import { findSameReceipt, findOrderReceipt, extractOrderNumber, amountsMatch, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 
-type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null };
+type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; for_vehicle_hint?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, summary: "Filed (sample mode)." };
   const sb = await createClient();
@@ -35,9 +35,16 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const wantClaim = answer === FILE_CLAIM;
 
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
-  if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
+  const orderNo = extractOrderNumber(r.order_number);
+  if (orderNo || (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date)) {
     // Exact matches link silently. A near match waits for the person's answer: same purchase, or a different one.
-    let same = answer === FILE_DIFFERENT ? null : await findSameReceipt(sb, String(r.vendor), r.amount, String(r.date));
+    let same: Awaited<ReturnType<typeof findSameReceipt>> = null;
+    if (orderNo && answer !== FILE_DIFFERENT) {
+      // An order number outranks name, amount and date. Same total (or no total on the paper): attach quietly. A different total waits for "Same purchase, attach it".
+      const o = await findOrderReceipt(sb, orderNo);
+      if (o && (typeof r.amount !== "number" || amountsMatch(Number(o.amount), r.amount) || answer === FILE_SAME)) same = o;
+    }
+    if (!same && answer !== FILE_DIFFERENT && r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) same = await findSameReceipt(sb, String(r.vendor), r.amount, String(r.date));
     if (!same && answer === FILE_SAME) {
       const nid = (r as { near_receipt?: { id?: string } }).near_receipt?.id;
       if (nid) same = ((await sb.from("receipts").select("*").eq("id", nid).is("duplicate_of", null).maybeSingle()).data as typeof same) ?? null;
@@ -49,8 +56,8 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
       await attachDocument(sb, same.id, { inbox_id: inboxId, path: (row.file_path as string | null) ?? null, name: name ?? null, source: "upload" });
       filed.duplicate_of = same.id; filed.receipt_id = same.id; done.push("already in Receipts (this document attached to it, not added twice)");
     }
-    else {
-      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id, documents: [{ inbox_id: inboxId, path: row.file_path ?? null, name: name ?? null, source: "upload", added_at: new Date().toISOString() }] }).select("id").single();
+    else if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
+      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, external_ref: orderNo && answer !== FILE_DIFFERENT ? `amazon:${orderNo}` : null, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id, documents: [{ inbox_id: inboxId, path: row.file_path ?? null, name: name ?? null, source: "upload", added_at: new Date().toISOString() }] }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
     }
   }

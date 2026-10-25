@@ -2,7 +2,7 @@
 // Reads a stored capture once, right after upload: what is it, who from, how much, what for, and a proposed filename.
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { findSameReceipt, findNearReceipt } from "@/lib/receipt-match";
+import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
@@ -22,6 +22,7 @@ warranty_relevant: true if this is a repair, part, appliance, electronics, tool 
 card_last4: the last four digits of the card paid with if printed (e.g. "1004"), else null; card_brand: "Visa"|"Mastercard"|"Amex"|"Discover"|null
 warranty_note: warranty or claim terms stated on it (e.g. "36-month free replacement")|null
 reimbursement_hint: true if it mentions reimbursement or a claim being owed back
+order_number: the marketplace order number exactly as printed (Amazon: three digits, seven digits, seven digits joined by hyphens, like 123-1234567-1234567)|null
 suggested_name: "YYYY-MM-DD Vendor what-it-is" in plain words, max 70 chars, no slashes
 confidence: 0 to 1 for how sure you are of kind, vendor and item
 If something is unreadable use null; do not guess.`;
@@ -53,7 +54,7 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v1", validate: jsonObjectValid });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v2", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
@@ -84,6 +85,20 @@ export async function readCapture(inboxId: string) {
   }
   const home = home0;
   plan.push({ t: "file", text: parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 ? `${name ?? "this receipt"} → kept in the app; one file goes to Finance by card and month once you say which card (Money › Receipts)${vehicle ? `, and it is listed in the ${vehicle.short} index` : ""}` : `${name ?? "this document"} → kept in the app; a copy goes to ${home}${ruleNote} when the Mac mini filing agent is running` });
+  // An order number outranks name, amount and date (an Amazon invoice finds the receipt made from the order email).
+  const orderNo = extractOrderNumber(parsed.order_number);
+  parsed.order_number = orderNo;
+  const byOrder = orderNo ? await findOrderReceipt(sb, orderNo) : null;
+  if (byOrder) {
+    const amt = typeof parsed.amount === "number" ? parsed.amount : null;
+    if (amt === null || amountsMatch(Number(byOrder.amount), amt)) {
+      parsed.same_receipt = { id: byOrder.id, merchant: byOrder.merchant, order: orderNo };
+      plan.push({ t: "link", text: `Money › Receipts: this is Amazon order ${orderNo}, already there; this file will be attached to it, not added twice` });
+    } else {
+      parsed.near_receipt = { id: byOrder.id, merchant: byOrder.merchant, amount: Number(byOrder.amount), date: String(byOrder.date), order: orderNo };
+      plan.push({ t: "link", text: `Money › Receipts: Amazon order ${orderNo} is there at $${Number(byOrder.amount).toFixed(2)}; this document says $${amt.toFixed(2)}; you choose whether to attach it to that order` });
+    }
+  } else
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
     const dup = await findSameReceipt(sb, String(parsed.vendor), parsed.amount as number, String(parsed.date));
     if (dup) parsed.same_receipt = { id: dup.id, merchant: dup.merchant };
@@ -108,7 +123,7 @@ export async function readCapture(inboxId: string) {
   const update: Record<string, unknown> = { read_result: parsed, suggested_name: name, read_at: new Date().toISOString() };
   if (summary && conf >= 0.6) {
     if (needsVehicle && !parsed.for_vehicle_hint) { update.missing = `${summary} Which vehicle is it for?`; update.options = vNames.length ? [...vNames, "Something else"] : ["Something else"]; }
-    else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string }; update.missing = `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
+    else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string; order?: string }; update.missing = nr.order ? `${summary} This is Amazon order ${nr.order}. The order total on file is $${nr.amount.toFixed(2)}, but this document says ${money.trim() || "a different amount"} (an invoice can cover part of an order). Attach it to that order?` : `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }
   await sb.from("inbox_items").update(update).eq("id", inboxId);

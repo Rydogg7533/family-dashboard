@@ -64,3 +64,25 @@ export async function findNearReceipt(sb: { from: (t: string) => any }, vendor: 
   const { data } = await sb.from("receipts").select("*").gte("date", iso(t - DAY)).lte("date", iso(t + DAY)).is("duplicate_of", null).order("created_at", { ascending: true }).limit(40);
   return ((data ?? []) as SameRow[]).find((x) => normalizeVendor(x.merchant) === key && !(x.date === date && Number(x.amount) === amount) && amountsClose(Number(x.amount), amount)) ?? null;
 }
+
+// ---- Marketplace orders ----
+// Amazon order numbers are three digits, seven digits, seven digits joined by hyphens. An order number outranks name, amount and date:
+// an invoice for order X belongs to the receipt created from the order email (external_ref "amazon:X"), whatever the vendor is spelled
+// ("Amazon.com" against "Amazon") and whichever day the invoice is dated.
+const ORDER_RE = /\b(\d{3}-\d{7}-\d{7})\b/;
+export function extractOrderNumber(v: unknown): string | null {
+  const m = String(v ?? "").match(ORDER_RE);
+  return m ? m[1] : null;
+}
+export const amountsMatch = (a: number, b: number) => Math.round(a * 100) === Math.round(b * 100);
+
+// The kept receipt for an order. If the order's own row was retired as a duplicate, follow it to the row that was kept.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function findOrderReceipt(sb: { from: (t: string) => any }, orderNumber: string): Promise<SameRow | null> {
+  const { data } = await sb.from("receipts").select("*").eq("external_ref", `amazon:${orderNumber}`).limit(1);
+  const row = ((data ?? []) as (SameRow & { duplicate_of?: string | null })[])[0];
+  if (!row) return null;
+  if (!row.duplicate_of) return row;
+  const { data: kept } = await sb.from("receipts").select("*").eq("id", row.duplicate_of).maybeSingle();
+  return (kept as SameRow | null) ?? null;
+}
