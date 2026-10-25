@@ -52,7 +52,8 @@ export function openGmail(args, { allowWrite }) {
 }
 
 // ---------- the free rules ----------
-const RECEIPT_RE = /\b(receipt|your order|order confirmation|invoice|payment received|e-?receipt|statement is (ready|available)|your statement)\b/i;
+const RECEIPT_RE = /\b(receipt|your order|order confirmation|invoice|payment received|e-?receipt|statement is (ready|available)|your statement|ordered \d+ items?|amazon\.com order|thank(s| you) for your (order|purchase))\b/i;
+const PROMO_RE = /(\bsales?\b|\d+\s?% off|\bdeals?\b|\bsave\b|coupon|offer|discount|free shipping|don'?t miss|last chance|limited time|waiting for you|reminder|rewards?|\bearn\b)/i;
 const SHIPPING_RE = /\b(shipped|out for delivery|delivered|tracking)\b/i;
 const CODE_RE = /\b(verification code|one-time|security code|sign-in code|2fa)\b/i;
 const CALENDAR_RE = /\b(invitation|invite|accepted|declined|tentative):|\.ics\b|calendar invitation/i;
@@ -61,6 +62,8 @@ const NOREPLY_RE = /^(no-?reply|do-?not-?reply|noreply|notifications?|mailer-dae
 
 export function decide(e) {
   if (["spam", "junk", "promotions", "social"].includes(e.folder)) return { stage: "provider", action: "skip", reason: `in ${e.folder}` };
+  // A receipt is not marketing just because the sender adds an unsubscribe link (most stores do). Promotional wording keeps it marketing.
+  if ((e.listUnsubscribe || e.precedenceBulk) && RECEIPT_RE.test(e.subject) && !PROMO_RE.test(e.subject)) return { stage: "money", action: "money", reason: "receipt or statement (sender adds an unsubscribe link)" };
   if (e.listUnsubscribe || e.precedenceBulk) return { stage: "headers", action: "archive", reason: e.listUnsubscribe ? "marketing (List-Unsubscribe)" : "bulk precedence" };
   if (CODE_RE.test(e.subject)) return { stage: "headers", action: "archive", reason: "one-time code" };
   if (CALENDAR_RE.test(e.subject)) return { stage: "calendar", action: "calendar", reason: "calendar invite" };
