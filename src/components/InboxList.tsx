@@ -50,6 +50,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   return (
     <>
       {capture && <CapturePanel kind={capture} claimId={claimId ?? null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
+      {!capture && <CapturePanel kind="file" compact claimId={null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
 
       <section className="mb-4">
         <div className="flex items-baseline justify-between mb-2">
@@ -152,7 +153,7 @@ async function storeFile(f: File): Promise<CapturedFile> {
 }
 
 // Photo and Upload file take ONE document (add pages to it afterwards); Bulk drop takes many, each its own item.
-function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string | null; onDone: (n: number) => void }) {
+function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string; claimId: string | null; onDone: (n: number) => void; compact?: boolean }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLInputElement>(null);
@@ -167,15 +168,17 @@ function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string
 
   async function take(list: FileList | null) {
     if (!list || !list.length) return;
-    const picked = bulk ? Array.from(list) : [list[0]];
+    // Several files dropped at once become separate documents (like Bulk drop); the picker itself still takes one document.
+    const asBulk = bulk || list.length > 1;
+    const picked = asBulk ? Array.from(list) : [list[0]];
     setNames(picked.map((f) => f.name)); setStatus("Saving…"); setDocId(null); setPageCount(0);
     const out: CapturedFile[] = [];
     for (const f of picked) out.push(await storeFile(f));
-    const r = await recordCapture(kind as "photo" | "file" | "bulk", out, claimId);
+    const r = await recordCapture(asBulk ? "bulk" : (kind as "photo" | "file" | "bulk"), out, claimId);
     const bad = r.failed?.length ?? 0;
     setStatus(bad ? `${bad} of ${out.length} did not upload. Saved by name only; see the Inbox to retry.` : `Saved ${r.stored} file${r.stored === 1 ? "" : "s"}.${r.duplicates?.length ? ` ${r.duplicates.length} look like repeats; the Inbox asks.` : ""} Reading…`);
     onDone(out.length);
-    if (!bulk && r.ids?.[0]) { setDocId(r.ids[0]); setPageCount(1); }
+    if (!asBulk && r.ids?.[0]) { setDocId(r.ids[0]); setPageCount(1); }
     // One at a time: concurrent server actions can be dropped by the refresh that follows the first.
     void (async () => { for (const id of r.ids ?? []) { await readCapture(id).catch(() => null); } setStatus((s) => s.replace(" Reading…", " Read.")); router.refresh(); })();
   }
@@ -192,17 +195,17 @@ function CapturePanel({ kind, claimId, onDone }: { kind: string; claimId: string
   }
 
   return (
-    <div className="card mb-4 flex flex-col gap-2 border-accent">
-      <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>
+    <div className={`card mb-4 flex flex-col gap-2 ${compact ? "" : "border-accent"}`}>
+      {!compact && <div className="flex items-baseline justify-between"><div className="font-semibold">{title}</div><Link href="/inbox" className="text-xs text-muted">Close</Link></div>}
       {claimId && <p className="text-xs font-semibold text-accent">This will be added to the open claim.</p>}
-      <p className="text-xs text-muted">{hint}</p>
-      {bulk ? (
-        <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()}
-          className={`min-h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
-          Drop files here, or tap to choose
+      {!compact && <p className="text-xs text-muted">{hint}</p>}
+      {kind !== "photo" ? (
+        <div role="button" tabIndex={0} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
+          className={`${compact ? "min-h-16" : "min-h-32"} rounded-xl border-2 border-dashed flex items-center justify-center text-center px-3 text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
+          {bulk ? "Drop files here, or tap to choose" : compact ? "Drop or choose a photo or file to add" : "Drop a file or image here, or tap to choose from your Photos or Files"}
         </div>
       ) : (
-        <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">{kind === "photo" ? "Open camera" : "Choose file"}</button>
+        <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">Open camera</button>
       )}
       <input ref={inputRef} type="file" className="hidden" multiple={bulk} accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void take(e.target.files); e.target.value = ""; }} />
       <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
