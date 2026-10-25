@@ -7,6 +7,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
+import { findSameReceipt, blanksToFill, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
@@ -35,8 +36,13 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   // 1. Money › Receipts, unless the same merchant, amount and date is already there.
   if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
-    const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", r.vendor).eq("amount", r.amount).eq("date", r.date).limit(1);
-    if (dup && dup.length) { filed.duplicate_of = dup[0].id; filed.receipt_id = dup[0].id; done.push("already in Receipts (linked, not added twice)"); }
+    const same = await findSameReceipt(sb, String(r.vendor), r.amount, String(r.date));
+    if (same) {
+      // Same purchase already filed: keep that row (first wins), fill only its empty fields, link this document to it.
+      const patch = blanksToFill(same, { file_path: row.file_path, captured_by: who });
+      if (Object.keys(patch).length) await sb.from("receipts").update(patch).eq("id", same.id);
+      filed.duplicate_of = same.id; filed.receipt_id = same.id; done.push("already in Receipts (linked, not added twice)");
+    }
     else {
       const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
@@ -80,14 +86,20 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
     if (open?.[0] && r.date < String(open[0].created_at).slice(0, 10)) claimId = open[0].id as string;
   }
   if (claimId) {
-    const { data: cl } = await sb.from("claims").select("documents,created_at").eq("id", claimId).maybeSingle();
+    const { data: cl } = await sb.from("claims").select("documents,created_at,expected_amount,vendor").eq("id", claimId).maybeSingle();
     if (cl) {
       const older = r.date && r.date < String(cl.created_at).slice(0, 10);
-      const entry = { role: older ? "original purchase" : "supporting document", inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name };
+      // A document that carries the claim's own amount and vendor is the current receipt, not the original purchase.
+      const cv = normalizeVendor(cl.vendor as string | null), rv = normalizeVendor(r.vendor);
+      const sameAmount = cl.expected_amount != null && typeof r.amount === "number" && Math.abs(Number(cl.expected_amount) - r.amount) < 0.01;
+      const sameVendor = !cv || !rv || cv.includes(rv) || rv.includes(cv);
+      const current = sameAmount && sameVendor;
+      const role = current ? "current receipt" : older ? "original purchase" : "supporting document";
+      const entry = { role, inbox_id: inboxId, receipt_id: filed.receipt_id ?? null, path: row.file_path, name };
       const prior = ((cl.documents as Array<{ inbox_id?: string }>) ?? []);
       const docs = prior.some((d) => d.inbox_id === inboxId) ? prior.map((d) => (d.inbox_id === inboxId ? entry : d)) : [...prior, entry];
       const { error } = await sb.from("claims").update({ documents: docs, updated_at: new Date().toISOString() }).eq("id", claimId);
-      if (!error) { filed.claim_id = claimId; done.push(`added to the claim as ${older ? "the original purchase" : "a supporting document"}`); }
+      if (!error) { filed.claim_id = claimId; done.push(`added to the claim as ${current ? "the current receipt" : older ? "the original purchase" : "a supporting document"}`); }
     }
   }
 

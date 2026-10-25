@@ -112,7 +112,7 @@ export type PickReceipt = { id: string; merchant: string; amount: number; date: 
 export async function listReceiptsForItem(itemId: string): Promise<{ ok: boolean; receipts: PickReceipt[] }> {
   const w = await who(); if (!w || !w.owner) return { ok: false, receipts: [] };
   const [{ data: rec }, { data: pr }] = await Promise.all([
-    w.sb.from("receipts").select("id, merchant, amount, date").order("date", { ascending: false }).limit(80),
+    w.sb.from("receipts").select("id, merchant, amount, date").is("duplicate_of", null).order("date", { ascending: false }).limit(80),
     w.sb.from("item_prices").select("store, purchase_date").eq("item_id", itemId).maybeSingle(),
   ]);
   const store = pr?.store?.toLowerCase() ?? ""; const pd = pr?.purchase_date ? new Date(pr.purchase_date + "T12:00:00").getTime() : null;

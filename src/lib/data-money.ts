@@ -108,7 +108,7 @@ export async function getTransactions(): Promise<Transaction[]> {
 export async function getReceipts(): Promise<Receipt[]> {
   if (!hasSupabaseEnv()) return sampleReceipts;
   const sb = await createClient();
-  const { data } = await sb.from("receipts").select("*").order("date", { ascending: false }).limit(200);
+  const { data } = await sb.from("receipts").select("*").is("duplicate_of", null).order("date", { ascending: false }).limit(200);
   return (data as Receipt[]) ?? [];
 }
 export async function getReconciliations(): Promise<Reconciliation[]> {

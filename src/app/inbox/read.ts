@@ -2,6 +2,7 @@
 // Reads a stored capture once, right after upload: what is it, who from, how much, what for, and a proposed filename.
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { findSameReceipt } from "@/lib/receipt-match";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
@@ -83,8 +84,8 @@ export async function readCapture(inboxId: string) {
   const home = home0;
   plan.push({ t: "file", text: parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 ? `${name ?? "this receipt"} → kept in the app; one file goes to Finance by card and month once you say which card (Money › Receipts)${vehicle ? `, and it is listed in the ${vehicle.short} index` : ""}` : `${name ?? "this document"} → kept in the app; a copy goes to ${home}${ruleNote} when the Mac mini filing agent is running` });
   if (parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 && parsed.date) {
-    const { data: dup } = await sb.from("receipts").select("id").ilike("merchant", String(parsed.vendor)).eq("amount", parsed.amount).eq("date", String(parsed.date)).limit(1);
-    plan.push({ t: "link", text: dup && dup.length ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
+    const dup = await findSameReceipt(sb, String(parsed.vendor), parsed.amount as number, String(parsed.date));
+    plan.push({ t: "link", text: dup ? `Money › Receipts: already there; this file will be linked to it, not added twice` : `Money › Receipts: ${parsed.vendor} $${(parsed.amount as number).toFixed(2)}, ${parsed.date}; waits for its card charge` });
   }
   if (vehicle) {
     plan.push({ t: "link", text: `${vehicle.short} service history: ${parsed.item ?? "service"}` });
