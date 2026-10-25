@@ -7,7 +7,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 import { FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
-import { findSameReceipt, blanksToFill, normalizeVendor } from "@/lib/receipt-match";
+import { findSameReceipt, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
@@ -41,10 +41,11 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
       // Same purchase already filed: keep that row (first wins), fill only its empty fields, link this document to it.
       const patch = blanksToFill(same, { file_path: row.file_path, captured_by: who });
       if (Object.keys(patch).length) await sb.from("receipts").update(patch).eq("id", same.id);
-      filed.duplicate_of = same.id; filed.receipt_id = same.id; done.push("already in Receipts (linked, not added twice)");
+      await attachDocument(sb, same.id, { inbox_id: inboxId, path: (row.file_path as string | null) ?? null, name: name ?? null, source: "upload" });
+      filed.duplicate_of = same.id; filed.receipt_id = same.id; done.push("already in Receipts (this document attached to it, not added twice)");
     }
     else {
-      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id }).select("id").single();
+      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id, documents: [{ inbox_id: inboxId, path: row.file_path ?? null, name: name ?? null, source: "upload", added_at: new Date().toISOString() }] }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
     }
   }

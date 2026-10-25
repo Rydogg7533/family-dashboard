@@ -38,3 +38,14 @@ export function blanksToFill(existing: SameRow, incoming: Record<string, unknown
   }
   return patch;
 }
+
+export type ReceiptDoc = { inbox_id: string; path: string | null; name: string | null; source: string; added_at: string };
+
+// Attach a document to a purchase. Idempotent per inbox item: filing the same item twice adds it once.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function attachDocument(sb: { from: (t: string) => any }, receiptId: string, doc: Omit<ReceiptDoc, "added_at">): Promise<void> {
+  const { data } = await sb.from("receipts").select("documents").eq("id", receiptId).maybeSingle();
+  const cur = ((data?.documents as ReceiptDoc[]) ?? []);
+  if (cur.some((d) => d.inbox_id === doc.inbox_id)) return;
+  await sb.from("receipts").update({ documents: [...cur, { ...doc, added_at: new Date().toISOString() }] }).eq("id", receiptId);
+}
