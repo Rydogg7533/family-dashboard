@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { normalizeVendor, vendorTokens, vendorCompatible, cents, dayGap, amountsClose, planMatches, nearCandidates, lastChance, likelyTransfer } from "./tx-match-lib.mjs";
+import { normalizeVendor, vendorTokens, vendorCompatible, cents, dayGap, amountsClose, planMatches, nearCandidates, lastChance, likelyTransfer, cardFromAccount } from "./tx-match-lib.mjs";
 
 assert.equal(normalizeVendor("AAA / California Roadside Service (Club Assist)"), "aaa california roadside service");
 assert.deepEqual(vendorTokens("AMZN Mktp US*2K4AB7"), ["amazon"]);
@@ -37,4 +37,9 @@ assert.equal(nearCandidates(tx("t1", "AMZN Mktp US", 5, "2026-10-12"), [rc("r1",
 const hits = lastChance(tx("t1", "WEIRD DESC", 19.99, "2026-10-12"), [{ name: "email sightings", rows: [{ amount: 19.99, date: "2026-10-08", label: "netflix" }, { amount: 20, date: "2026-10-08" }] }, { name: "Inbox", rows: [{ amount: 19.99, date: "2026-09-01" }] }]);
 assert.deepEqual(hits, [{ pool: "email sightings", date: "2026-10-08", label: "netflix" }]);
 assert.ok(likelyTransfer("Transfer", "x") && likelyTransfer("Credit Card Payment", "x") && likelyTransfer("", "ONLINE PAYMENT THANK YOU") && !likelyTransfer("Groceries", "Costco"));
+assert.equal(cardFromAccount({ institution: "Chase Sapphire", last4: "4417" }), "Chase Sapphire 4417");
+assert.equal(cardFromAccount({ institution: " Citi  Costco ", last4: "····4632" }), "Citi Costco 4632");
+assert.equal(cardFromAccount({ institution: "Citi", last4: "" }), null);
+assert.equal(cardFromAccount({ institution: "", last4: "1234" }), null);
+assert.equal(cardFromAccount(null), null);
 console.log("tx-match-test: all checks passed");

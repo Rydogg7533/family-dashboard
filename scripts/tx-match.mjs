@@ -7,6 +7,7 @@
 //
 // For every charge that is still "unknown" (a purchase: positive amount, no receipt linked):
 //   1. EXACT   same amount to the cent, date within 3 days, compatible vendor → link receipt and charge both ways, status "matched".
+//   (Apply also records the charge's account as the receipt's card, as a statement-source high-confidence vote, for every linked receipt that has no such vote yet.)
 //   2. NEAR    same vendor, date within 3 days, amount close but different → a note "Possible receipt" on the charge. Never linked silently.
 //   3. LAST CHANCE  the same amount within 7 days anywhere (receipts, email sightings, Inbox items), whatever the vendor says → a note.
 //   4. NONE    inside the period the receipt sources cover, older than 3 days → counted. A "No receipt found" note is written ONLY for charges
@@ -19,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { planMatches, nearCandidates, lastChance, likelyTransfer, dayGap } from "./tx-match-lib.mjs";
+import { planMatches, nearCandidates, lastChance, likelyTransfer, dayGap, cardFromAccount } from "./tx-match-lib.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
@@ -112,6 +113,20 @@ async function main() {
     if (!tr?.length) { await rest("PATCH", `receipts?id=eq.${m.receipt.id}&transaction_id=eq.${encodeURIComponent(m.tx.id)}`, { transaction_id: null, status: m.receipt.status }, { Prefer: "return=minimal" }); skippedLink++; continue; }   // undo half-link
     linked++;
   }
+  // The charge says which account paid: record it as the receipt's card (record_card_vote, source statement, high).
+  // Runs for every linked receipt that has no statement vote yet, so a rerun never votes twice.
+  const accts = new Map((await all("accounts?select=id,institution,last4")).map((a) => [a.id, a]));
+  const linkedRc = await all("receipts?select=id,transaction_id&transaction_id=not.is.null&duplicate_of=is.null");
+  const voted = new Set((await all("card_votes?select=receipt_id&source=eq.statement")).map((v) => v.receipt_id));
+  const txAcct = new Map(allTx.map((t) => [t.id, t.account_id]));
+  let carded = 0, cardSkipped = 0;
+  for (const r of linkedRc) {
+    if (voted.has(r.id)) continue;
+    const label = cardFromAccount(accts.get(txAcct.get(r.transaction_id)));
+    if (!label) { cardSkipped++; continue; }
+    await rest("POST", "rpc/record_card_vote", { p_receipt: r.id, p_source: "statement", p_card: label, p_conf: "high" }, { Prefer: "return=minimal" });
+    carded++;
+  }
   const byId = new Map(allTx.map((t) => [t.id, t]));
   for (const [id, p] of plan) {
     const t = byId.get(id), cur = t.flag ?? null, ours = cur === null || String(cur).startsWith(TAG);
@@ -134,6 +149,7 @@ async function main() {
   for (const r of rc2) { const t = tById.get(r.transaction_id); if (!t || t.matched_receipt !== r.id) bad++; }
   const dupLinks = tx2.length - new Set(tx2.map((t) => t.matched_receipt)).size;
   console.log(`\nWRITTEN: ${linked} linked (${skippedLink} skipped because the receipt or charge was already linked), ${noted} notes added or updated, ${cleared} of our notes cleared.`);
+  console.log(`CARDS: ${carded} receipts got their card from the charge (${cardSkipped} skipped: the charge's account has no name or last four).`);
   console.log(`VERIFIED in the database: ${tx2.length} charges linked to receipts, ${rc2.length} receipts linked to charges; ${bad} one-sided or inconsistent links; ${dupLinks} receipts claimed by more than one charge.`);
   if (bad || dupLinks) { console.log("NOT VERIFIED. Paste this output back to Claude."); process.exit(1); }
   console.log("All verified. Nothing was deleted.");

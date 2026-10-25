@@ -69,3 +69,10 @@ export function lastChance(tx, pools, { days = 7 } = {}) {
 export function likelyTransfer(category, merchant) {
   return /transfer|credit card payment|loan payment|payment/i.test(String(category ?? "")) || /\btransfer\b|payment thank you|autopay|online payment/i.test(String(merchant ?? ""));
 }
+
+// The card label a charge's account gives a receipt, spelled like the app's known cards ("<institution> <last4>").
+// Returns null when the account has no usable name or last four, so nothing vague is ever recorded.
+export function cardFromAccount(acct) {
+  const inst = String(acct?.institution ?? "").replace(/\s+/g, " ").trim(), last4 = String(acct?.last4 ?? "").replace(/\D/g, "").slice(-4);
+  return inst && last4.length === 4 ? `${inst} ${last4}` : null;
+}
