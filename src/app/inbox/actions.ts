@@ -3,8 +3,25 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { fileCapture } from "@/app/inbox/file";
 import { readCapture } from "@/app/inbox/read";
 import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
+import { SKIP, CLEAR } from "@/lib/paid-with";
 import { filingFolders, vendorKey, toTemplate } from "@/lib/filing-folders";
 import { callModel, jsonObjectValid } from "@/lib/ai";
+
+// "Paid with" chosen on the card before the Yes tap: stored on the read, applied when the receipt is filed. SKIP = not now.
+export async function setInboxPaidWith(id: string, value: string): Promise<{ ok: boolean }> {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false };
+  const { data: row } = await sb.from("inbox_items").select("read_result,status").eq("id", id).maybeSingle();
+  if (!row || row.status !== "open" || !row.read_result || typeof row.read_result !== "object") return { ok: false };
+  const v = value.replace(/\s+/g, " ").trim().slice(0, 40);
+  if (!v) return { ok: false };
+  const next: Record<string, unknown> = { ...(row.read_result as Record<string, unknown>) };
+  if (v === CLEAR) delete next.paid_with; else next.paid_with = v === SKIP ? { skipped: true } : { value: v };
+  const { error } = await sb.from("inbox_items").update({ read_result: next }).eq("id", id);
+  return { ok: !error };
+}
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
 export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
