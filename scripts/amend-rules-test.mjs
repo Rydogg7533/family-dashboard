@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import { amendBlock, fieldBlock } from "../src/lib/amend-rules.ts";
+const ok = { filed: { receipt_id: "r1" }, copied_path: null, kind: "receipt", transaction_id: null };
+assert.equal(amendBlock(ok), null);
+assert.match(amendBlock({ ...ok, kind: "statement" }), /statement/i);
+assert.match(amendBlock({ ...ok, filed: {} }), /filed receipt/);
+assert.match(amendBlock({ ...ok, filed: { receipt_id: "r1", duplicate_of: "x" } }), /already on file/);
+assert.match(amendBlock({ ...ok, copied_path: "/a/b.pdf" }), /already copied/);
+assert.match(amendBlock({ ...ok, filed: { receipt_id: "r1", vehicle_id: "v" } }), /service history/);
+assert.match(amendBlock({ ...ok, filed: { receipt_id: "r1", claim_id: "c" } }), /claim/);
+assert.equal(fieldBlock("item", { transaction_id: "t" }), null);
+assert.equal(fieldBlock("category", { transaction_id: "t" }), null);
+for (const f of ["vendor", "amount", "date"]) assert.match(fieldBlock(f, { transaction_id: "t" }), /matched/);
+assert.equal(fieldBlock("amount", { transaction_id: null }), null);
+console.log("amend-rules-test ok");

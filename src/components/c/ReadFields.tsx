@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { correctRead } from "@/app/inbox/read";
+import { amendDecided } from "@/app/inbox/amend";
 import { CATEGORIES, FIELD_LABEL, categoryLabel, type Corrections, type EditableField } from "@/lib/read-correction";
 
 export type ReadShape = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string | null; corrections?: Corrections };
@@ -18,7 +19,7 @@ function show(f: EditableField, v: unknown): string {
 
 // "What I read": every field the reader found, tappable. A blank is highlighted. Fixing a field rebuilds the plan from the corrected facts without reading the file again;
 // the reader's first value is kept and shown as "was ...".
-export function ReadFields({ id, rr }: { id: string; rr: ReadShape }) {
+export function ReadFields({ id, rr, decided = false }: { id: string; rr: ReadShape; decided?: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState<EditableField | null>(null);
   const [val, setVal] = useState("");
@@ -33,7 +34,7 @@ export function ReadFields({ id, rr }: { id: string; rr: ReadShape }) {
   async function save() {
     if (!editing) return;
     setBusy(true); setError(null);
-    const r = await correctRead(id, editing, val).catch(() => ({ ok: false, error: "That did not save. Try again." }));
+    const r = await (decided ? amendDecided : correctRead)(id, editing, val).catch(() => ({ ok: false, error: "That did not save. Try again." }));
     setBusy(false);
     if (!r.ok) { setError(r.error ?? "That did not save."); return; }
     setEditing(null); router.refresh();
@@ -41,7 +42,7 @@ export function ReadFields({ id, rr }: { id: string; rr: ReadShape }) {
 
   return (
     <div className="rounded-xl border border-line px-3 pt-2 pb-1">
-      <div className="text-[11px] font-bold tracking-wide text-muted">WHAT I READ <span className="font-normal normal-case tracking-normal">· tap the pencil to fix anything wrong</span></div>
+      <div className="text-[11px] font-bold tracking-wide text-muted">WHAT I READ <span className="font-normal normal-case tracking-normal">· {decided ? "fixing a filed receipt changes its record and name" : "tap the pencil to fix anything wrong"}</span></div>
       {ORDER.map((f) => {
         const cur = rr[f];
         const empty = cur == null || cur === "";

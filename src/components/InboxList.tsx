@@ -303,6 +303,7 @@ function FolderFix({ item }: { item: InboxItem }) {
 
 // Decided: what you answered in the last 30 days, one line each. Everything stays on record; this is only the view.
 function DecidedList({ items, names }: { items: DecidedItem[]; names: Record<string, string> }) {
+  const [fixing, setFixing] = useState<string | null>(null);
   if (!items.length) return <div className="card text-muted">Nothing decided in the last {DECIDED_DAYS} days.</div>;
   const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" }) : "");
   return (
@@ -314,6 +315,14 @@ function DecidedList({ items, names }: { items: DecidedItem[]; names: Record<str
             <div className="text-sm font-semibold truncate">{d.title}</div>
             <div className="text-xs text-muted">{decidedOutcome(d.filed, d.resolution)} · {when(d.resolved_at)}{d.resolved_by && names[d.resolved_by] ? ` · ${names[d.resolved_by]}` : ""}{d.file_path ? <> · <a href={`/api/capture/${d.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a></> : null}</div>
             {d.folder_note && <div className="text-xs text-muted">{d.folder_note}</div>}
+            {d.read && !("error" in d.read) && ["receipt", "bill", "warranty", "service_report", "form", "other"].includes(String(d.read.kind ?? "")) && (
+              fixing === d.id
+                ? <div className="mt-2 flex flex-col gap-1.5">
+                    {d.amend_block ? <div className="text-xs text-amber font-semibold">{d.amend_block}</div> : <ReadFields id={d.id} rr={d.read as ReadShape} decided />}
+                    <button type="button" onClick={() => setFixing(null)} className="self-start min-h-11 text-xs font-semibold text-accent">Close</button>
+                  </div>
+                : <button type="button" onClick={() => setFixing(d.id)} className="min-h-11 text-xs font-semibold text-accent">Fix details</button>
+            )}
           </div>
         </div>
       ))}
