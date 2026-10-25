@@ -24,7 +24,7 @@ import { join } from "node:path";
 const STOP_RADIUS_M = 75;        // points within this distance of the running centre belong to the same stop
 const STOP_MIN_MINUTES = 8;      // a cluster shorter than this is just a pause in travel
 const MATCH_RADIUS_M = 150;      // a stop this close to a known Place is that Place
-const RETENTION_DAYS = 30;
+const RETENTION_DAYS = 3;       // raw points are only a working copy; the stops they became are kept
 const TZ = process.env.STEWARD_TZ || "America/Denver";
 const MAX_POINTS_PER_RUN = 20000;
 const NOMINATIM_UA = "StewardOS location-agent (household self-hosted; contact via dashboard)";
@@ -253,8 +253,22 @@ async function main() {
     catch (e) { log.push(`${person.display_name}: ERROR ${e.message}`); }
   }
 
+  // Retention. A point is deleted ONLY when all of these hold, so a late, stalled or failed upload loses nothing:
+  //  - it was already turned into stops (status "stop"); an unprocessed "raw" point is never deleted, however old;
+  //  - it is older than RETENTION_DAYS;
+  //  - it is older than this person's oldest unprocessed raw point (nothing newer than a backlog is touched);
+  //  - this person's stops reach at least that far (processing has caught up);
+  //  - this person's run had no error this time.
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
-  await del(`locations?recorded_at=lt.${cutoff}`).catch((e) => log.push(`retention: ${e.message}`));
+  for (const person of people) {
+    if (log.some((l) => l.startsWith(`${person.display_name}: ERROR`))) { log.push(`${person.display_name}: retention skipped (error this run)`); continue; }
+    try {
+      const [oldRaw] = await get(`locations?person=eq.${person.id}&status=eq.raw&order=recorded_at.asc&limit=1&select=recorded_at`);
+      const [lastStop] = await get(`location_stops?person=eq.${person.id}&order=ended_at.desc&limit=1&select=ended_at`);
+      const before = retentionBefore({ cutoff, oldestRaw: oldRaw?.recorded_at ?? null, lastStopEnd: lastStop?.ended_at ?? null });
+      if (before) await del(`locations?person=eq.${person.id}&status=eq.stop&recorded_at=lt.${before}`);
+    } catch (e) { log.push(`retention: ${e.message}`); }
+  }
 
   const open = await get("location_stops?status=eq.question&select=id").catch(() => []);
   const summary = (log.length ? log.join("; ") : "no new points") + `; ${open.length} open question${open.length === 1 ? "" : "s"}`;
@@ -263,5 +277,14 @@ async function main() {
   console.log(`${new Date().toISOString()} ${summary}`);
 }
 
-export { cluster, distM, localParts };
+// The latest time before which consumed points may be deleted, or null when nothing may be. Pure so it can be tested.
+function retentionBefore({ cutoff, oldestRaw, lastStopEnd }) {
+  if (!lastStopEnd) return null;                                   // no stops yet: processing has not produced anything, keep everything
+  let t = Date.parse(cutoff);
+  if (oldestRaw) t = Math.min(t, Date.parse(oldestRaw));          // a backlog of unprocessed points holds back everything from its start
+  t = Math.min(t, Date.parse(lastStopEnd));                        // never delete past what the stops cover
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+export { cluster, distM, localParts, retentionBefore };
 if (process.argv[1] && process.argv[1].endsWith("location-agent.mjs")) main().catch((e) => { console.error(e); process.exit(1); });
