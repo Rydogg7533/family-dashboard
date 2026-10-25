@@ -38,7 +38,8 @@ async function get(path) {
     const r = await fetch(BASE + path, { headers: { Authorization: `Bearer ${access}` } });   // GET only: this script cannot change the sheet
     if (r.ok) return r.json();
     if (r.status === 429 || r.status >= 500) { await new Promise((x) => setTimeout(x, 1500 * attempt)); continue; }
-    throw new Error(`Sheets GET ${path.split("?")[0].split("/").slice(0, 4).join("/")} → ${r.status}${r.status === 404 ? " (wrong sheet id, or this account cannot open it)" : r.status === 403 ? " (this account cannot read that sheet)" : ""}`);
+    const why = await r.json().then((j) => j?.error ? `${j.error.status || ""}: ${String(j.error.message || "").slice(0, 400)}` : "").catch(() => "");   // Google's own reason (no sheet data in it)
+    throw new Error(`${why ? `Google says ${why}. ` : ""}Sheets GET ${path.split("?")[0].split("/").slice(0, 4).join("/")} → ${r.status}${why ? "" : r.status === 404 ? " (wrong sheet id, or this account cannot open it)" : r.status === 403 ? " (Google gave no reason; the account may not be able to read that sheet)" : ""}`);
   }
   throw new Error("Sheets: gave up after retries");
 }
