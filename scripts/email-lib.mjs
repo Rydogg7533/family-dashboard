@@ -21,9 +21,11 @@ export function openGmail(args, { allowWrite }) {
   try { const j = JSON.parse(readFileSync(option(args, "--client") || join(dir, "google-oauth-client.json"), "utf8")); client = j.installed || j.web; } catch (e) { die(`cannot read the OAuth client file: ${e.message}`); }
   try { tok = JSON.parse(readFileSync(join(dir, `google-${account}.json`), "utf8")); } catch { die(`no saved sign-in for ${account}. Run scripts/google-auth.mjs --account ${account} first.`); }
   let accessToken = null;
+  // Node reports every dropped connection as just "fetch failed"; the reason (ECONNRESET, ENOTFOUND, a timeout) is in e.cause, so it is added to the message.
+  const describeNetError = (e, url) => { const c = e?.cause; const why = c?.code || c?.message || ""; let host = ""; try { host = new URL(url).host; } catch { /* not a URL */ } return `${e?.message || "network error"}${why ? ` (${why})` : ""}${host ? ` talking to ${host}` : ""}`; };
   // A dropped connection ("fetch failed") is retried quietly; only a real answer from Google (or four failures in a row) counts as an error.
   async function netFetch(url, init) {
-    for (let i = 1; ; i++) { try { return await fetch(url, init); } catch (e) { if (i >= 4) throw e; await sleep(1500 * i); } }
+    for (let i = 1; ; i++) { try { return await fetch(url, init); } catch (e) { if (i >= 4) throw new Error(describeNetError(e, url)); await sleep(1500 * i); } }
   }
   async function refresh() {
     const r = await netFetch(TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },

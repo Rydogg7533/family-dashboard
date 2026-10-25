@@ -25,6 +25,6 @@ console.log("PASS: mail parsing (headers, addresses with commas, plain/HTML bodi
   const assert2 = (await import("node:assert/strict")).default;
   assert2.equal(isMailboxToken("google-admin@shvr.co.json"), "admin@shvr.co");
   assert2.equal(isMailboxToken("google-melissarossiter1@gmail.com.json"), "melissarossiter1@gmail.com");
-  for (const f of ["google-melissarossiter1@gmail.com.contacts.json", "google-rross15253@gmail.com.calendar.json", "google-admin@shvr.co.sheets.json", "google-oauth-client.json", "icloud-ryan.env", "google-admin@shvr.co.calendar.env"]) assert2.equal(isMailboxToken(f), null, f);
+  for (const f of ["google-melissarossiter1@gmail.com.contacts.json", "google-rross15253@gmail.com.calendar.json", "google-admin@shvr.co.sheets.json", "google-admin@shvr.co.mail.json", "google-admin@shvr.co.mail.env", "google-oauth-client.json", "icloud-ryan.env", "google-admin@shvr.co.calendar.env"]) assert2.equal(isMailboxToken(f), null, f);
   console.log("PASS: mail sync token files (only real Gmail sign-ins are mailboxes)");
 }
