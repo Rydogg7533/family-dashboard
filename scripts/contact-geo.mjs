@@ -45,24 +45,49 @@ export function planGeo(cards, rows, nowMs = Date.now()) {
   return { close, add, retry, rename };
 }
 
+// ---------- cleaning for the lookup (the stored key and text are never changed) ----------
+const STATES = { alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE", florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "so carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI", wyoming: "WY" };
+const strip = (v) => String(v ?? "").replace(/[:;]+/g, " ").replace(/\s+/g, " ").trim();
+export function cleanForLookup(a) {
+  // Street: the line with the house number (joined with the next line when the number sits alone), without apartment, suite or unit parts.
+  const lines = String(a.street ?? "").split(/[\r\n]+/).map((l) => strip(l).replace(/,$/, "")).filter(Boolean);
+  const i = lines.findIndex((l) => /^\d/.test(l));
+  let street = i >= 0 ? lines[i] : (lines[0] ?? "");
+  if (i >= 0 && /^\d+$/.test(street) && lines[i + 1]) street = `${street} ${lines[i + 1]}`;
+  street = street.replace(/[,\s]+(?:suite|ste\.?|unit|apt\.?|apartment|bldg\.?|building|space|spc|no\.?)\s*#?\s*[\w-]+\s*$/i, "").replace(/\s*#\s*[\w-]*\s*$/, "").replace(/[,\s]+$/, "").trim();
+  const sraw = strip(a.state).replace(/\./g, "").toLowerCase();
+  const state = sraw.length === 2 ? sraw.toUpperCase() : (STATES[sraw] ?? strip(a.state));
+  return { street, city: strip(a.city), state, zip: strip(a.zip) };
+}
+
 // ---------- OpenStreetMap ----------
 // Accept a result only if it is in the US and agrees with the city (or zip) we asked for, so a wrong town never becomes a suggestion.
-async function lookup(a) {
+async function lookup(raw) {
+  const a = cleanForLookup(raw);
   const tryOne = async (qs) => {
     const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=us&${qs}`, { headers: { "User-Agent": UA } });
     if (!r.ok) throw new Error(`nominatim ${r.status}`);
     const [j] = await r.json();
     return j ?? null;
   };
+  const zip5 = (a.zip.match(/\d{5}/) || [""])[0];
   const ok = (j) => {
     if (!j) return false;
     const ad = j.address ?? {}, hay = norm(Object.values(ad).join(" "));
-    return (a.city && hay.includes(norm(a.city))) || (a.zip && norm(ad.postcode ?? "").startsWith(norm(a.zip).slice(0, 5)));
+    return !!((zip5 && norm(ad.postcode ?? "").startsWith(zip5)) || (a.city && hay.includes(norm(a.city))));
   };
   const enc = encodeURIComponent;
-  let j = await tryOne(`street=${enc(a.street)}&city=${enc(a.city)}&state=${enc(a.state)}&postalcode=${enc(a.zip)}`);
-  if (!ok(j)) { await sleep(1100); j = await tryOne(`q=${enc(addressText(a))}`); }
-  return ok(j) ? { lat: Number(j.lat), lon: Number(j.lon) } : null;
+  const attempts = [
+    `street=${enc(a.street)}&city=${enc(a.city)}&state=${enc(a.state)}&postalcode=${enc(zip5)}`,
+    `q=${enc(addressText({ ...a, zip: zip5 }))}`,
+    ...(zip5 ? [`street=${enc(a.street)}&postalcode=${zip5}`] : []),   // a wrong city or state on the card: the street and zip alone
+  ];
+  for (let i = 0; i < attempts.length; i++) {
+    if (i > 0) await sleep(1100);
+    const j = await tryOne(attempts[i]);
+    if (ok(j)) return { lat: Number(j.lat), lon: Number(j.lon) };
+  }
+  return null;
 }
 
 // ---------- main ----------
@@ -79,6 +104,8 @@ async function main() {
   };
   const pageAll = async (path) => { const out = []; for (let from = 0; ; from += 1000) { const rows = await rest("GET", path, undefined, { Range: `${from}-${from + 999}`, "Range-Unit": "items" }); out.push(...rows); if (rows.length < 1000) break; } return out; };
 
+  // --retry-not-found: close the "not found" rows (kept as history) so those addresses are looked up again with the current cleanup.
+  if (process.argv.includes("--retry-not-found")) await rest("PATCH", "contact_geo?status=eq.not_found&valid_until=is.null", { valid_until: new Date().toISOString() }, { Prefer: "return=minimal" });
   const cards = await pageAll("contact_cards?deleted_at=is.null&select=id,person,full_name,last_name,org,addresses&order=id");
   const rows = await pageAll("contact_geo?select=id,card_id,address_key,status,geocoded_at,valid_until,name,last_name,org&order=id");
   const withAddr = cards.filter((c) => (c.addresses ?? []).some(usableAddress));
