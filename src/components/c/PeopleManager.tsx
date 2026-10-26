@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addChild, setBirthDate, createChildLogin, createChildInvite, revokeChildInvite, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
@@ -101,7 +102,10 @@ export const prettyDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocale
 function DateModal({ value, today, title, busy, err, onCancel, onDone }: { value: string; today: string; title: string; busy?: boolean; err?: string | null; onCancel: () => void; onDone: (v: string) => void }) {
   const [v, setV] = useState(value);
   const bad = !v || v > today;
-  return (
+  // Out of the page tree: the field it belongs to sits inside a <label>, and a click anywhere inside a
+  // label is forwarded to its control — so Cancel closed the box and the label reopened it on the spot.
+  if (typeof document === "undefined") return null;
+  return createPortal((
     <div className="fixed inset-0 z-50 flex items-center justify-center p-5" role="dialog" aria-modal="true" aria-label={title}>
       <button aria-label="Close" className="absolute inset-0 bg-black/50" onClick={onCancel} />
       <div className="relative w-full max-w-sm bg-bg rounded-2xl border border-line p-5 flex flex-col gap-3 shadow-2xl">
@@ -115,7 +119,7 @@ function DateModal({ value, today, title, busy, err, onCancel, onDone }: { value
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 // A field that reads as empty until a date is chosen; tapping it brings the wheels up.
@@ -276,9 +280,9 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
         <div className="card flex flex-col gap-2">
           <div className="font-semibold">Add a child</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={input} autoCapitalize="words" />
-          <label className="text-xs font-semibold">Birth date
-            <DateField key={dobKey} value={dob} onChange={setDob} today={todayMax} className={`${input} mt-1`} />
-          </label>
+          <div className="text-xs font-semibold">Birth date
+            <DateField key={dobKey} value={dob} onChange={setDob} today={todayMax} className={`${input} mt-1 font-normal text-sm`} />
+          </div>
           <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, and a grandparent may be a member too, so it goes back 100 years.</div>
           <button type="button" disabled={pending || !name.trim() || !dob || dob > todayMax} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); setDobKey((k) => k + 1); })}>{pending ? "Adding…" : "Add child"}</button>
         </div>
