@@ -1,6 +1,7 @@
 import "server-only";
 import type { Tool } from "@/lib/tools/types";
 import { str } from "@/lib/tools/types";
+import { defaultAssignment } from "@/lib/task-defaults";
 
 // A task somebody typed. It carries an origin like every other task — "Ryan added this" rather than a
 // blank — so the queue keeps its promise that everything on it says where it came from.
@@ -34,13 +35,21 @@ export const taskTools: Tool[] = [
       due: { type: "date", describe: "When it is due, if the person said", required: false },
       kind: { type: "enum", options: ["do", "decide", "reply"], describe: "do = an errand, decide = a choice to make, reply = someone is waiting", required: false },
       note: { type: "string", describe: "Anything else the person said about it", required: false },
+      mine: { type: "boolean", describe: "true only if the person said it is just for them; a household job goes to everyone by default", required: false },
     },
     async run(a, c) {
       const title = str(a.title).slice(0, 160);
       const { data: open } = await c.sb.from("tasks").select("id, title").eq("status", "open").limit(200);
       const near = ((open ?? []) as { id: string; title: string }[]).find((t) => closeness(title, t.title) >= 0.7);
+      // D90: a household job shows for both and whoever gets to it first clears it. defaultAssignment
+      // already encodes that -- "anything else about the household goes to both" -- and Inbox filing,
+      // child unlocks and warranties all use it. Only an explicit "just me" narrows it.
+      const assign = a.mine === true
+        ? { person: c.userId, audience: "one" as const, fyi: [] as string[] }
+        : await defaultAssignment(c.sb, c.userId);
       const row = {
-        person: c.userId, audience: "one", fyi: [], kind: ["do", "decide", "reply"].includes(str(a.kind)) ? str(a.kind) : "do",
+        person: assign.person, audience: assign.audience, fyi: assign.fyi,
+        kind: ["do", "decide", "reply"].includes(str(a.kind)) ? str(a.kind) : "do",
         title, summary: str(a.note) || null, due_at: str(a.due) || null,
         origin_kind: "person", origin_ref: c.userId, status: "open",
       };

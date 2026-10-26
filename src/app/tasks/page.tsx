@@ -2,6 +2,7 @@ import { getOpenTasks, getPeopleNames } from "@/lib/data";
 import { getRequestUser } from "@/lib/supabase/server";
 import { H1, Card } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
+import { splitTasks } from "@/lib/tasks-view";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +13,16 @@ export default async function Tasks({ searchParams }: PageProps<"/tasks">) {
   // Tabs: each person, then Both. Mine first. "Both" = shared with either able to finish, or unassigned.
   const ids = Object.keys(names).sort((a, b) => (a === me ? -1 : b === me ? 1 : 0));
   const isBoth = (t: (typeof all)[number]) => t.audience === "both" || !t.person;
-  const bucket = (id: string) => all.filter((t) => !isBoth(t) && (t.person === id || (t.fyi ?? []).includes(id)));
-  const both = all.filter(isBoth);
-  const tabs = [...ids.map((id) => ({ id, label: names[id] + (id === me ? " (you)" : ""), list: bucket(id) })), { id: "both", label: "Both", list: both }];
+  // D90: your own tab is everything you could pick up -- yours plus the household's -- which is what
+  // Today already shows via splitTasks. Before this, Tasks excluded shared items from your tab, so a
+  // household job appeared on Today and not on the page you actually go to for work. Another person's
+  // tab still shows only what is specifically theirs. Tab id stays "both" so existing links keep working.
+  const s = splitTasks(all, me);
+  const bucket = (id: string) => (me && id === me)
+    ? [...s.mine, ...s.fyi]
+    : all.filter((t) => !isBoth(t) && (t.person === id || (t.fyi ?? []).includes(id)));
+  const household = all.filter(isBoth);
+  const tabs = [...ids.map((id) => ({ id, label: names[id] + (id === me ? " (you)" : ""), list: bucket(id) })), { id: "both", label: "Household", list: household }];
   const current = typeof who === "string" && tabs.some((t) => t.id === who) ? who : (me && ids.includes(me) ? me : "both");
   const tab = tabs.find((t) => t.id === current)!;
   const tasks = typeof kind === "string" && kind !== "all" ? tab.list.filter((t) => t.kind === kind) : tab.list;
