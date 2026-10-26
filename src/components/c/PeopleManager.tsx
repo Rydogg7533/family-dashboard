@@ -12,41 +12,70 @@ const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50"
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-based; handles February
 
-// One scrollable column. Tapping a row picks it; the chosen row is scrolled to the middle without
-// moving the page. A plain list beats a native date field for a birthday decades back.
-function Col({ label, items, value, onPick }: { label: string; items: { v: string; t: string }[]; value: string; onPick: (v: string) => void }) {
+const ROW = 40;              // px per row
+const SEEN = 5;              // rows visible
+const PAD = ((SEEN - 1) / 2) * ROW;   // blank space top and bottom, so the first and last row can reach the middle
+
+// One wheel. The row sitting under the band in the middle is the chosen one: scroll the column and it
+// changes when the scrolling settles. Rows are real buttons as well, so a tap or a keyboard still works.
+function Wheel({ label, items, value, onChange }: { label: string; items: { v: string; t: string }[]; value: string; onChange: (v: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const i = Math.max(0, items.findIndex((x) => x.v === value));
+
+  // Put the chosen row under the band. Nothing is written when it is already there, so settling cannot loop.
   useEffect(() => {
-    const el = box.current?.querySelector<HTMLElement>('[data-on="1"]');
-    if (el && box.current) box.current.scrollTop = el.offsetTop - box.current.clientHeight / 2 + el.clientHeight / 2;
-  }, [value]);
+    const el = box.current; if (!el) return;
+    const want = i * ROW;
+    if (Math.abs(el.scrollTop - want) > 2) el.scrollTop = want;
+  }, [i, items.length]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const onScroll = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      const el = box.current; if (!el) return;
+      const n = Math.min(items.length - 1, Math.max(0, Math.round(el.scrollTop / ROW)));
+      const v = items[n]?.v;
+      if (v && v !== value) onChange(v);
+    }, 110);
+  };
+
   return (
     <div className="flex-1 min-w-0">
       <div className="text-[11px] font-semibold text-muted text-center mb-1">{label}</div>
-      <div ref={box} className="h-40 overflow-y-auto rounded-xl border border-line" style={{ scrollSnapType: "y proximity", WebkitOverflowScrolling: "touch" }} role="listbox" aria-label={label}>
-        {items.map((it) => {
-          const on = value === it.v;
-          return (
-            <button key={it.v} type="button" role="option" aria-selected={on} data-on={on ? "1" : "0"} onClick={() => onPick(it.v)}
-              style={{ scrollSnapAlign: "center" }}
-              className={`block w-full text-center py-2 text-sm ${on ? "bg-accent text-white font-semibold" : "hover:bg-soft"}`}>
-              {it.t}
-            </button>
-          );
-        })}
+      <div className="relative">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 z-10 rounded-md border-y border-accent bg-accent/10" style={{ top: PAD, height: ROW }} />
+        <div ref={box} onScroll={onScroll} role="listbox" aria-label={label} tabIndex={0}
+          className="overflow-y-auto rounded-xl border border-line"
+          style={{ height: SEEN * ROW, scrollSnapType: "y mandatory", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", scrollbarWidth: "none" }}>
+          <div style={{ height: PAD }} aria-hidden="true" />
+          {items.map((it) => {
+            const on = it.v === value;
+            return (
+              <button key={it.v} type="button" role="option" aria-selected={on} onClick={() => onChange(it.v)}
+                style={{ height: ROW, scrollSnapAlign: "center" }}
+                className={`block w-full text-center text-sm leading-[40px] ${on ? "font-bold" : "text-muted"}`}>
+                {it.t}
+              </button>
+            );
+          })}
+          <div style={{ height: PAD }} aria-hidden="true" />
+        </div>
       </div>
     </div>
   );
 }
 
-// Month, day and year as three scrollable lists. The parts are held here: emitting only a whole date
-// would blank a part the moment it was picked, which is what made the first version unusable.
+// Month, day and year as three wheels. The parts are held here: emitting only a whole date would blank
+// a part the moment it was picked, which is what made the first version unusable.
 function DatePick({ value, onChange, today, back = 100 }: { value: string; onChange: (v: string) => void; today: string; back?: number }) {
   const thisYear = Number(today.slice(0, 4));
   const [p, setP] = useState(() => (value ? { y: value.slice(0, 4), m: value.slice(5, 7), d: value.slice(8, 10) } : { y: "", m: "", d: "" }));
 
   const put = (next: { y: string; m: string; d: string }) => {
-    if (next.y && next.m && next.d) {   // 31 January then February: keep the day inside the month
+    if (next.y && next.m && next.d) {   // 31 January, then February: keep the day inside the month
       const max = daysInMonth(Number(next.y), Number(next.m));
       if (Number(next.d) > max) next = { ...next, d: String(max).padStart(2, "0") };
     }
@@ -56,10 +85,10 @@ function DatePick({ value, onChange, today, back = 100 }: { value: string; onCha
 
   const days = p.y && p.m ? daysInMonth(Number(p.y), Number(p.m)) : 31;
   return (
-    <div className="flex gap-1.5">
-      <Col label="Month" value={p.m} onPick={(m) => put({ ...p, m })} items={MONTHS.map((t, i) => ({ v: String(i + 1).padStart(2, "0"), t }))} />
-      <Col label="Day" value={p.d} onPick={(d) => put({ ...p, d })} items={Array.from({ length: days }, (_, i) => ({ v: String(i + 1).padStart(2, "0"), t: String(i + 1) }))} />
-      <Col label="Year" value={p.y} onPick={(y) => put({ ...p, y })} items={Array.from({ length: back + 1 }, (_, i) => ({ v: String(thisYear - i), t: String(thisYear - i) }))} />
+    <div className="flex gap-2">
+      <Wheel label="Month" value={p.m} onChange={(m) => put({ ...p, m })} items={MONTHS.map((t, k) => ({ v: String(k + 1).padStart(2, "0"), t: t.slice(0, 3) }))} />
+      <Wheel label="Day" value={p.d} onChange={(d) => put({ ...p, d })} items={Array.from({ length: days }, (_, k) => ({ v: String(k + 1).padStart(2, "0"), t: String(k + 1) }))} />
+      <Wheel label="Year" value={p.y} onChange={(y) => put({ ...p, y })} items={Array.from({ length: back + 1 }, (_, k) => ({ v: String(thisYear - k), t: String(thisYear - k) }))} />
     </div>
   );
 }
