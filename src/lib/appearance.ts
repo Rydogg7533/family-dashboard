@@ -17,7 +17,7 @@ export type Appearance = {
 };
 
 export const DEFAULT_APPEARANCE: Appearance = {
-  theme: "auto", accent: "#1F6FA3", textSize: "m", density: "comfortable", cardStyle: "bordered", radius: "soft",
+  theme: "auto", accent: "#1F6FA3", textSize: "m", density: "comfortable", cardStyle: "filled", radius: "soft",
   font: "plex", background: "plain", backgroundDim: 40, greetingName: "", firstLine: "date", reduceMotion: false,
 };
 
