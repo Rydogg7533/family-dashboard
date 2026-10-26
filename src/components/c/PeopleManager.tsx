@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { addChild, setBirthDate, createChildLogin, createChildInvite, revokeChildInvite, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
@@ -12,65 +12,99 @@ const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50"
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-based; handles February
 
-// Month, day and year as three lists. A native date field makes you scroll a month at a time, which is
-// painful for a birthday decades back. Emits YYYY-MM-DD once all three are chosen, "" until then.
-function DatePick({ value, onChange, today, back = 100 }: { value: string; onChange: (v: string) => void; today: string; back?: number }) {
-  const thisYear = Number(today.slice(0, 4));
-  const [y, m, d] = value ? value.split("-") : ["", "", ""];
-  const sel = "min-h-11 rounded-xl border border-line bg-bg px-2 text-sm";
-  const set = (ny: string, nm: string, nd: string) => {
-    if (ny && nm) { const max = daysInMonth(Number(ny), Number(nm)); if (nd && Number(nd) > max) nd = String(max).padStart(2, "0"); }
-    onChange(ny && nm && nd ? `${ny}-${nm}-${nd}` : "");
-  };
-  const days = y && m ? daysInMonth(Number(y), Number(m)) : 31;
+// One scrollable column. Tapping a row picks it; the chosen row is scrolled to the middle without
+// moving the page. A plain list beats a native date field for a birthday decades back.
+function Col({ label, items, value, onPick }: { label: string; items: { v: string; t: string }[]; value: string; onPick: (v: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current?.querySelector<HTMLElement>('[data-on="1"]');
+    if (el && box.current) box.current.scrollTop = el.offsetTop - box.current.clientHeight / 2 + el.clientHeight / 2;
+  }, [value]);
   return (
-    <div className="flex gap-1.5">
-      <select aria-label="Month" value={m} onChange={(e) => set(y, e.target.value, d)} className={`${sel} flex-1 min-w-0`}>
-        <option value="">Month</option>
-        {MONTHS.map((name, i) => <option key={name} value={String(i + 1).padStart(2, "0")}>{name}</option>)}
-      </select>
-      <select aria-label="Day" value={d} onChange={(e) => set(y, m, e.target.value)} className={sel}>
-        <option value="">Day</option>
-        {Array.from({ length: days }, (_, i) => String(i + 1).padStart(2, "0")).map((n) => <option key={n} value={n}>{Number(n)}</option>)}
-      </select>
-      <select aria-label="Year" value={y} onChange={(e) => set(e.target.value, m, d)} className={sel}>
-        <option value="">Year</option>
-        {Array.from({ length: back + 1 }, (_, i) => String(thisYear - i)).map((n) => <option key={n} value={n}>{n}</option>)}
-      </select>
+    <div className="flex-1 min-w-0">
+      <div className="text-[11px] font-semibold text-muted text-center mb-1">{label}</div>
+      <div ref={box} className="h-40 overflow-y-auto rounded-xl border border-line" style={{ scrollSnapType: "y proximity", WebkitOverflowScrolling: "touch" }} role="listbox" aria-label={label}>
+        {items.map((it) => {
+          const on = value === it.v;
+          return (
+            <button key={it.v} type="button" role="option" aria-selected={on} data-on={on ? "1" : "0"} onClick={() => onPick(it.v)}
+              style={{ scrollSnapAlign: "center" }}
+              className={`block w-full text-center py-2 text-sm ${on ? "bg-accent text-white font-semibold" : "hover:bg-soft"}`}>
+              {it.t}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// A birthday: the date, the age it makes, and a tap to set or correct it. A row saved before dates were
-// kept shows the year it has and asks for the rest.
+// Month, day and year as three scrollable lists. The parts are held here: emitting only a whole date
+// would blank a part the moment it was picked, which is what made the first version unusable.
+function DatePick({ value, onChange, today, back = 100 }: { value: string; onChange: (v: string) => void; today: string; back?: number }) {
+  const thisYear = Number(today.slice(0, 4));
+  const [p, setP] = useState(() => (value ? { y: value.slice(0, 4), m: value.slice(5, 7), d: value.slice(8, 10) } : { y: "", m: "", d: "" }));
+
+  const put = (next: { y: string; m: string; d: string }) => {
+    if (next.y && next.m && next.d) {   // 31 January then February: keep the day inside the month
+      const max = daysInMonth(Number(next.y), Number(next.m));
+      if (Number(next.d) > max) next = { ...next, d: String(max).padStart(2, "0") };
+    }
+    setP(next);
+    onChange(next.y && next.m && next.d ? `${next.y}-${next.m}-${next.d}` : "");
+  };
+
+  const days = p.y && p.m ? daysInMonth(Number(p.y), Number(p.m)) : 31;
+  return (
+    <div className="flex gap-1.5">
+      <Col label="Month" value={p.m} onPick={(m) => put({ ...p, m })} items={MONTHS.map((t, i) => ({ v: String(i + 1).padStart(2, "0"), t }))} />
+      <Col label="Day" value={p.d} onPick={(d) => put({ ...p, d })} items={Array.from({ length: days }, (_, i) => ({ v: String(i + 1).padStart(2, "0"), t: String(i + 1) }))} />
+      <Col label="Year" value={p.y} onPick={(y) => put({ ...p, y })} items={Array.from({ length: back + 1 }, (_, i) => ({ v: String(thisYear - i), t: String(thisYear - i) }))} />
+    </div>
+  );
+}
+
+// A birthday: the compact line in the row, and a sheet that comes up with the three columns in it.
+// The row has no space for them, so the picker gets the width of the screen.
 function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child" | "profile"; id: string; date: string | null; today: string; canEdit: boolean; fallbackYear?: number }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(date ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [busy, start] = useTransition();
+
   const save = () => start(async () => {
     const r = await setBirthDate(who, id, v);
     if (!("ok" in r) || !r.ok) { setErr(("error" in r && r.error) || "Could not save."); return; }
     setErr(null); setOpen(false); router.refresh();
   });
-  const shown = date ? `${new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })} · ${ageOf({ birth_year: Number(date.slice(0, 4)), birth_date: date }, today)}`
+  const close = () => { setOpen(false); setErr(null); setV(date ?? ""); };
+
+  const pretty = date ? new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : null;
+  const shown = date ? `${pretty} · ${ageOf({ birth_year: Number(date.slice(0, 4)), birth_date: date }, today)}`
     : fallbackYear ? `born ${fallbackYear} · about ${ageOf({ birth_year: fallbackYear, birth_date: null }, today)}` : "No birthday yet";
-  if (!open) return (
-    <div className="text-xs text-muted text-right shrink-0">
-      {shown}{canEdit && <> · <button type="button" className="font-semibold text-accent" onClick={() => setOpen(true)}>{date ? "Change" : "Add"}</button></>}
-    </div>
-  );
+
   return (
-    <div className="flex flex-col items-end gap-1.5 min-w-0">
-      <div className="flex gap-1.5 items-center flex-wrap justify-end">
-        <DatePick value={v} onChange={setV} today={today} />
-        <button type="button" disabled={busy || !v || v > today} className="min-h-9 px-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50" onClick={save}>{busy ? "…" : "Save"}</button>
-        <button type="button" className="min-h-9 px-2 text-xs font-semibold text-muted" onClick={() => { setOpen(false); setErr(null); }}>Cancel</button>
+    <>
+      <div className="text-xs text-muted text-right shrink-0">
+        {shown}{canEdit && <> · <button type="button" className="font-semibold text-accent" onClick={() => setOpen(true)}>{date ? "Change" : "Add"}</button></>}
       </div>
-      {v && v > today && <div className="text-[11px] font-semibold text-red">That date is in the future.</div>}
-      {err && <div className="text-[11px] font-semibold text-red">{err}</div>}
-    </div>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Birthday">
+          <button aria-label="Close" className="absolute inset-0 bg-black/40" onClick={close} />
+          <div className="relative w-full max-w-md bg-bg rounded-t-2xl border-t border-line p-5 pb-[max(20px,env(safe-area-inset-bottom))] flex flex-col gap-3 shadow-xl">
+            <div className="font-bold">Birthday</div>
+            <DatePick value={v} onChange={setV} today={today} />
+            {v && v > today && <div className="text-xs font-semibold text-red">That date is in the future.</div>}
+            {err && <div className="text-xs font-semibold text-red">{err}</div>}
+            <div className="flex gap-2">
+              <button type="button" className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm" onClick={close}>Cancel</button>
+              <button type="button" disabled={busy || !v || v > today} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" onClick={save}>{busy ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -81,6 +115,7 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
   const [name, setName] = useState("");
   const todayMax = today;
   const [dob, setDob] = useState("");
+  const [dobKey, setDobKey] = useState(0);   // bumping it remounts the picker, which clears the three columns
   const [minAge, setMinAge] = useState(String(householdMin));
   const [loginFor, setLoginFor] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -193,10 +228,10 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
           <div className="font-semibold">Add a child</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={input} autoCapitalize="words" />
           <label className="text-xs font-semibold">Birth date
-            <div className="mt-1"><DatePick value={dob} onChange={setDob} today={todayMax} /></div>
+            <div className="mt-1"><DatePick key={dobKey} value={dob} onChange={setDob} today={todayMax} /></div>
           </label>
           <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, and a grandparent may be a member too, so it goes back 100 years.</div>
-          <button type="button" disabled={pending || !name.trim() || !dob || dob > todayMax} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); })}>{pending ? "Adding…" : "Add child"}</button>
+          <button type="button" disabled={pending || !name.trim() || !dob || dob > todayMax} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); setDobKey((k) => k + 1); })}>{pending ? "Adding…" : "Add child"}</button>
         </div>
       )}
 
