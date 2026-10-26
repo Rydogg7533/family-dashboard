@@ -95,24 +95,56 @@ function DatePick({ value, onChange, today, back = 100 }: { value: string; onCha
   );
 }
 
-// A birthday: the compact line in the row, and a sheet that comes up with the three columns in it.
-// The row has no space for them, so the picker gets the width of the screen.
+export const prettyDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+
+// The wheels, in the middle of the screen. Nothing is committed until Done, so Cancel leaves the value alone.
+function DateModal({ value, today, title, busy, err, onCancel, onDone }: { value: string; today: string; title: string; busy?: boolean; err?: string | null; onCancel: () => void; onDone: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  const bad = !v || v > today;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-5" role="dialog" aria-modal="true" aria-label={title}>
+      <button aria-label="Close" className="absolute inset-0 bg-black/50" onClick={onCancel} />
+      <div className="relative w-full max-w-sm bg-bg rounded-2xl border border-line p-5 flex flex-col gap-3 shadow-2xl">
+        <div className="font-bold">{title}</div>
+        <DatePick value={v} onChange={setV} today={today} />
+        {v && v > today && <div className="text-xs font-semibold text-red">That date is in the future.</div>}
+        {err && <div className="text-xs font-semibold text-red">{err}</div>}
+        <div className="flex gap-2">
+          <button type="button" className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm" onClick={onCancel}>Cancel</button>
+          <button type="button" disabled={busy || bad} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" onClick={() => onDone(v)}>{busy ? "Saving…" : "Done"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A field that reads as empty until a date is chosen; tapping it brings the wheels up.
+function DateField({ value, onChange, today, className = "" }: { value: string; onChange: (v: string) => void; today: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={`${className} text-left ${value ? "" : "text-muted"}`}>
+        {value ? prettyDate(value) : "Choose a date"}
+      </button>
+      {open && <DateModal value={value} today={today} title="Birth date" onCancel={() => setOpen(false)} onDone={(v) => { onChange(v); setOpen(false); }} />}
+    </>
+  );
+}
+
+// A birthday: the compact line in the row, and the wheels in the middle of the screen when it is tapped.
 function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child" | "profile"; id: string; date: string | null; today: string; canEdit: boolean; fallbackYear?: number }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [v, setV] = useState(date ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [busy, start] = useTransition();
 
-  const save = () => start(async () => {
+  const save = (v: string) => start(async () => {
     const r = await setBirthDate(who, id, v);
     if (!("ok" in r) || !r.ok) { setErr(("error" in r && r.error) || "Could not save."); return; }
     setErr(null); setOpen(false); router.refresh();
   });
-  const close = () => { setOpen(false); setErr(null); setV(date ?? ""); };
 
-  const pretty = date ? new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : null;
-  const shown = date ? `${pretty} · ${ageOf({ birth_year: Number(date.slice(0, 4)), birth_date: date }, today)}`
+  const shown = date ? `${prettyDate(date)} · ${ageOf({ birth_year: Number(date.slice(0, 4)), birth_date: date }, today)}`
     : fallbackYear ? `born ${fallbackYear} · about ${ageOf({ birth_year: fallbackYear, birth_date: null }, today)}` : "No birthday yet";
 
   return (
@@ -120,21 +152,7 @@ function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child
       <div className="text-xs text-muted text-right shrink-0">
         {shown}{canEdit && <> · <button type="button" className="font-semibold text-accent" onClick={() => setOpen(true)}>{date ? "Change" : "Add"}</button></>}
       </div>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Birthday">
-          <button aria-label="Close" className="absolute inset-0 bg-black/40" onClick={close} />
-          <div className="relative w-full max-w-md bg-bg rounded-t-2xl border-t border-line p-5 pb-[max(20px,env(safe-area-inset-bottom))] flex flex-col gap-3 shadow-xl">
-            <div className="font-bold">Birthday</div>
-            <DatePick value={v} onChange={setV} today={today} />
-            {v && v > today && <div className="text-xs font-semibold text-red">That date is in the future.</div>}
-            {err && <div className="text-xs font-semibold text-red">{err}</div>}
-            <div className="flex gap-2">
-              <button type="button" className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm" onClick={close}>Cancel</button>
-              <button type="button" disabled={busy || !v || v > today} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50" onClick={save}>{busy ? "Saving…" : "Save"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {open && <DateModal value={date ?? ""} today={today} title="Birthday" busy={busy} err={err} onCancel={() => { setOpen(false); setErr(null); }} onDone={save} />}
     </>
   );
 }
@@ -259,7 +277,7 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
           <div className="font-semibold">Add a child</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={input} autoCapitalize="words" />
           <label className="text-xs font-semibold">Birth date
-            <div className="mt-1"><DatePick key={dobKey} value={dob} onChange={setDob} today={todayMax} /></div>
+            <DateField key={dobKey} value={dob} onChange={setDob} today={todayMax} className={`${input} mt-1`} />
           </label>
           <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, and a grandparent may be a member too, so it goes back 100 years.</div>
           <button type="button" disabled={pending || !name.trim() || !dob || dob > todayMax} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); setDobKey((k) => k + 1); })}>{pending ? "Adding…" : "Add child"}</button>
