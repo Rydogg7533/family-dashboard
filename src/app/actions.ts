@@ -40,18 +40,23 @@ export async function setTaskStatus(id: string, status: "done" | "snoozed" | "di
   return { ok: true };
 }
 
-// Who a task is for: "me", "other", "both" (either may finish it; it closes for both), plus an optional heads-up to the other person.
-export async function setTaskWho(id: string, mode: "me" | "other" | "both", headsUp: boolean) {
+// Who a task is for: "me", "both", or a member's id. The id is passed in rather than worked out here:
+// this used to do its own find((x) => x !== user.id) while the button did the same independently, so
+// in a household with more than two people the label and the assignment could disagree. Children are
+// excluded -- is_member() is role <> 'child', so a child can neither read nor finish a task.
+export async function setTaskWho(id: string, target: string, headsUp: boolean) {
   if (!hasSupabaseEnv()) return { ok: true, sample: true };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false };
-  const { data: people } = await sb.from("profiles").select("id");
-  const other = (people ?? []).map((p) => p.id as string).find((x) => x !== user.id);
-  if (!other) return { ok: false, error: "No second person is set up." };
-  const patch = mode === "both" ? { person: user.id, audience: "both", fyi: [] as string[] }
-    : mode === "me" ? { person: user.id, audience: "one", fyi: headsUp ? [other] : [] }
-    : { person: other, audience: "one", fyi: headsUp ? [user.id] : [] };
+  const { data: people } = await sb.from("profiles").select("id, role").neq("role", "child");
+  const members = (people ?? []).map((p) => p.id as string);
+  const others = (who: string) => (headsUp ? members.filter((x) => x !== who) : []);
+  let patch: { person: string; audience: string; fyi: string[] };
+  if (target === "both") patch = { person: user.id, audience: "both", fyi: [] };
+  else if (target === "me") patch = { person: user.id, audience: "one", fyi: others(user.id) };
+  else if (members.includes(target)) patch = { person: target, audience: "one", fyi: others(target) };
+  else return { ok: false, error: "That person can't hold a task." };
   const { data, error } = await sb.from("tasks").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id");
   if (error || !data?.length) return { ok: false, error: "You can't change this one." };
   revalidatePath("/tasks"); revalidatePath("/");

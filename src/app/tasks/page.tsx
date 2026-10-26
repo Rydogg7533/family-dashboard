@@ -1,4 +1,4 @@
-import { getOpenTasks, getFinishedTasks, getPeopleNames } from "@/lib/data";
+import { getOpenTasks, getFinishedTasks, getPeopleNames, getTaskMembers } from "@/lib/data";
 import { getRequestUser } from "@/lib/supabase/server";
 import { H1, Card } from "@/components/ui";
 import { TaskRow } from "@/components/TaskRow";
@@ -9,10 +9,12 @@ export const dynamic = "force-dynamic";
 
 export default async function Tasks({ searchParams }: PageProps<"/tasks">) {
   const { kind, who } = await searchParams;
-  const [all, finished, names, user] = await Promise.all([getOpenTasks(), getFinishedTasks(), getPeopleNames(), getRequestUser()]);
+  const [all, finished, names, members, user] = await Promise.all([getOpenTasks(), getFinishedTasks(), getPeopleNames(), getTaskMembers(), getRequestUser()]);
   const me = user?.id ?? null;
   // Tabs: each person, then Both. Mine first. "Both" = shared with either able to finish, or unassigned.
-  const ids = Object.keys(names).sort((a, b) => (a === me ? -1 : b === me ? 1 : 0));
+  // Adults only: a child cannot read or update a task, so a child tab is permanently empty and a child
+  // is not an assignment option. Children still appear by name anywhere a task names a person.
+  const ids = members.map((m) => m.id).sort((a, b) => (a === me ? -1 : b === me ? 1 : 0));
   const isBoth = (t: (typeof all)[number]) => t.audience === "both" || !t.person;
   // D90: your own tab is everything you could pick up -- yours plus the household's -- which is what
   // Today already shows via splitTasks. Before this, Tasks excluded shared items from your tab, so a
@@ -44,7 +46,7 @@ export default async function Tasks({ searchParams }: PageProps<"/tasks">) {
       {tasks.length === 0 ? <Card className="text-muted">{current === "done" ? "Nothing finished yet." : "Nothing here."}</Card>
         : <div className="flex flex-col gap-2">{tasks.map((t) => current === "done"
             ? <FinishedRow key={t.id} task={t} />
-            : <TaskRow key={t.id} task={t} me={me} names={names} />)}</div>}
+            : <TaskRow key={t.id} task={t} me={me} names={names} members={members} />)}</div>}
     </>
   );
 }

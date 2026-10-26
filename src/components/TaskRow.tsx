@@ -43,13 +43,11 @@ const shortAgo = (iso: string) => {
   return d < 1 ? "today" : `${d}d`;
 };
 
-export function TaskRow({ task, me = null, names = {} }: { task: Task; me?: string | null; names?: Record<string, string> }) {
+export function TaskRow({ task, me = null, names = {}, members = [] }: { task: Task; me?: string | null; names?: Record<string, string>; members?: { id: string; name: string }[] }) {
   const l = label[task.kind];
   const chip = dueChip(task.due_at ? new Date(task.due_at) : null);
   const { text: summary, from } = splitSummary(task.summary);
-  const ids = Object.keys(names);
-  const otherId = ids.find((x) => x !== me) ?? null;
-  const otherName = otherId ? names[otherId] : "the other person";
+  const others = members.filter((m) => m.id !== me);
   const isFyi = !!me && task.audience !== "both" && !!task.person && task.person !== me && (task.fyi ?? []).includes(me);
   const addedBy = task.origin_kind === "person" && task.origin_ref ? names[task.origin_ref] : null;
   const source = from ?? (addedBy ? `${addedBy} added this` : ORIGIN[task.origin_kind] ?? task.origin_kind);
@@ -72,7 +70,7 @@ export function TaskRow({ task, me = null, names = {} }: { task: Task; me?: stri
       </div>
       <div className="flex gap-2 items-start">
         <div className="flex-1 min-w-0"><TaskActions id={task.id} kind={task.title.startsWith("Subscription? ") ? "sub" : task.kind} /></div>
-        {me && <TaskWho id={task.id} mine={task.person === me} headsUp={(task.fyi ?? []).length > 0} otherName={otherName} canTake={isFyi} />}
+        {me && <TaskWho id={task.id} headsUp={(task.fyi ?? []).length > 0} others={others} canTake={isFyi} />}
       </div>
     </div>
   );

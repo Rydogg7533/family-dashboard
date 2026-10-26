@@ -6,7 +6,7 @@ import { setTaskWho, takeTask } from "@/app/actions";
 // Who a task is for. The trigger is a small button beside Done and Snooze rather than a "Change who"
 // link on every card: with 61 open tasks that was 61 copies of a control used rarely. Who the task is
 // for now reads in the card's meta line in one word, so this only has to offer the change.
-export function TaskWho({ id, mine, headsUp, otherName, canTake }: { id: string; mine: boolean; headsUp: boolean; otherName: string; canTake: boolean }) {
+export function TaskWho({ id, headsUp, others, canTake }: { id: string; headsUp: boolean; others: { id: string; name: string }[]; canTake: boolean }) {
   const [open, setOpen] = useState(false);
   const [hu, setHu] = useState(headsUp);
   const [err, setErr] = useState<string | null>(null);
@@ -22,10 +22,10 @@ export function TaskWho({ id, mine, headsUp, otherName, canTake }: { id: string;
         <div className="absolute right-0 top-12 z-10 w-64 flex flex-col gap-2 rounded-xl border border-line bg-bg p-2 text-xs">
           <div className="flex gap-1.5 flex-wrap">
             <button className={b} disabled={pending} onClick={() => run(() => setTaskWho(id, "me", hu))}>Just me</button>
-            <button className={b} disabled={pending} onClick={() => run(() => setTaskWho(id, "other", hu))}>{otherName}</button>
+            {others.map((p) => <button key={p.id} className={b} disabled={pending} onClick={() => run(() => setTaskWho(id, p.id, hu))}>{p.name}</button>)}
             <button className={b} disabled={pending} onClick={() => run(() => setTaskWho(id, "both", false))}>Household</button>
           </div>
-          <label className="flex items-center gap-2"><input type="checkbox" checked={hu} onChange={(e) => setHu(e.target.checked)} /> Also give {mine ? otherName : "the other person"} a heads-up</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={hu} onChange={(e) => setHu(e.target.checked)} /> Also give {others.length === 1 ? others[0].name : "everyone else"} a heads-up</label>
           <div className="text-muted">&ldquo;Household&rdquo;: either of you can finish it, and it closes for both.</div>
           {err && <div className="text-red font-semibold">{err}</div>}
         </div>

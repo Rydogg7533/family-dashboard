@@ -74,6 +74,17 @@ export async function getFinishedTasks(limit = 60): Promise<Task[]> {
   return (data as Task[]) ?? [];
 }
 
+// Who can hold a task: adults only. is_member() is role <> 'child', so a child can neither read nor
+// update a task -- assigning one to a child makes something nobody can see or finish. Both the tabs
+// and the who-picker used to take "the first id that is not you", which in a three-person household
+// picks whoever happens to come first.
+export async function getTaskMembers(): Promise<{ id: string; name: string }[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("profiles").select("id, display_name, role, created_at").neq("role", "child").order("created_at");
+  return (data ?? []).map((p) => ({ id: p.id as string, name: String(p.display_name ?? "Member") }));
+}
+
 export async function getLog(limit = 50): Promise<LogRow[]> {
   if (!hasSupabaseEnv()) return sampleLog;
   const sb = await createClient();
