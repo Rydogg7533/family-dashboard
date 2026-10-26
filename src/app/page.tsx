@@ -1,3 +1,4 @@
+import { householdTz } from "@/lib/google-calendar";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getViewer } from "@/lib/data-registers";
@@ -25,7 +26,7 @@ export default async function Today() {
   if ((await getViewer()).role === "child" && hasSupabaseEnv()) redirect("/kid");
   // A parent gets one task per sensitive feature a child has just become old enough for.
   if (hasSupabaseEnv() && (await isOwnerViewer())) { const u = await getRequestUser(); if (u) { const [kids, feats, ages] = await Promise.all([getChildRows(), getChildFeatures(), getFeatureAges()]); await syncChildUnlockTasks(await createClient(), u.id, kids, feats, ages).catch(() => null); } }
-  const [name, status, allTasks, names, user, setup] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser(), getMyConnections()]);
+  const [name, status, allTasks, names, user, setup, tz] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser(), getMyConnections(), householdTz()]);
   const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;
   let handed = 0, handedBy = "";
@@ -52,7 +53,7 @@ export default async function Today() {
   const top = tasks.filter((t) => t.kind !== "fyi").slice(0, 5);
   const more = tasks.filter((t) => t.kind !== "fyi").length - top.length;
   const fyi = tasks.filter((t) => t.kind === "fyi").length;
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" });
 
   return (
     <>
@@ -63,7 +64,7 @@ export default async function Today() {
       {catalog?.show && <GuidedCard step="catalog" title={catalog.started ? "Keep cataloging what you own" : "Next: catalog what you own"} progress={catalog.started && catalog.total > 0 ? `${catalog.done} of ${catalog.total} areas done` : undefined}
         body={catalog.started ? (catalog.next ? `Next area: ${catalog.next}. A few minutes at a time is fine; it keeps your place.` : "Every area is marked done. Run the final check to finish.") : "Pick the rooms, then photograph things one room at a time. It takes a few minutes per room, over as many days as you like, and it keeps your place."} href="/things/catalog" startLabel={catalog.started ? "Continue" : "Start"} />}
       {sitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${sitterNudge.done} of ${sitterNudge.total} sections done`} body={`What a babysitter needs, written once.${sitterNudge.next ? ` Next: ${sitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter" startLabel="Continue" />}
-      <SitterToday review={sitterReview} proposal={sitterProposal} />
+      <SitterToday review={sitterReview} proposal={sitterProposal} tz={tz} />
       {handed > 0 && <Link href="/inbox" className="block mb-4"><div className="card border-accent text-sm font-semibold">{handedBy ? `${handedBy} handed you` : "Handed to you:"} {handed} item{handed === 1 ? "" : "s"} in the Inbox. <span className="text-accent">Open</span></div></Link>}
       <section className="mb-5">
         <div className="flex items-baseline justify-between mb-2">

@@ -1,3 +1,4 @@
+import { householdTz } from "@/lib/google-calendar";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { evidenceFor, type Evidence } from "@/lib/money-routine-evidence";
 import { syncRoutineTasks } from "@/lib/money-routine-tasks";
@@ -10,9 +11,9 @@ export type RoutineItem = RoutineStep & { run: RoutineRun | null; due: string; o
 // gate = the live Tiller health for this month. complete = every step closed AND the gate open: a month is not closed while charges may be missing.
 export type Routine = { period: string; label: string; items: RoutineItem[]; done: number; total: number; gate: TillerHealth | null; complete: boolean };
 
-// The household's current month, in Utah time.
-export function currentPeriod(now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver", year: "numeric", month: "2-digit" }).format(now).slice(0, 7);
+// The household's current month, on the household's clock.
+export async function currentPeriod(now = new Date()): Promise<string> {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: await householdTz(), year: "numeric", month: "2-digit" }).format(now).slice(0, 7);
 }
 export function periodLabel(period: string): string {
   const [y, m] = period.split("-").map(Number);
@@ -21,8 +22,9 @@ export function periodLabel(period: string): string {
 const dueDate = (period: string, day: number | null) => { const [y, m] = period.split("-").map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); return `${period}-${String(Math.min(day ?? last, last)).padStart(2, "0")}`; };
 
 // This month's routine. Runs for the period are created on first read (one per live step), so the list is the same for everyone who opens it.
-export async function getRoutine(period = currentPeriod()): Promise<Routine | null> {
+export async function getRoutine(periodArg?: string): Promise<Routine | null> {
   if (!hasSupabaseEnv()) return null;
+  const period = periodArg ?? (await currentPeriod());
   const sb = await createClient();
   const { data: steps } = await sb.from("money_routine_steps").select("id,key,label,detail,cadence,anchor_day,account_id,owner,href,source,sort").is("retired_at", null).order("sort").order("key");
   const live = (steps ?? []) as RoutineStep[];
@@ -49,7 +51,7 @@ export async function getRoutine(period = currentPeriod()): Promise<Routine | nu
       if (upd) { byStep.set(s.id, { ...run, status: "done", done_by: "System", done_at: now, evidence: `app: ${e.line}` }); await sb.from("activity_log").insert({ actor: "System (routine)", action: "routine_done", subject: `${s.key} ${period}: ${e.line}`.slice(0, 80), undoable: true }).then(() => {}, () => {}); }
     }
   }
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(new Date());
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: await householdTz() }).format(new Date());
   const items: RoutineItem[] = live.map((s) => { const run = byStep.get(s.id) ?? null; const due = dueDate(period, s.anchor_day); return { ...s, run, due, overdue: (run?.status ?? "open") === "open" && due < today, evidence: evid.get(s.id) ?? null }; });
   await syncRoutineTasks(sb, period, items).catch(() => {});
   const done = items.filter((i) => i.run && i.run.status !== "open").length;

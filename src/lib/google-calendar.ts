@@ -4,7 +4,41 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 // calendar-only token (GOOGLE_CAL_* in the Vercel settings, made by `node scripts/google-auth.mjs --purpose calendar`).
 // Nothing here is cached beyond the short access token; every page load asks Google, so what you see is what Google has.
 
-export const HOUSEHOLD_TZ = process.env.HOUSEHOLD_TZ || "America/Denver";
+export const FALLBACK_TZ = process.env.HOUSEHOLD_TZ || "America/Denver";
+
+// The household's time zone, as it was set at setup and can be changed in Settings. Cached for a minute
+// so reading it costs nothing on a page that formats many events. Every date in this file goes through it:
+// get it wrong and appointments move, so the helpers below take it as a required argument.
+let tzCache: { v: string; until: number } | null = null;
+export async function householdTz(): Promise<string> {
+  if (tzCache && tzCache.until > Date.now()) return tzCache.v;
+  let v = FALLBACK_TZ;
+  if (hasSupabaseEnv()) {
+    try {
+      const sb = await createClient();
+      const { data } = await sb.from("household").select("tz").limit(1).maybeSingle();
+      const t = data?.tz ? String(data.tz) : "";
+      if (t) { new Intl.DateTimeFormat("en-US", { timeZone: t }); v = t; }   // throws on a zone Node does not know
+    } catch { v = FALLBACK_TZ; }
+  }
+  tzCache = { v, until: Date.now() + 60_000 };
+  return v;
+}
+export function forgetHouseholdTz() { tzCache = null; }
+
+// The household's own day, as YYYY-MM-DD. new Date().toISOString() is the SERVER's day, which on Vercel is
+// UTC: after 6pm in Utah it is already tomorrow, so every page showed the wrong date all evening. Whole days
+// are added to the local date rather than to the clock, so a DST change does not skip or repeat a day.
+export async function todayIso(offsetDays = 0): Promise<string> {
+  const base = new Intl.DateTimeFormat("en-CA", { timeZone: await householdTz() }).format(new Date());
+  if (!offsetDays) return base;
+  const [y, m, d] = base.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + days * 86_400_000).toISOString().slice(0, 10);
+}
 const API = "https://www.googleapis.com/calendar/v3";
 
 export function hasGoogleCal() { return !!(process.env.GOOGLE_CAL_CLIENT_ID && process.env.GOOGLE_CAL_CLIENT_SECRET && process.env.GOOGLE_CAL_REFRESH_TOKEN); }
@@ -51,12 +85,12 @@ async function g<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 // ---- dates in the household zone ----
-const partsIn = (iso: string, tz = HOUSEHOLD_TZ) => {
+const partsIn = (iso: string, tz: string) => {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour === "24" ? "00" : p.hour}:${p.minute}` };
 };
 // "2026-10-23" + "15:00" on the household clock → RFC3339 with that zone's offset at that moment (DST-correct).
-export function localToIso(date: string, time: string, tz = HOUSEHOLD_TZ) {
+export function localToIso(date: string, time: string, tz: string) {
   const [y, mo, d] = date.split("-").map(Number), [h, mi] = time.split(":").map(Number);
   const naive = Date.UTC(y, mo - 1, d, h, mi);                 // the wall-clock reading, pretending it is UTC
   const offsetAt = (ms: number) => { const p = partsIn(new Date(ms).toISOString(), tz); const [py, pm, pd] = p.date.split("-").map(Number), [ph, pmi] = p.time.split(":").map(Number); return Date.UTC(py, pm - 1, pd, ph, pmi) - ms; };
@@ -69,12 +103,12 @@ type RawEvent = { id: string; summary?: string; description?: string; location?:
   start?: { date?: string; dateTime?: string }; end?: { date?: string; dateTime?: string }; recurrence?: string[]; recurringEventId?: string;
   attendees?: { email: string; displayName?: string; responseStatus?: string }[]; reminders?: { useDefault?: boolean; overrides?: Reminder[] }; creator?: { email?: string } };
 
-function toEvent(e: RawEvent, cal: GCal): GEvent {
+function toEvent(e: RawEvent, cal: GCal, tz: string): GEvent {
   const allDay = !!e.start?.date;
   const startIso = e.start?.dateTime || `${e.start?.date}T00:00:00`;
   const endIso = e.end?.dateTime || `${e.end?.date}T00:00:00`;
-  const s = allDay ? { date: e.start!.date!, time: null } : partsIn(startIso);
-  const en = allDay ? { date: e.end!.date!, time: null } : partsIn(endIso);
+  const s = allDay ? { date: e.start!.date!, time: null } : partsIn(startIso, tz);
+  const en = allDay ? { date: e.end!.date!, time: null } : partsIn(endIso, tz);
   // Google's all-day end is the day AFTER the last day; show the last day.
   const endDate = allDay ? new Date(new Date(en.date + "T00:00:00Z").getTime() - 86400_000).toISOString().slice(0, 10) : en.date;
   return { id: e.id, calendarId: cal.id, calendarName: cal.name, color: cal.color, title: e.summary || "(no title)", description: e.description || null, location: e.location || null, htmlLink: e.htmlLink || null,
@@ -126,13 +160,14 @@ export async function shownCalendars(): Promise<GCal[]> {
 // Every event (single instances, repeats expanded) between two household-zone dates, inclusive, across the chosen calendars.
 export async function listEvents(fromDate: string, toDate: string, calendars?: GCal[]): Promise<GEvent[]> {
   const cals = calendars ?? (await shownCalendars());
-  const timeMin = localToIso(fromDate, "00:00"), timeMax = localToIso(toDate, "23:59");
+  const tz = await householdTz();
+  const timeMin = localToIso(fromDate, "00:00", tz), timeMax = localToIso(toDate, "23:59", tz);
   const all = await Promise.all(cals.map(async (cal) => {
     const out: GEvent[] = []; let pageToken = "";
     do {
-      const q = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", timeMin, timeMax, maxResults: "250", timeZone: HOUSEHOLD_TZ, ...(pageToken ? { pageToken } : {}) });
+      const q = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", timeMin, timeMax, maxResults: "250", timeZone: tz, ...(pageToken ? { pageToken } : {}) });
       const j = await g<{ items?: RawEvent[]; nextPageToken?: string }>(`/calendars/${encodeURIComponent(cal.id)}/events?${q}`).catch(() => ({ items: [] as RawEvent[], nextPageToken: undefined }));
-      for (const e of j.items || []) if (e.status !== "cancelled") out.push(toEvent(e, cal));
+      for (const e of j.items || []) if (e.status !== "cancelled") out.push(toEvent(e, cal, tz));
       pageToken = j.nextPageToken || "";
     } while (pageToken);
     return out;
@@ -142,7 +177,7 @@ export async function listEvents(fromDate: string, toDate: string, calendars?: G
 export async function getEvent(calendarId: string, id: string, calendars?: GCal[]): Promise<GEvent> {
   const cals = calendars ?? (await listCalendars());
   const cal = cals.find((c) => c.id === calendarId) || { id: calendarId, name: "Calendar", color: null, primary: false, canWrite: true };
-  return toEvent(await g<RawEvent>(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`), cal);
+  return toEvent(await g<RawEvent>(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`), cal, await householdTz());
 }
 
 // ---- writes (every one re-reads the event from Google afterwards, so "done" means Google has it) ----
@@ -151,7 +186,7 @@ export type EventInput = {
   location?: string | null; description?: string | null; reminders?: Reminder[] | null;   // null = the calendar's default; [] = none; up to 5 (Google's limit)
   recurrence?: string[] | null; attendees?: string[] | null;
 };
-function body(i: EventInput) {
+function body(i: EventInput, tz: string) {
   const endDate = i.endDate || i.date;
   const b: Record<string, unknown> = { summary: i.title.trim(), location: i.location?.trim() || null, description: i.description?.trim() || null };
   if (i.allDay) {   // Google wants the exclusive end day
@@ -160,7 +195,7 @@ function body(i: EventInput) {
   } else {
     const st = i.start || "09:00"; let en = i.end || null;
     if (!en) { const [h, m] = st.split(":").map(Number); const t = h * 60 + m + 60; en = `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; }
-    b.start = { dateTime: localToIso(i.date, st), timeZone: HOUSEHOLD_TZ }; b.end = { dateTime: localToIso(endDate, en), timeZone: HOUSEHOLD_TZ };
+    b.start = { dateTime: localToIso(i.date, st, tz), timeZone: tz }; b.end = { dateTime: localToIso(endDate, en, tz), timeZone: tz };
   }
   if (i.reminders === null || i.reminders === undefined) b.reminders = { useDefault: true };
   else b.reminders = { useDefault: false, overrides: i.reminders.slice(0, 5).map((r) => ({ method: r.method, minutes: Math.max(0, Math.round(r.minutes)) })) };
@@ -169,11 +204,11 @@ function body(i: EventInput) {
   return b;
 }
 export async function insertEvent(i: EventInput): Promise<GEvent> {
-  const made = await g<RawEvent>(`/calendars/${encodeURIComponent(i.calendarId)}/events?sendUpdates=${i.attendees?.length ? "all" : "none"}`, { method: "POST", body: JSON.stringify(body(i)) });
+  const made = await g<RawEvent>(`/calendars/${encodeURIComponent(i.calendarId)}/events?sendUpdates=${i.attendees?.length ? "all" : "none"}`, { method: "POST", body: JSON.stringify(body(i, await householdTz())) });
   return getEvent(i.calendarId, made.id);
 }
 export async function updateEvent(id: string, i: EventInput): Promise<GEvent> {
-  await g<RawEvent>(`/calendars/${encodeURIComponent(i.calendarId)}/events/${encodeURIComponent(id)}?sendUpdates=${i.attendees?.length ? "all" : "none"}`, { method: "PATCH", body: JSON.stringify(body(i)) });
+  await g<RawEvent>(`/calendars/${encodeURIComponent(i.calendarId)}/events/${encodeURIComponent(id)}?sendUpdates=${i.attendees?.length ? "all" : "none"}`, { method: "PATCH", body: JSON.stringify(body(i, await householdTz())) });
   return getEvent(i.calendarId, id);
 }
 export async function deleteEvent(calendarId: string, id: string): Promise<void> {
@@ -187,7 +222,8 @@ export async function moveEvent(fromCalendar: string, id: string, toCalendar: st
 // Moves one event to a new time on one day. Touches ONLY start and end (title, notes, reminders, guests stay as they are), and
 // sends no invitation updates; the caller refuses events that have guests. Re-reads the event so "moved" means Google has it.
 export async function rescheduleEvent(calendarId: string, id: string, date: string, start: string, end: string): Promise<GEvent> {
+  const tz = await householdTz();
   await g<RawEvent>(`/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}?sendUpdates=none`, { method: "PATCH",
-    body: JSON.stringify({ start: { dateTime: localToIso(date, start), timeZone: HOUSEHOLD_TZ }, end: { dateTime: localToIso(date, end), timeZone: HOUSEHOLD_TZ } }) });
+    body: JSON.stringify({ start: { dateTime: localToIso(date, start, tz), timeZone: tz }, end: { dateTime: localToIso(date, end, tz), timeZone: tz } }) });
   return getEvent(calendarId, id);
 }

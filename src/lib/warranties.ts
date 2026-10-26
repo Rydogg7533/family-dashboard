@@ -1,3 +1,4 @@
+import { todayIso } from "@/lib/google-calendar";
 import type { createClient } from "@/lib/supabase/server";
 import { defaultAssignment } from "@/lib/task-defaults";
 
@@ -9,10 +10,11 @@ export type Attachment = { path: string; name: string; role: "receipt" | "warran
 export type WState = "needs_end" | "soon" | "active" | "expired";
 export const SOON_DAYS = 45;
 const iso = (d: unknown) => (typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null);
-const today = () => new Date().toISOString().slice(0, 10);
-export function stateOf(w: WarrantyRow): WState {
+// `today` is passed in, on the household's clock: working it out here would make this sync helper async,
+// and taking the server's day made a warranty expire a few hours early every evening.
+export function stateOf(w: WarrantyRow, today: string): WState {
   if (!w.end) return "needs_end";
-  const t = today();
+  const t = today;
   if (w.end < t) return "expired";
   const days = Math.round((Date.parse(w.end) - Date.parse(t)) / 86400_000);
   return days <= SOON_DAYS ? "soon" : "active";
@@ -45,7 +47,8 @@ export async function collectWarranties(sb: Sb): Promise<WarrantyRow[]> {
 
 // One reminder per warranty, about 30 days before it ends ("extend or let it lapse"). Safe to run repeatedly.
 export async function ensureReminders(sb: Sb, userId: string, rows: WarrantyRow[]) {
-  const due = rows.filter((w) => w.end && stateOf(w) === "soon");
+  const todayHh = await todayIso();
+  const due = rows.filter((w) => w.end && stateOf(w, todayHh) === "soon");
   if (!due.length) return;
   const { data: have } = await sb.from("tasks").select("origin_ref").eq("origin_kind", "warranty").in("origin_ref", due.map((w) => `${w.key}@${w.end}`));
   const seen = new Set((have ?? []).map((t) => t.origin_ref as string));

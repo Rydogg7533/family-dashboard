@@ -6,11 +6,11 @@ import { answerProposal, createToldNight } from "@/app/sitter/actions";
 import { fmtWhen, type Night } from "@/lib/sitter-shared";
 
 const inp = "w-full min-h-10 rounded-xl border border-line bg-bg px-3 text-sm";
-const hhmm = (d: Date, add = 0) => new Date(d.getTime() + add).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/Denver" });
-const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+const hhmm = (d: Date, tz: string, add = 0) => new Date(d.getTime() + add).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz });
+const today = (tz: string) => new Date().toLocaleDateString("en-CA", { timeZone: tz });
 
 // Today: (1) a night that needs review right now, (2) a question about an evening event, (3) the "Sitter tonight" button for telling the app directly.
-export function SitterToday({ review, proposal }: { review: Night | null; proposal: Night | null }) {
+export function SitterToday({ review, proposal, tz }: { review: Night | null; proposal: Night | null; tz: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [sitter, setSitter] = useState(""); const [place, setPlace] = useState("");
@@ -37,7 +37,7 @@ export function SitterToday({ review, proposal }: { review: Night | null; propos
         </div>
       )}
       <div className="mb-4">
-        {!open ? <button onClick={() => { setDate(today()); setLeave(hhmm(new Date(), 30 * 60e3)); setBack(hhmm(new Date(), 4 * 3600e3)); setOpen(true); }} className="min-h-10 px-4 rounded-full border border-line text-sm font-semibold">Sitter tonight</button> : (
+        {!open ? <button onClick={() => { setDate(today(tz)); setLeave(hhmm(new Date(), tz, 30 * 60e3)); setBack(hhmm(new Date(), tz, 4 * 3600e3)); setOpen(true); }} className="min-h-10 px-4 rounded-full border border-line text-sm font-semibold">Sitter tonight</button> : (
           <form className="card flex flex-col gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); setErr(null); const r = await createToldNight({ title: "", place, sitterName: sitter, date, leaveTime: leave, backTime: back }); setBusy(false); if (!r.ok) { setErr(r.error ?? "Could not save."); return; } setOpen(false); if (r.review && r.id) router.push(`/sitter/review/${r.id}`); else router.refresh(); }}>
             <div className="text-xs font-bold tracking-wide text-muted">TELL ME ABOUT A SITTER NIGHT</div>
             <input className={inp} placeholder="Sitter’s name (optional)" value={sitter} onChange={(e) => setSitter(e.target.value)} />

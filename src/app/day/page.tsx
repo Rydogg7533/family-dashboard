@@ -1,3 +1,4 @@
+import { householdTz } from "@/lib/google-calendar";
 import Link from "next/link";
 import { getDayBlocks, getDayQuestions, getDayRecord, getSyncStatus, daySummary } from "@/lib/data-day";
 import { getDisplayName } from "@/lib/data";
@@ -10,9 +11,9 @@ export const dynamic = "force-dynamic";
 // F3 + F5 + F6: the morning schedule, weather on every block, a checklist per activity, the questions that
 // teach the day record, and yesterday's record. Location points come from Overland on the person's own phone.
 export default async function Day() {
-  const [name, blocks, questions, record, sync] = await Promise.all([getDisplayName(), getDayBlocks(), getDayQuestions(), getDayRecord(), getSyncStatus(["calendar", "location", "weather"])]);
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString("en-US", { weekday: "long" });
+  const [name, blocks, questions, record, sync, tz] = await Promise.all([getDisplayName(), getDayBlocks(), getDayQuestions(), getDayRecord(), getSyncStatus(["calendar", "location", "weather"]), householdTz()]);
+  const today = new Date().toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" });
+  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString("en-US", { timeZone: tz, weekday: "long" });
   const s = daySummary(blocks);
   const unpacked = blocks.flatMap((b) => b.checklist?.items.filter((i) => i.layer !== "done_before" && !i.packed) ?? []).length;
 

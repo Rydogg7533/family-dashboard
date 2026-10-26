@@ -1,9 +1,10 @@
+import { householdTz } from "@/lib/google-calendar";
 // Server reader for the Tiller health check: accounts, their charge dates, and this period's "no activity" confirmations.
 import type { createClient } from "@/lib/supabase/server";
 import { tillerHealth, type HealthAccount, type TillerHealth } from "@/lib/tiller-health";
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
-export const todayDenver = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(new Date());
+export const todayLocal = async () => new Intl.DateTimeFormat("en-CA", { timeZone: await householdTz() }).format(new Date());
 
 export async function getTillerHealth(sb: Sb, period: string): Promise<TillerHealth> {
   const [{ data: accts }, { data: conf }] = await Promise.all([
@@ -29,5 +30,5 @@ export async function getTillerHealth(sb: Sb, period: string): Promise<TillerHea
   }));
   const tracked = new Set(accounts.filter((a) => a.tracked).map((a) => a.id));
   const stamps = list.filter((a) => tracked.has(a.id as string)).map((a) => (a.synced_at as string | null) ?? null);
-  return tillerHealth(accounts, period, todayDenver(), stamps);
+  return tillerHealth(accounts, period, await todayLocal(), stamps);
 }

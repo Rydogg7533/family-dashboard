@@ -1,3 +1,4 @@
+import { todayIso, householdTz } from "@/lib/google-calendar";
 import Link from "next/link";
 import { getPeople, getViewer } from "@/lib/data-registers";
 import { hasSupabaseEnv } from "@/lib/supabase/server";
@@ -43,14 +44,15 @@ export default async function Kid({ searchParams }: PageProps<"/kid">) {
   }
   const [blocks, events] = await Promise.all([getDayBlocks(), getCalendarEvents(undefined, 7)]);
   const mine = blocks.filter((b) => b.person === child);
+  const [todayHh, tz] = await Promise.all([todayIso(), householdTz()]);
   const school = { start: "08:00", title: "School" };
   const activity = mine.find((b) => b.checklist);
-  const week = events.filter((e) => e.person === child || e.person === "Family").filter((e) => e.date > new Date().toISOString().slice(0, 10)).slice(0, 4);
+  const week = events.filter((e) => e.person === child || e.person === "Family").filter((e) => e.date > todayHh).slice(0, 4);
   const w = activity?.weather;
   return (
     <div className="text-base">
       <h1 className="text-[26px] mb-0.5">Hi, {child}</h1>
-      <div className="text-sm text-muted mb-4">{new Date().toLocaleDateString("en-US", { weekday: "long" })}{w ? ` · ${w.note}, ${w.temp}°` : ""}</div>
+      <div className="text-sm text-muted mb-4">{new Date().toLocaleDateString("en-US", { timeZone: tz, weekday: "long" })}{w ? ` · ${w.note}, ${w.temp}°` : ""}</div>
 
       {on("schedule") && <section className="flex flex-col gap-2 mb-5">
         <h2 className="text-[17px]">Today</h2>

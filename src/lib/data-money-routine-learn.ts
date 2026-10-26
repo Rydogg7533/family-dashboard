@@ -1,18 +1,20 @@
+import { householdTz } from "@/lib/google-calendar";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findCandidates, WATCHED, type Observation } from "@/lib/money-routine-learn";
 
 export type CandidateRow = { key: string; label: string; months: string[]; times: number; typical_day: number | null; status: string };
 export type Learning = { proposed: CandidateRow[]; watched: number; observedKinds: number; sinceMonths: number };
 
-const denverDay = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(new Date(iso));
+const localDay = (iso: string, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(iso));
 
 // What the household has done, as observations: human activity-log actions (never System's) and Inbox filings by document kind.
 async function observations(sb: Awaited<ReturnType<typeof createClient>>): Promise<Observation[]> {
   const out: Observation[] = [];
+  const tz = await householdTz();
   const { data: acts } = await sb.from("activity_log").select("action, at, actor").not("actor", "like", "System%").limit(5000);
-  for (const a of acts ?? []) { const kind = `activity:${a.action}`; if (kind in WATCHED) out.push({ kind, day: denverDay(a.at as string) }); }
+  for (const a of acts ?? []) { const kind = `activity:${a.action}`; if (kind in WATCHED) out.push({ kind, day: localDay(a.at as string, tz) }); }
   const { data: filed } = await sb.from("inbox_items").select("read_result, resolved_at, captured_at").not("filed", "is", null).limit(5000);
-  for (const f of filed ?? []) { const k = (f.read_result as { kind?: string } | null)?.kind; if (!k) continue; const kind = `filed:${k}`; if (kind in WATCHED) out.push({ kind, day: denverDay((f.resolved_at ?? f.captured_at) as string) }); }
+  for (const f of filed ?? []) { const k = (f.read_result as { kind?: string } | null)?.kind; if (!k) continue; const kind = `filed:${k}`; if (kind in WATCHED) out.push({ kind, day: localDay((f.resolved_at ?? f.captured_at) as string, tz) }); }
   return out;
 }
 

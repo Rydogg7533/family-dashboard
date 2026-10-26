@@ -1,5 +1,5 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { hasGoogleCal, listEvents } from "@/lib/google-calendar";
+import { hasGoogleCal, listEvents, todayIso } from "@/lib/google-calendar";
 import { getChildRows } from "@/lib/data-children";
 
 let last = 0;
@@ -12,8 +12,7 @@ export async function detectSitterNights(userId: string): Promise<void> {
     const kids = await getChildRows();
     if (!kids.length) return;
     const names = kids.map((k) => k.display_name.split(/\s+/)[0].toLowerCase()).filter((n) => n.length > 1);
-    const day = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
-    const events = await listEvents(day(0), day(3));
+    const events = await listEvents(await todayIso(), await todayIso(3));
     const cand = events.filter((e) => !e.allDay && e.status !== "cancelled" && e.start && new Date(e.endIso) > new Date() && +e.start.slice(0, 2) >= 16 && +e.start.slice(0, 2) <= 23
       && !names.some((n) => e.title.toLowerCase().includes(n)) && !/\b(school|practice|lesson|game|recital|pickup|pick-up|drop off)\b/i.test(e.title));
     if (!cand.length) return;

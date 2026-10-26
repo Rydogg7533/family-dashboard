@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { localToIso } from "@/lib/google-calendar";
+import { localToIso, householdTz } from "@/lib/google-calendar";
 import { SECTIONS, type SheetItem } from "@/lib/sitter-shared";
 
 type Res = { ok: boolean; error?: string; id?: string; review?: boolean };
@@ -52,7 +52,8 @@ export async function markEventNight(i: { eventKey: string; title: string; place
 export async function createToldNight(i: { title: string; place?: string; sitterName?: string; date: string; leaveTime: string; backTime: string }): Promise<Res> {
   const w = await who(); if (!w) return { ok: false, error: "Not signed in or not available in preview." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(i.date) || !/^\d{2}:\d{2}$/.test(i.leaveTime) || !/^\d{2}:\d{2}$/.test(i.backTime)) return { ok: false, error: "Pick a date and both times." };
-  const leave = new Date(localToIso(i.date, i.leaveTime)); let back = new Date(localToIso(i.date, i.backTime));
+  const tz = await householdTz();
+  const leave = new Date(localToIso(i.date, i.leaveTime, tz)); let back = new Date(localToIso(i.date, i.backTime, tz));
   if (back <= leave) back = new Date(back.getTime() + 24 * 3600e3);
   const times = { startsAt: leave, leaveAt: leave, endsAt: back };
   const bad = check(times); if (bad) return { ok: false, error: bad };

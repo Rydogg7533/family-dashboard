@@ -2,6 +2,7 @@ import { H1 } from "@/components/ui";
 import { Row, RowGroup, SectionTitle } from "@/components/registers";
 
 const settings = [
+  { href: "/settings/household", label: "Household", sub: "Household name and time zone — the clock every page reads" },
   { href: "/settings/people", label: "People and access", sub: "Change my password, members, who sees what, sharing between parents" },
   { href: "/settings/connections", label: "Connections", sub: "What is connected for you: notifications, mail, calendar, location, contacts" },
   { href: "/settings/contacts", label: "Contacts source", sub: "Apple or Google contacts, chosen per person" },

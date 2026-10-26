@@ -1,5 +1,5 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { hasGoogleCal, listEvents, googleCalAccount } from "@/lib/google-calendar";
+import { hasGoogleCal, listEvents, googleCalAccount, householdTz } from "@/lib/google-calendar";
 import { buildCandidates, eventsForPlaces, type Candidate, type ContactSpot, type Event, type Named, type Receipt, type Stop } from "@/lib/place-candidates";
 
 // The signed-in person's unnamed stops, grouped into places, each with a suggested name only when receipts or the calendar point to one.
@@ -10,7 +10,7 @@ export async function getPlaceCandidates(): Promise<{ candidates: Candidate[]; p
   const { data: stops } = await sb.from("location_stops").select("id,started_at,ended_at,lat,lon,address,status").eq("status", "question").order("started_at", { ascending: true }).limit(2000);
   const list = (stops ?? []) as Stop[];
   if (!list.length) return { candidates: [], pauses: 0 };
-  const from = new Date(Date.parse(list[0].started_at) - 2 * 86_400_000).toISOString().slice(0, 10);
+  const from = new Date(Date.parse(list[0].started_at) - 2 * 86_400_000).toISOString().slice(0, 10);   // a stop's own timestamp, not "now": UTC is right here
   // Calendar: only for the person who owns the household calendar token (person_connections kind "calendar"), read live from Google for the days the stops cover.
   // Anyone else's stops get no calendar suggestions, so one person's events never name another person's places.
   const liveEvents = async (): Promise<Event[]> => {
@@ -21,7 +21,8 @@ export async function getPlaceCandidates(): Promise<{ candidates: Candidate[]; p
       const { data: conn } = await sb.from("person_connections").select("account").eq("person", user.id).eq("kind", "calendar").eq("provider", "google").maybeSingle();
       if (!conn) return [];
       const last = list[list.length - 1].ended_at;
-      const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+      const tz = await householdTz();
+      const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: tz });
       const toDate = day(last), fromDate = day(list[0].started_at);
       if ((Date.parse(toDate) - Date.parse(fromDate)) / 86_400_000 > 45) return [];   // a long backlog is not worth a long calendar read
       return eventsForPlaces(await listEvents(fromDate, toDate), (conn.account as string) || googleCalAccount());

@@ -3,16 +3,17 @@ import "server-only";
 // so the same question is never skipped and never invented. Nothing is written until the person taps Confirm, and the write
 // goes through saveEvent, which re-reads the event from Google before it says saved.
 import { callModel, formatCost } from "@/lib/ai";
-import { HOUSEHOLD_TZ, hasGoogleCal } from "@/lib/google-calendar";
+import { householdTz, hasGoogleCal } from "@/lib/google-calendar";
 import type { AskReply, EventDraft, Turn } from "@/lib/ask-engine";
 import { checkDay, freeSlots, fromMin, movable, short, to12, to24, toMin, whyNot } from "@/lib/ask-conflicts";
 
-const todayParts = () => {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: HOUSEHOLD_TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return { date: `${p.year}-${p.month}-${p.day}`, weekday: p.weekday, time: `${p.hour === "24" ? "00" : p.hour}:${p.minute}` };
+const todayParts = async () => {
+  const tz = await householdTz();
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, weekday: p.weekday, time: `${p.hour === "24" ? "00" : p.hour}:${p.minute}`, tz };
 };
 
-const SYSTEM = (t: ReturnType<typeof todayParts>) => `You read a conversation with a family-calendar assistant and extract the calendar event the person wants. Today is ${t.weekday} ${t.date}, ${t.time}, time zone ${HOUSEHOLD_TZ}. Reply with ONE JSON object and nothing else:
+const SYSTEM = (t: Awaited<ReturnType<typeof todayParts>>) => `You read a conversation with a family-calendar assistant and extract the calendar event the person wants. Today is ${t.weekday} ${t.date}, ${t.time}, time zone ${t.tz}. Reply with ONE JSON object and nothing else:
 {"title":string|null,"date":"YYYY-MM-DD"|null,"endDate":"YYYY-MM-DD"|null,"allDay":boolean,"start":"HH:MM"|null,"end":"HH:MM"|null,"location":string|null,"reminders":number[]|null,"remindersDeclined":boolean,"guests":string[]}
 Rules: never invent a value the person did not give or clearly imply; use null. Resolve "tomorrow", "Friday", "next week" from today's date. 24-hour times. "reminders" is minutes BEFORE the start for every notification the person asked for ("an hour before and a day before" = [60,1440]; "at the time" = [0]); null if they have not talked about notifications. If they said they want no reminder or notification, set "remindersDeclined" true. "guests" are email addresses only. A title is a short noun phrase ("Dentist, Ella"), not the whole sentence. Later messages in the conversation override earlier ones.`;
 
@@ -20,7 +21,7 @@ const clean = (s: unknown) => (typeof s === "string" && s.trim() ? s.trim() : nu
 const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 
 export async function extractDraft(thread: Turn[]): Promise<{ draft: EventDraft; cost: number; model: string }> {
-  const t = todayParts();
+  const t = await todayParts();
   const r = await callModel({ job: "chat", feature: "ask-event", maxTokens: 400, system: SYSTEM(t), messages: [{ role: "user", content: thread.map((x) => `${x.role === "user" ? "Person" : "Assistant"}: ${x.text}`).join("\n") }] });
   let j: Record<string, unknown> = {};
   try { j = JSON.parse(r.text.match(/\{[\s\S]*\}/)?.[0] ?? "{}"); } catch { /* an unreadable answer is treated as nothing understood */ }

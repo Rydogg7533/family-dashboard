@@ -1,7 +1,7 @@
 // Slice C data: the day (F3), weather on blocks (F5), checklists (F6), calendar (F5/F12), recurring register.
 // Same pattern as data.ts: types, sample data, readers that fall back to samples when Supabase is unset.
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { hasGoogleCal, listEvents } from "@/lib/google-calendar";
+import { hasGoogleCal, listEvents, todayIso, addDaysIso } from "@/lib/google-calendar";
 import type { Weather } from "@/lib/c-shared";
 export type { Weather } from "@/lib/c-shared";
 export { fmtTime, shortTime, fmtDate, daysUntil, weatherGlyph, weatherLine } from "@/lib/c-shared";
@@ -156,17 +156,19 @@ async function readSyncFromStatus(): Promise<SyncStatus[]> {
   });
 }
 
-export async function getCalendarEvents(fromDate = d(0), days = 14): Promise<CalendarEvent[]> {
-  if (!hasSupabaseEnv()) return sampleEvents.filter((e) => e.date >= fromDate && e.date <= d(days));
+export async function getCalendarEvents(fromArg?: string, days = 14): Promise<CalendarEvent[]> {
+  const fromDate = fromArg ?? (await todayIso());
+  const toDate = addDaysIso(fromDate, days);
+  if (!hasSupabaseEnv()) return sampleEvents.filter((e) => e.date >= fromDate && e.date <= toDate);
   if (hasGoogleCal()) {   // live from Google (D72); the cache table below is only the fallback when the app has no calendar token
     try {
-      const evs = await listEvents(fromDate, d(days));
+      const evs = await listEvents(fromDate, toDate);
       return evs.map((e) => ({ id: `${e.calendarId}|${e.id}`, date: e.date, start: e.start, end: e.end, title: e.title, place: e.location, person: e.calendarName, weather: null, trip: false,
         source: { name: "Google Calendar", href: e.htmlLink ?? "#" }, requested_by: e.creator ?? "Google", href: `/calendar/e/${encodeURIComponent(e.calendarId)}/${encodeURIComponent(e.id)}`, color: e.color, allDay: e.allDay }));
     } catch { /* fall through to the cache so the page still renders; the sync line shows the problem */ }
   }
   const sb = await createClient();
-  const { data } = await sb.from("calendar_events").select("*").gte("date", fromDate).lte("date", d(days)).order("date").order("start_time");
+  const { data } = await sb.from("calendar_events").select("*").gte("date", fromDate).lte("date", toDate).order("date").order("start_time");
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id), date: String(r.date), start: r.start_time ? String(r.start_time).slice(0, 5) : null, end: r.end_time ? String(r.end_time).slice(0, 5) : null,
     title: String(r.title), place: (r.place as string) ?? null, person: String(r.person_name ?? "Family"), weather: (r.weather as Weather) ?? null, trip: Boolean(r.is_trip),

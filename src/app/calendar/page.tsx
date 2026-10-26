@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CalendarPanel } from "@/components/CalendarPanel";
-import { calendarsWithChoices, hasGoogleCal } from "@/lib/google-calendar";
+import { calendarsWithChoices, hasGoogleCal, todayIso, addDaysIso } from "@/lib/google-calendar";
 import { getCalendarEvents, getSyncStatus, fmtDate, fmtTime, weatherGlyph, weatherLine, type CalendarEvent } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
 import { SyncLine } from "@/components/c/SyncLine";
@@ -27,6 +27,9 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
   const here = oneDay ? `/calendar?day=${oneDay}&from=${from}` : view === "week" ? "/calendar?view=week" : "/calendar";
   const openChoices = `${here}${here.includes("?") ? "&" : "?"}calendars=1`;
   const dayHref = (iso: string) => `/calendar?day=${iso}&from=${view}`;
+  const todayHh = await todayIso();
+  // A date string formatted as itself: noon UTC so no zone can push it onto the day either side.
+  const labelOf = (iso: string, o: Intl.DateTimeFormatOptions) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", ...o });
   const byDay = new Map<string, CalendarEvent[]>();
   for (const e of events) byDay.set(e.date, [...(byDay.get(e.date) ?? []), e]);
   const days = Array.from(byDay.keys()).sort();
@@ -81,9 +84,9 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
 
       {view === "week" ? (
         <div className="card mb-4 flex flex-col">
-          {Array.from({ length: 7 }, (_, i) => { const dt = new Date(); dt.setDate(dt.getDate() + i); const iso = dt.toISOString().slice(0, 10); const evs = byDay.get(iso) ?? []; return (
+          {Array.from({ length: 7 }, (_, i) => { const iso = addDaysIso(todayHh, i); const evs = byDay.get(iso) ?? []; return (
             <Link key={iso} href={dayHref(iso)} className="flex gap-3 py-2 border-b border-line last:border-0 hover:bg-soft -mx-1 px-1 rounded-lg">
-              <div className="w-12 shrink-0 text-[11px] font-bold text-muted leading-tight">{dt.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase()}<br /><span className="text-base text-fg">{dt.getDate()}</span></div>
+              <div className="w-12 shrink-0 text-[11px] font-bold text-muted leading-tight">{labelOf(iso, { weekday: "short" }).toUpperCase()}<br /><span className="text-base text-fg">{Number(iso.slice(8, 10))}</span></div>
               <div className="flex-1 min-w-0 flex flex-wrap gap-1">
                 {evs.length === 0 ? <span className="text-xs text-muted self-center">free</span> : evs.map((e) => (
                   <span key={e.id} className="text-xs font-semibold bg-soft rounded-full px-2 py-1 max-w-full truncate">{e.weather ? <span className="text-amber">{weatherGlyph(e.weather.icon)} </span> : null}{e.start ? `${fmtTime(e.start)} ` : ""}{e.title}{e.weather ? <span className="text-muted font-normal"> {e.weather.temp}°</span> : null}</span>
@@ -109,7 +112,7 @@ export default async function Calendar({ searchParams }: PageProps<"/calendar">)
       <section className="flex flex-col gap-4">
         {(oneDay ? days.filter((d) => d === oneDay) : view === "week" ? [] : days).map((day) => (
           <div key={day}>
-            {!oneDay && <Link href={dayHref(day)} className="block text-[11px] font-bold tracking-wide text-muted mb-1.5">{day === new Date().toISOString().slice(0, 10) ? "TODAY · " : ""}{fmtDate(day, { weekday: "long", month: "short", day: "numeric" }).toUpperCase()}</Link>}
+            {!oneDay && <Link href={dayHref(day)} className="block text-[11px] font-bold tracking-wide text-muted mb-1.5">{day === todayHh ? "TODAY · " : ""}{fmtDate(day, { weekday: "long", month: "short", day: "numeric" }).toUpperCase()}</Link>}
             <div className="flex flex-col gap-2">
               {(byDay.get(day) ?? []).map((e) => (
                 <Card key={e.id}>

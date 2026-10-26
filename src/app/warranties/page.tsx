@@ -1,3 +1,4 @@
+import { todayIso } from "@/lib/google-calendar";
 import Link from "next/link";
 import { Card, H1 } from "@/components/ui";
 import { SectionTitle } from "@/components/registers";
@@ -23,7 +24,8 @@ export default async function Warranties() {
     const user = await getRequestUser();
     rows = user ? await syncWarrantyTasks(sb, user.id) : [];
   }
-  const by = (s: WState) => rows.filter((w) => stateOf(w) === s).sort((a, b) => (a.end ?? "9999").localeCompare(b.end ?? "9999"));
+  const today = await todayIso();
+  const by = (s: WState) => rows.filter((w) => stateOf(w, today) === s).sort((a, b) => (a.end ?? "9999").localeCompare(b.end ?? "9999"));
   return (
     <>
       <H1>Warranties</H1>

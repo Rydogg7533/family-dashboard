@@ -1,3 +1,4 @@
+import { todayIso, householdTz } from "@/lib/google-calendar";
 import { getCalendarEvents, getDayBlocks, daySummary, shortTime } from "@/lib/data-day";
 import { hasSupabaseEnv } from "@/lib/supabase/server";
 import { TvScreen, type TvData } from "@/components/c/TvScreen";
@@ -19,14 +20,14 @@ export default async function Tv({ searchParams }: PageProps<"/tv">) {
   }
   // TODO(production): verify `token` against device_tokens (kind='tv', not revoked) with the service role, set a cookie, and read live rows.
 
-  const [blocks, events] = await Promise.all([getDayBlocks(), getCalendarEvents(undefined, 1)]);
+  const [blocks, events, tz] = await Promise.all([getDayBlocks(), getCalendarEvents(undefined, 1), householdTz()]);
   const s = daySummary(blocks);
-  const tomorrowIso = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const tomorrowIso = await todayIso(1);
   const tomorrow = events.filter((e) => e.date === tomorrowIso).map((e) => `${e.title.charAt(0).toLowerCase() + e.title.slice(1)} ${e.start ? shortTime(e.start) : ""}`.trim()).join(" · ") || "nothing on the calendar";
   const byPerson = (name: string) => blocks.filter((b) => b.person === name && b.kind !== "free" && b.kind !== "unknown").map((b) => ({ time: shortTime(b.start), text: `${b.title}${b.driving && b.person !== b.driving ? ` · ${b.driving} driving` : b.driving ? " · driving" : ""}${b.checklist?.items.some((i) => i.weather && !i.packed) ? ` · ${b.checklist.items.find((i) => i.weather && !i.packed)!.label.toLowerCase()}` : ""}`, highlight: (b.weather?.precip ?? 0) >= 50 || Boolean(b.driving) }));
 
   const data: TvData = {
-    dateLabel: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
+    dateLabel: new Date().toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" }),
     weatherLine: s.line.replace(/\.$/, "").replace(". ", " · "),
     dinner: "[planned meal]",
     people: [
