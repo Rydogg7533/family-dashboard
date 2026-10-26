@@ -193,8 +193,11 @@ export function jsonObjectValid(text: string) {
   try { const o = JSON.parse(m[0]); return Boolean(o) && typeof o === "object" && Object.keys(o).length > 0; } catch { return false; }
 }
 
-// Short structured input is recognised locally and never reaches a model (F18 "local first").
-const STRUCTURED = /^(y|yes|n|no|ok|later|done|snooze|undo)$|^(add|mark|show|what'?s due|who'?s driving|turn (on|off)|snooze)\b/i;
+// Only a one-word reply to something already on screen is recognised locally (F18 "local first").
+// Everything else -- "add ...", "turn off ...", "mark ...", "what's due" -- goes to the tool registry,
+// which reads and writes for real. This pattern used to catch those too, and structured() answered
+// them from hardcoded strings that claimed to have saved things it never saved (D91).
+const STRUCTURED = /^(y|yes|n|no|ok|later|done|snooze|undo)$/i;
 export function isStructuredInput(text: string) {
   return STRUCTURED.test(text.trim());
 }

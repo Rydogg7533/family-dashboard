@@ -52,9 +52,7 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
   if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm" || prev?.kind === "event_conflict" || prev?.kind === "event_move")) return { kind: "answer", text: "Okay, I won't add it.", cost: 0, costText: "no model used", model: "none", sample: false };
 
   // 1) Local, no model: short structured input.
-  if (isStructuredInput(q) && !/\badd\b.*\b(medication|meds|melatonin|dentist|contact|birthday)\b/i.test(q)) {
-    return structured(q);
-  }
+  if (isStructuredInput(q)) return structured(q, thread);
 
   if (!hasAiKey()) return sampleRoute(thread, q);
 
@@ -123,22 +121,27 @@ function topic(q: string) {
 function deflect(app: string): AskReply {
   return { kind: "deflect", text: "That's beyond what this system does. For general questions, use your regular assistant app.", source: { label: `Open in ${app}`, href: app === "ChatGPT" ? "https://chatgpt.com" : "https://claude.ai" }, cost: 0, costText: "no model used", model: "none", sample: !hasAiKey() };
 }
-function structured(q: string): AskReply {
-  const l = q.toLowerCase();
-  let text = "Done.";
-  let source: AskReply["source"] | undefined;
-  if (/^(y|yes|ok)$/.test(l)) text = "Confirmed and saved.";
-  else if (/^(n|no)$/.test(l)) text = "Okay, nothing changed.";
-  else if (/^later|^snooze/.test(l)) text = "Snoozed until tomorrow morning.";
-  else if (/^done/.test(l)) text = "Marked done.";
-  else if (/^undo/.test(l)) text = "Undone.";
-  else if (/what'?s due/.test(l)) { text = "Due this week: Internet $79.99 (Tue), Amex close (Thu), field-trip form (Fri)."; source = { label: "Open in Tasks", href: "/tasks" }; }
-  else if (/who'?s driving/.test(l)) { text = "Thursday: Melissa has the Sienna (practice at 4). Ryan has the Tahoe."; source = { label: "Open in Calendar", href: "#" }; }
-  else if (/^show /.test(l)) { text = `Here it is: "${q.replace(/^show /i, "")}" is a 1Password item. Opens behind your own unlock.`; source = { label: "Open in 1Password", href: "#" }; }
-  else if (/^turn (on|off)/.test(l)) { text = `${q} → Settings › Notifications. Confirm?`; return { kind: "instruction", text, confirm: { summary: q, target: "Settings › Notifications", tier: 2 }, cost: 0, costText: "no model used", model: "none", sample: !hasAiKey() }; }
-  else if (/^mark /.test(l)) { text = `${q.replace(/^mark /i, "")} marked done.`; source = { label: "Open in Vehicles", href: "#" }; }
-  else if (/^add /.test(l)) { const item = q.replace(/^add /i, ""); return { kind: "instruction", text: `Add "${item}" → Shop list. Saved.`, confirm: { summary: `Add ${item}`, target: "Shop list", tier: 1 }, source: { label: "Open in Shop", href: "#" }, cost: 0, costText: "no model used", model: "none", sample: !hasAiKey() }; }
-  return { kind: "structured", text, source, cost: 0, costText: "no model used (recognised locally)", model: "none", sample: !hasAiKey() };
+function structured(q: string, thread: Turn[]): AskReply {
+  const l = q.toLowerCase().trim();
+  const prev = [...thread].reverse().find((t) => t.role === "assistant");
+  const waiting = prev?.kind === "tool_confirm" || prev?.kind === "clarify" || prev?.kind === "instruction";
+  const base = { cost: 0, costText: "no model used (recognised locally)", model: "none", sample: false };
+
+  // Nothing here writes. The confirm card is what writes, through runTool, so a "yes" points at the
+  // card rather than claiming the change is done. Before D91 this said "Confirmed and saved." while
+  // saving nothing, and did the same for done / snooze / undo.
+  if (/^(y|yes|ok)$/.test(l))
+    return { ...base, kind: "answer", text: waiting
+      ? "It is waiting on you \u2014 tap Do it on the card above and I will make the change."
+      : "Nothing is waiting on an answer right now." };
+
+  if (/^(n|no)$/.test(l))
+    return { ...base, kind: "answer", text: waiting ? "Okay, nothing changed." : "Nothing is waiting on an answer right now." };
+
+  // later / snooze / done / undo have to name something. There is no tool behind them yet, so say so.
+  return { ...base, kind: "answer",
+    text: `Which one? "${q.trim()}" on its own does not say what to change. Name it \u2014 "mark the Sienna oil change done" \u2014 or do it on Tasks.`,
+    chips: ["What needs me today?"] };
 }
 
 
