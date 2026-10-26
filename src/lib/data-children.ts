@@ -8,7 +8,7 @@ export async function getChildRows(): Promise<ChildRow[]> {
   if (!hasSupabaseEnv()) return [];
   try {
     const sb = await createClient();
-    const { data } = await sb.from("children").select("id,display_name,birth_year,login_min_age,profile_id,access,paused_at,pin_login").is("archived_at", null).order("birth_year");
+    const { data } = await sb.from("children").select("id,display_name,birth_year,birth_date,login_min_age,profile_id,access,paused_at,pin_login").is("archived_at", null).order("birth_year");
     return (data ?? []) as ChildRow[];
   } catch { return []; }
 }

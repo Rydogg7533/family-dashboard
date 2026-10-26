@@ -33,7 +33,7 @@ export async function acceptInvite(token: string, pin: string): Promise<{ ok: tr
   const r = await lookup(token); if (!r || !r.inv) return { ok: false, error: "This link is not valid." };
   const { svc, inv } = r;
   if (inv.revoked_at || inv.accepted_at || new Date(inv.expires_at) < new Date()) return { ok: false, error: "This invite can no longer be used. Ask a parent for a new one." };
-  const { data: c } = await svc.from("children").select("id,display_name,birth_year,login_min_age,profile_id").eq("id", inv.child_id).maybeSingle();
+  const { data: c } = await svc.from("children").select("id,display_name,birth_year,birth_date,login_min_age,profile_id").eq("id", inv.child_id).maybeSingle();
   if (!c || c.profile_id) return { ok: false, error: "This login was already set up." };
   const { data: hh } = await svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
   if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10), await todayIso())) return { ok: false, error: "A parent needs to allow a login for you first." };

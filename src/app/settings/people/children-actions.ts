@@ -78,7 +78,7 @@ export async function createChildLogin(childId: string, email: string): Promise<
   const o = await owner(); if ("ok" in o) return o;
   const addr = clean(email, 120).toLowerCase();
   if (!EMAIL.test(addr)) return { ok: false, error: "That doesn't look like an email address." };
-  const { data: c } = await o.svc.from("children").select("id,display_name,birth_year,login_min_age,profile_id,archived_at").eq("id", childId).maybeSingle();
+  const { data: c } = await o.svc.from("children").select("id,display_name,birth_year,birth_date,login_min_age,profile_id,archived_at").eq("id", childId).maybeSingle();
   if (!c || c.archived_at) return { ok: false, error: "That child was not found." };
   if (c.profile_id) return { ok: false, error: `${c.display_name} already has a login.` };
   const { data: hh } = await o.svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
@@ -154,7 +154,7 @@ export async function createChildInvite(childId: string, email: string): Promise
   const o = await owner(); if ("ok" in o) return o;
   const addr = clean(email, 120).toLowerCase();
   if (!EMAIL.test(addr)) return { ok: false, error: "That doesn't look like an email address." };
-  const { data: c } = await o.svc.from("children").select("id,display_name,birth_year,login_min_age,profile_id,archived_at").eq("id", childId).maybeSingle();
+  const { data: c } = await o.svc.from("children").select("id,display_name,birth_year,birth_date,login_min_age,profile_id,archived_at").eq("id", childId).maybeSingle();
   if (!c || c.archived_at) return { ok: false, error: "That child was not found." };
   if (c.profile_id) return { ok: false, error: `${c.display_name} already has a login.` };
   const { data: hh } = await o.svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
