@@ -24,7 +24,11 @@ export async function setInboxPaidWith(id: string, value: string): Promise<{ ok:
 }
 
 // Resolving an Inbox item: the answer is recorded, the item is filed, and (where it can) a rule is proposed.
-export async function resolveInboxItem(id: string, answer: string, makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
+// `_makeRule` is kept for the client's call shape and ignored. It used to write an email_rules row of kind
+// "answer" keyed by THIS item's id -- a rule that could only ever match one already-answered item -- into a
+// table nothing reads. The real rule is filing_rules ("Always file this vendor here", read by read.ts the next
+// time that vendor's document arrives). Decisions log 2026-10-26h, D99.
+export async function resolveInboxItem(id: string, answer: string, _makeRule: boolean): Promise<{ ok: boolean; sample?: boolean; summary?: string; kept?: boolean }> {
   if (!hasSupabaseEnv()) return { ok: true, sample: true };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -43,7 +47,6 @@ export async function resolveInboxItem(id: string, answer: string, makeRule: boo
   const { error } = await sb.from("inbox_items").update({ status: "resolved", resolution: answer, resolved_at: new Date().toISOString(), resolved_by: user.id }).eq("id", id);
   if (!error) {
     await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "inbox_resolved", subject: `${id}: ${answer}`, ref: id, undoable: true }).then(() => {}, () => {});
-    if (makeRule) await sb.from("email_rules").insert({ match_kind: "answer", match_value: id, action: "file", target: answer, proposed_by: user.id, status: "proposed", origin: `Inbox answer ${id}` }).then(() => {}, () => {});
   }
   return { ok: !error };
 }

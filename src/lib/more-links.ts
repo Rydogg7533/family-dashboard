@@ -18,6 +18,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/inbox", label: "Inbox", group: "daily", icon: "inbox" },
   { href: "/money/receipts", label: "Receipts", group: "daily", icon: "receipt" },
   { href: "/day", label: "Today's schedule", group: "daily", icon: "clock" },
+  { href: "/review", label: "Weekly review", group: "daily", icon: "calendarClock" },
   { href: "/calendar", label: "Calendar", group: "daily", icon: "calendar" },
   { href: "/messages", label: "Messages", group: "daily", icon: "message" },
   { href: "/mail", label: "Mail", group: "daily", icon: "mail" },

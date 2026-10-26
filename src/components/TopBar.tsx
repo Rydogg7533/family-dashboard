@@ -16,7 +16,7 @@ const moreTitles: Record<string, string> = {
   "/day": "Day", "/calendar": "Calendar", "/inbox": "Inbox", "/messages": "Messages", "/shop": "Shop",
   "/recurring": "Due dates and renewals", "/email-subscriptions": "Mailing lists", "/records": "Records", "/family": "Family", "/vehicles": "Vehicles", "/devices": "Devices",
   "/meds": "Medications", "/home-property": "Home and property", "/contacts": "Contacts", "/emergency": "Emergency plan",
-  "/places": "Places", "/sources": "Sources", "/register": "Source register", "/health": "System health", "/log": "Log",
+  "/places": "Places", "/sources": "Sources", "/register": "Source register", "/health": "System health", "/log": "Log", "/review": "Weekly review",
   "/voice": "Phone calls", "/claims": "Claims", "/settings": "Settings",
 };
 const subTitles: Record<string, string> = {

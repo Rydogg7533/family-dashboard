@@ -54,7 +54,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   function resolve(item: InboxItem, answer: string) {
     const before = open;
     setOpen((o) => o.filter((x) => x.id !== item.id));
-    setToast(item.file_path ? { text: "Filing…" } : { text: `${item.title.slice(0, 32)}${item.title.length > 32 ? "…" : ""}: ${answer}. Filed; rule proposed for the weekly review.`, undo: () => setOpen(before) });
+    setToast(item.file_path ? { text: "Filing…" } : { text: `${item.title.slice(0, 32)}${item.title.length > 32 ? "…" : ""}: ${answer}. Filed.`, undo: () => setOpen(before) });
     void resolveInboxItem(item.id, answer, true).then((r) => {
       if (r.kept) setOpen(before);
       if (r.summary) setToast({ text: r.summary });
@@ -107,7 +107,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
         )}
       </section>
 
-      <p className="text-xs text-muted">Every answer becomes a rule, so the same question is never asked twice. Nothing here expires; after a few days an item folds into the weekly review. Synced from the Mac mini drop folder · <button className="font-semibold text-accent">Sync now</button></p>
+      <p className="text-xs text-muted">A vendor you file the same way can get a rule: open the item and tap Always file this vendor here, and the next one from that vendor is filed without asking. Nothing here expires. Synced from the Mac mini drop folder · <button className="font-semibold text-accent">Sync now</button></p>
 
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 bottom-[150px] z-10 card shadow-lg text-sm flex items-center gap-3 max-w-[360px]">
