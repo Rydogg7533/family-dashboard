@@ -20,6 +20,7 @@ export type AskReply = {
   move?: { calendarId: string; id: string; title: string; date: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string };   // an existing event to move first                                   // an event waiting for the person's Add tap
   text: string;
   source?: { label: string; href: string };            // "Open in …"
+  items?: AskItem[];                                    // things a read tool found, each with somewhere to go
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
   tool?: { name: string; title: string; args: Record<string, unknown>; tier: Tier };   // a write the person has not agreed to yet
   chips?: string[];                                     // suggested next taps
@@ -27,6 +28,8 @@ export type AskReply = {
   cost: number; costText: string; model: string; sample: boolean;
 };
 export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["kind"] };
+// A row the person can act on. open delivers the thing itself (a file); href goes to its page in the app.
+export type AskItem = { name: string; detail: string | null; href: string; open: string | null };
 
 const FAMILY_WORDS = /\b(confirmation|reservation|hotel|flight|ticket|claim|warranty|return|record|today|tomorrow|week|schedule|calendar|appointment|dentist|doctor|school|practice|kid|child|son|daughter|ryan|melissa|tahoe|sienna|car|oil|registration|insurance|title|document|file|where|receipt|charge|paid|pay|cost|spent|spend|money|amex|visa|card|bill|subscription|statement|budget|medication|meds|melatonin|dose|device|laptop|serial|filter|furnace|home|house|yard|contact|grandma|birthday|task|email|reply|draft|inbox|setting|notification|rain|weather|trip|pack|checklist|shop|order|buy|need)\b/i;
 
@@ -80,12 +83,26 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
   const turns: ToolTurn[] = toMessages(thread) as ToolTurn[];
   let spend = cls.cost;
   let saidLast = "";
+  // Anything a read tool found that has somewhere to go is carried to the person as a row, not as prose:
+  // the model's text says what was found, the rows are how they get to it. Without this the find was
+  // honest but useless -- "AAA, Oct 11, $242.88" with no way to open it.
+  const items: AskItem[] = [];
+  const keep = (out: unknown) => {
+    const data = (out as { ok?: boolean; data?: unknown })?.data;
+    if (!Array.isArray(data)) return;
+    for (const d of data as Record<string, unknown>[]) {
+      if (typeof d?.href !== "string" || typeof d?.name !== "string") continue;
+      if (items.some((x) => x.href === d.href && x.name === d.name)) continue;
+      const detail = [d.date, typeof d.amount === "number" ? `$${d.amount.toFixed(2)}` : null, typeof d.where === "string" ? d.where : null].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
+      items.push({ name: d.name, detail: detail || null, href: d.href, open: typeof d.open === "string" ? d.open : null });
+    }
+  };
   for (let round = 0; round < 4; round++) {
     const r = await callModelTools({ job: "chat", feature: "ask", messages: turns, system, tools: specs, maxTokens: 1200 });
     spend += r.cost;
     saidLast = r.text || saidLast;
     const base2 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: r.model, sample: r.sample };
-    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", ...base2 };
+    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", items: items.length ? items.slice(0, 12) : undefined, ...base2 };
 
     const write = r.calls.find((cl) => toolByName(cl.name)?.kind === "write");
     if (write) {
@@ -97,12 +114,13 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     const results: Block[] = [];
     for (const cl of r.calls) {
       const out = ctx ? await runTool(cl.name, cl.input, ctx) : { ok: false as const, error: "Not signed in." };
+      keep(out);
       results.push({ type: "tool_result", tool_use_id: cl.id, content: JSON.stringify(out).slice(0, 6000) });
     }
     turns.push({ role: "user", content: results });
   }
   const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: "claude-sonnet-5-5", sample: false };
-  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", ...base3 };
+  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", items: items.length ? items.slice(0, 12) : undefined, ...base3 };
 }
 
 // ---- helpers ----

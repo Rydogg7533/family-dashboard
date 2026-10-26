@@ -86,10 +86,12 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
           <div className="card text-sm text-muted">Try one of the suggestions below, or ask anything the family&apos;s records can answer: schedules, documents, money, people, vehicles, home, your own health.</div>
         )}
         {bubbles.map((b, i) => b.role === "user" ? (
-          <div key={i} className="self-end max-w-[85%] rounded-2xl rounded-br-md bg-accent text-white px-4 py-2.5 text-sm whitespace-pre-wrap">{b.text}</div>
+          <div key={i} className="self-end max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-accent text-white px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{b.text}</div>
         ) : (
-          <div key={i} className="self-start max-w-[92%] flex flex-col gap-1.5">
-            <div className={`card text-sm whitespace-pre-wrap ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
+          // min-w-0 and overflow-wrap:anywhere on the bubble: a folder path, an order number or a link has no
+          // spaces to break at, and without these a flex child grows to fit it and the text runs past the card.
+          <div key={i} className="self-start w-full max-w-[92%] min-w-0 flex flex-col gap-1.5">
+            <div className={`card text-sm whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
             {b.reply?.kind === "tool_confirm" && b.reply.tool && (
               b.toolResult
                 ? <div className={`text-xs font-semibold px-1 ${b.toolResult.ok ? "text-green" : "text-red"}`}>{b.toolResult.text}{b.toolResult.ok && b.toolResult.href ? <> · <Link href={b.toolResult.href} className="text-accent">Open</Link></> : null}</div>
@@ -117,6 +119,18 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
                     {b.eventResult && !b.eventResult.ok && <div className="text-xs text-red px-1">{b.eventResult.text}</div>}
                     <button disabled={busy} onClick={() => addEvent(i)} className="min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50">{b.reply.kind === "event_move" ? `Move “${b.reply.move!.title}”, then add mine` : "Add to Google Calendar"}</button>
                   </div>
+            )}
+            {b.reply?.items && b.reply.items.length > 0 && (
+              <div className="card flex flex-col text-sm p-0 overflow-hidden">
+                {b.reply.items.map((it) => (
+                  <div key={`${it.href}|${it.name}`} className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-0">
+                    <Link href={it.href} className="min-w-0 flex-1"><div className="font-semibold truncate">{it.name}</div>{it.detail && <div className="text-xs text-muted truncate">{it.detail}</div>}</Link>
+                    {it.open
+                      ? <a href={it.open} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>
+                      : <span className="shrink-0 text-[11px] text-muted">on the hub</span>}
+                  </div>
+                ))}
+              </div>
             )}
             {b.reply?.scopeRule && <div className="text-xs text-muted px-1">Scope rule saved: &ldquo;{b.reply.scopeRule}&rdquo; · remove it in Settings › Assistant</div>}
             {b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}

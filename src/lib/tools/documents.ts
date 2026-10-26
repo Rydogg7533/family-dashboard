@@ -10,7 +10,10 @@ import { CATEGORY_IDS } from "@/lib/categories";
 // This is the seed of the document catalog (D98): the same shape of answer, over what the app already knows.
 // When the walker lands, it joins this search rather than replacing it.
 
-type Hit = { register: "inbox" | "receipt" | "record"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string };
+// open: a link that delivers the file itself (a short-lived signed link, members only), when the app holds
+// the file. A receipt whose only copy sits in the Organized tree on the hub has no open link until the
+// document catalog (D98) serves it; "where" still says where it lives.
+type Hit = { register: "inbox" | "receipt" | "record"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null };
 
 const LIMIT = 20;
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9$.]+/g, " ").trim();
@@ -37,7 +40,7 @@ export const documentTools: Tool[] = [
       if (!ws.length && !from && !to && !cat) return { ok: false, error: "Say what to look for: a vendor, some words, a date range or a category." };
 
       const [inbox, receipts, records] = await Promise.all([
-        c.sb.from("inbox_items").select("id, title, status, filed, read_result").not("read_result", "is", null).is("copy_error", null).limit(1000),
+        c.sb.from("inbox_items").select("id, title, status, filed, file_path, read_result").not("read_result", "is", null).is("copy_error", null).limit(1000),
         c.sb.from("receipts").select("id, merchant, amount, date, file_path, home_path, status").is("duplicate_of", null).limit(1000),
         c.sb.from("records").select("id, kind, title, happens_at, file_ref, confirmation_number, for_person").limit(1000),
       ]);
@@ -45,9 +48,11 @@ export const documentTools: Tool[] = [
       const hits: Hit[] = [];
       // Receipts that came through the Inbox are linked, not duplicated (filed.receipt_id), so the same paper is
       // reported once, from the register that holds its file.
-      const linkedReceipts = new Set<string>();
+      const inboxRows = (inbox.data ?? []) as { id: string; title: string; status: string; filed: Record<string, string> | null; file_path: string | null; read_result: Record<string, unknown> }[];
+      const linkedReceipts = new Map<string, string>();   // receipt id -> open link, over every item, not just the matches
+      for (const r of inboxRows) if (r.file_path && r.filed?.receipt_id) linkedReceipts.set(r.filed.receipt_id, `/api/capture/${r.id}`);
 
-      for (const r of (inbox.data ?? []) as { id: string; title: string; status: string; filed: Record<string, string> | null; read_result: Record<string, unknown> }[]) {
+      for (const r of inboxRows) {
         const rr = r.read_result;
         if (rr.error) continue;
         const date = typeof rr.date === "string" ? rr.date : null;
@@ -57,32 +62,35 @@ export const documentTools: Tool[] = [
         const hay = [r.title, rr.vendor, rr.item, rr.covers, rr.order_number, rr.reference, rr.suggested_name, category].filter((x) => typeof x === "string").join(" ");
         if (ws.length && !matches(ws, hay)) continue;
         const filed = r.filed ?? {};
-        if (filed.receipt_id) linkedReceipts.add(filed.receipt_id);
+        const open = r.file_path ? `/api/capture/${r.id}` : null;
         const href = filed.receipt_id ? `/money/receipts?item=${filed.receipt_id}` : filed.vehicle_id ? `/vehicles/${filed.vehicle_id}` : "/inbox";
-        hits.push({ register: "inbox", name: typeof rr.suggested_name === "string" ? rr.suggested_name : r.title, date, amount: typeof rr.amount === "number" ? rr.amount : null, category, kind: typeof rr.kind === "string" ? rr.kind : null, where: typeof rr.home === "string" ? rr.home : null, href });
+        hits.push({ register: "inbox", name: typeof rr.suggested_name === "string" ? rr.suggested_name : r.title, date, amount: typeof rr.amount === "number" ? rr.amount : null, category, kind: typeof rr.kind === "string" ? rr.kind : null, where: typeof rr.home === "string" ? rr.home : null, href, open });
       }
 
       if (!cat) {
         for (const r of (receipts.data ?? []) as { id: string; merchant: string; amount: number; date: string; file_path: string | null; home_path: string | null; status: string }[]) {
-          if (linkedReceipts.has(r.id)) continue;
           if (!inRange(r.date, from, to)) continue;
           if (ws.length && !matches(ws, `${r.merchant} ${r.file_path ?? ""}`)) continue;
-          hits.push({ register: "receipt", name: `${r.merchant} ${r.date}`, date: r.date, amount: r.amount, category: null, kind: "receipt", where: r.home_path ?? r.file_path, href: `/money/receipts?item=${r.id}` });
+          hits.push({ register: "receipt", name: `${r.merchant} ${r.date}`, date: r.date, amount: r.amount, category: null, kind: "receipt", where: r.home_path ?? r.file_path, href: `/money/receipts?item=${r.id}`, open: linkedReceipts.get(r.id) ?? null });
         }
         for (const r of (records.data ?? []) as { id: string; kind: string; title: string; happens_at: string | null; file_ref: string | null; confirmation_number: string | null; for_person: string | null }[]) {
           const date = r.happens_at ? r.happens_at.slice(0, 10) : null;
           if (!inRange(date, from, to)) continue;
           if (ws.length && !matches(ws, `${r.title} ${r.kind} ${r.for_person ?? ""} ${r.confirmation_number ?? ""}`)) continue;
-          hits.push({ register: "record", name: r.title, date, amount: null, category: null, kind: r.kind, where: r.file_ref, href: `/records/${r.id}` });
+          hits.push({ register: "record", name: r.title, date, amount: null, category: null, kind: r.kind, where: r.file_ref, href: `/records/${r.id}`, open: null });
         }
       }
 
-      hits.sort((x, y) => (y.date ?? "").localeCompare(x.date ?? ""));
-      const shown = hits.slice(0, LIMIT);
+      // The Inbox item and the receipt it was filed to are one paper: keep the one that can open the file.
+      const inboxHrefs = new Set(hits.filter((h) => h.register === "inbox").map((h) => h.href));
+      const once = hits.filter((h) => !(h.register === "receipt" && inboxHrefs.has(h.href)));
+      once.sort((x, y) => (y.date ?? "").localeCompare(x.date ?? ""));
+      const shown = once.slice(0, LIMIT);
+      const openable = shown.filter((h) => h.open).length;
       const what = [ws.length ? `"${str(a.text)}"` : "", cat ? `in ${cat.replace("_", " ")}` : "", from || to ? `${from || "…"} to ${to || "…"}` : ""].filter(Boolean).join(", ");
       return {
         ok: true,
-        summary: hits.length === 0 ? `Nothing filed matches ${what}.` : `${hits.length} document${hits.length === 1 ? "" : "s"} match${hits.length === 1 ? "es" : ""} ${what}${hits.length > LIMIT ? `; showing the newest ${LIMIT}` : ""}.`,
+        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > LIMIT ? `; showing the newest ${LIMIT}` : ""}. ${openable} can be opened from here; the rest live in the Organized folder on the hub (see "where"). The person sees each one as a row with an Open link; do not repeat the list.`,
         data: shown,
         href: shown.length === 1 ? shown[0].href : undefined,
       };
