@@ -85,7 +85,16 @@ async function main() {
     if (!person) { log.push(`${a}: SKIPPED, no owner yet (first run: node scripts/mail-sync.mjs --account ${a} --person <name>)`); continue; }
     if (!DRY && named_person && owners.get(a) && owners.get(a) !== named_person) { state = "error"; log.push(`${a}: STOPPED, this mailbox already belongs to someone else`); continue; }
     try { await syncAccount(a, person, log); }
-    catch (e) { state = "error"; log.push(`${a}: ERROR ${e.message}`); if (!DRY) await rest("PATCH", `mail_accounts?person=eq.${person}&address=eq.${encodeURIComponent(a)}`, { last_error: String(e.message).slice(0, 300) }, { Prefer: "return=minimal" }).catch(() => {}); }
+    // Node reports every dropped connection as just "fetch failed" and puts the reason (ECONNRESET, ENOTFOUND,
+    // a timeout, a certificate) in e.cause — the same thing email-lib.mjs already unwraps. Without it the stored
+    // error says nothing: "fetch failed" on one mailbox out of six, for an hour, is unanswerable. Record both.
+    catch (e) {
+      state = "error";
+      const cause = e?.cause?.code || e?.cause?.message || "";
+      const detail = `${e.message}${cause ? ` (${cause})` : ""}`;
+      log.push(`${a}: ERROR ${detail}`);
+      if (!DRY) await rest("PATCH", `mail_accounts?person=eq.${person}&address=eq.${encodeURIComponent(a)}`, { last_error: detail.slice(0, 300) }, { Prefer: "return=minimal" }).catch(() => {});
+    }
   }
   const summary = log.join("; ");
   if (!DRY) await rest("POST", "system_status?on_conflict=key", [{ key: "mail_sync", state, summary: `Mail: ${summary}`, value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});

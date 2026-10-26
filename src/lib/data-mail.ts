@@ -8,6 +8,50 @@ export type MailRow = {
 export type MailFull = MailRow & { cc_addrs: { name: string; addr: string }[]; body_text: string | null; attachments: { name: string; mime: string; size: number }[]; web_url: string | null; rfc_message_id: string | null };
 export type MailAccount = { id: string; address: string; kind: "gmail" | "icloud" | "other"; last_sync_at: string | null; last_error: string | null };
 
+// Whether a sync error is worth showing a person, and what to say. One rule, because there were two:
+// Settings › Connections already waited an hour and used plain words, while this slice's Mail page printed
+// `last_error` straight from the database the moment it appeared. So a dropped connection on the mini -- which
+// the sync scripts retry by themselves -- put the literal string "fetch failed" in front of Melissa on her
+// phone, under the words "could not be read", about a mailbox whose 668 messages were sitting there intact.
+//
+// Two rules, both from the Connections version:
+//  - A single failed run is not news. mail-sync runs every five minutes and clears the error on its next
+//    success, so nothing is said until an hour has passed with no successful sync.
+//  - Never show an API string. Node reports every dropped connection as "fetch failed"; that is our plumbing
+//    leaking, and it reads as data loss to anyone who is not the person who wrote it.
+// The mail itself is never gone when this shows: what is here was synced before the trouble started, so the
+// wording says the mailbox is not up to date, never that it cannot be read.
+const HOUR = 60 * 60_000;
+export function mailTrouble(a: Pick<MailAccount, "address" | "last_sync_at" | "last_error">, now = Date.now()):
+  { text: string } | null {
+  if (!a.last_error) return null;
+  if (a.last_sync_at && now - Date.parse(a.last_sync_at) < HOUR) return null;
+  const e = String(a.last_error);
+  const why = /invalid_grant|revoked|expired|401|403|insufficient/i.test(e)
+    ? "the sign-in has expired — sign in again on the Mac mini"
+    : /retries|rate|429|timeout|ECONN|ENOTFOUND|fetch failed/i.test(e)
+      ? "the mail service is not answering"
+      : e.slice(0, 120);
+  const when = a.last_sync_at
+    ? `last updated ${new Date(a.last_sync_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+    : "it has not finished a first sync yet";
+  return { text: `${a.address} is not up to date — ${why}. The mail below ${a.last_sync_at ? `was ${when}` : "is incomplete"}.` };
+}
+
+// Every mailbox the household has already connected — address and owner only, from the household_mailboxes
+// view (0065). The Add a mailbox screen needs this because mail_accounts is own-rows-only: without it, one
+// parent cannot see that the other already connected an address, and sets it up a second time under the
+// wrong owner. Deliberately carries no counts, sync times or errors for other people's mailboxes.
+export type HouseholdMailbox = { address: string; kind: string; owner: string | null; mine: boolean };
+export async function getHouseholdMailboxes(): Promise<HouseholdMailbox[]> {
+  if (!hasSupabaseEnv()) return [{ address: SAMPLE_ACCT, kind: "gmail", owner: "You", mine: true }];
+  try {
+    const sb = await createClient();
+    const { data } = await sb.from("household_mailboxes").select("address,kind,owner,mine").order("address");
+    return (data ?? []) as HouseholdMailbox[];
+  } catch { return []; }
+}
+
 const SAMPLE_ACCT = "you@example.com";
 export async function getMailAccounts(): Promise<MailAccount[]> {
   if (!hasSupabaseEnv()) return [{ id: "a1", address: SAMPLE_ACCT, kind: "gmail" as const, last_sync_at: new Date().toISOString(), last_error: null }];

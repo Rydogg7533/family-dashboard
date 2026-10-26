@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
-import { getMail, getMailAccounts } from "@/lib/data-mail";
+import { getMail, getMailAccounts, mailTrouble } from "@/lib/data-mail";
 import MailList from "@/components/MailList";
 import { AutoRefresh } from "@/components/EmailSubscriptionList";
 
@@ -15,13 +15,13 @@ export default async function Mail({ searchParams }: PageProps<"/mail">) {
   const unread = rows.filter((r) => r.unread && (!acct || r.account === acct)).length;
   const href = (b: string, a: string) => `/mail?box=${b}${a ? `&acct=${encodeURIComponent(a)}` : ""}`;
   const pill = (on: boolean) => `px-3 py-1.5 rounded-full text-xs font-semibold min-h-9 inline-flex items-center ${on ? "bg-accent text-white" : "bg-soft"}`;
-  const bad = accounts.filter((a) => a.last_error);
+  const bad = accounts.map((a) => ({ id: a.id, t: mailTrouble(a) })).filter((x) => x.t);
   return (
     <>
       <AutoRefresh active={false} />
       <H1 right={box === "inbox" ? `${unread} unread` : `${list.length} drafts`}>Mail</H1>
       {accounts.length === 0 && <div className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-3">No mailbox is connected yet. The Mac mini copies your mail here once an account is signed in.</div>}
-      {bad.map((a) => <div key={a.id} role="alert" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">{a.address} could not be read: {a.last_error}</div>)}
+      {bad.map((x) => <div key={x.id} role="alert" className="rounded-xl bg-amber-bg text-amber px-3 py-2 text-sm font-semibold mb-2">{x.t!.text}</div>)}
       <div className="flex gap-2 mb-2">
         <Link href={href("inbox", acct)} className={pill(box === "inbox")}>Inbox</Link>
         <Link href={href("drafts", acct)} className={pill(box === "draft")}>Drafts</Link>
