@@ -30,7 +30,7 @@ export type AskReply = {
 };
 export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["kind"] };
 // A row the person can act on. open delivers the thing itself (a file); href goes to its page in the app.
-export type AskItem = { name: string; detail: string | null; href: string; open: string | null };
+export type AskItem = { name: string; detail: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
 
 const FAMILY_WORDS = /\b(confirmation|reservation|hotel|flight|ticket|claim|warranty|return|record|today|tomorrow|week|schedule|calendar|appointment|dentist|doctor|school|practice|kid|child|son|daughter|ryan|melissa|tahoe|sienna|car|oil|registration|insurance|title|document|file|where|receipt|charge|paid|pay|cost|spent|spend|money|amex|visa|card|bill|subscription|statement|budget|medication|meds|melatonin|dose|device|laptop|serial|filter|furnace|home|house|yard|contact|grandma|birthday|task|email|reply|draft|inbox|setting|notification|rain|weather|trip|pack|checklist|shop|order|buy|need)\b/i;
 
@@ -101,7 +101,8 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
       if (typeof d?.href !== "string" || typeof d?.name !== "string") continue;
       if (items.some((x) => x.href === d.href && x.name === d.name)) continue;
       const detail = [d.date, typeof d.amount === "number" ? `$${d.amount.toFixed(2)}` : null, typeof d.where === "string" ? d.where : null].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
-      items.push({ name: d.name, detail: detail || null, href: d.href, open: typeof d.open === "string" ? d.open : null });
+      const f = d.fetch as { path?: string; register?: string; ref?: string } | null | undefined;
+      items.push({ name: d.name, detail: detail || null, href: d.href, open: typeof d.open === "string" ? d.open : null, fetch: f && typeof f.path === "string" ? { path: f.path, register: String(f.register ?? ""), ref: String(f.ref ?? "") } : null });
     }
   };
   for (let round = 0; round < 4; round++) {

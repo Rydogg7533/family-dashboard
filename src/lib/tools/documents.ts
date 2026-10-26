@@ -11,9 +11,9 @@ import { CATEGORY_IDS } from "@/lib/categories";
 // When the walker lands, it joins this search rather than replacing it.
 
 // open: a link that delivers the file itself (a short-lived signed link, members only), when the app holds
-// the file. A receipt whose only copy sits in the Organized tree on the hub has no open link until the
-// document catalog (D98) serves it; "where" still says where it lives.
-type Hit = { register: "inbox" | "receipt" | "record"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null };
+// the file. fetch: a file whose only copy sits on the hub, with what a fetch request needs (D104); the row
+// shows a Fetch button and the hub delivers a copy within about a minute.
+type Hit = { register: "inbox" | "receipt" | "record"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
 
 const LIMIT = 20;
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9$.]+/g, " ").trim();
@@ -72,13 +72,14 @@ export const documentTools: Tool[] = [
         for (const r of (receipts.data ?? []) as { id: string; merchant: string; amount: number; date: string; file_path: string | null; home_path: string | null; status: string }[]) {
           if (!inRange(r.date, from, to)) continue;
           if (ws.length && !matches(ws, `${r.merchant} ${r.file_path ?? ""}`)) continue;
-          hits.push({ register: "receipt", name: `${r.merchant} ${r.date}`, date: r.date, amount: r.amount, category: null, kind: "receipt", where: r.home_path ?? r.file_path, href: `/money/receipts?item=${r.id}`, open: linkedReceipts.get(r.id) ?? null });
+          // file_path is the stored copy (captures bucket) and opens from here; home_path is the hub's filed copy.
+          hits.push({ register: "receipt", name: `${r.merchant} ${r.date}`, date: r.date, amount: r.amount, category: null, kind: "receipt", where: r.home_path ? r.home_path.replace(/^.*\/Organized\//, "Organized/") : null, href: `/money/receipts?item=${r.id}`, open: r.file_path ? `/api/receipt-file/${r.id}` : (linkedReceipts.get(r.id) ?? null), fetch: !r.file_path && !linkedReceipts.get(r.id) && r.home_path ? { path: r.home_path, register: "receipt", ref: r.id } : null });
         }
         for (const r of (records.data ?? []) as { id: string; kind: string; title: string; happens_at: string | null; file_ref: string | null; confirmation_number: string | null; for_person: string | null }[]) {
           const date = r.happens_at ? r.happens_at.slice(0, 10) : null;
           if (!inRange(date, from, to)) continue;
           if (ws.length && !matches(ws, `${r.title} ${r.kind} ${r.for_person ?? ""} ${r.confirmation_number ?? ""}`)) continue;
-          hits.push({ register: "record", name: r.title, date, amount: null, category: null, kind: r.kind, where: r.file_ref, href: `/records/${r.id}`, open: null });
+          hits.push({ register: "record", name: r.title, date, amount: null, category: null, kind: r.kind, where: r.file_ref, href: `/records/${r.id}`, open: null, fetch: r.file_ref && /\.[a-z0-9]{2,5}$/i.test(r.file_ref) ? { path: r.file_ref, register: "record", ref: r.id } : null });
         }
       }
 
@@ -92,7 +93,7 @@ export const documentTools: Tool[] = [
       const what = [ws.length ? `"${str(a.text)}"` : "", cat ? `in ${cat.replace("_", " ")}` : "", from || to ? `${from || "…"} to ${to || "…"}` : ""].filter(Boolean).join(", ");
       return {
         ok: true,
-        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > want ? `; showing the newest ${want} of them` : ""}. ${openable} can be opened from here; the rest live in the Organized folder on the hub (see "where"). The person sees each one as a row with an Open link; do not repeat the list.`,
+        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > want ? `; showing the newest ${want} of them` : ""}. ${openable} can be opened from here; the rest live on the hub and the row offers to fetch them (about a minute). The person sees each one as a row; do not repeat the list.`,
         data: shown,
         href: shown.length === 1 ? shown[0].href : undefined,
       };

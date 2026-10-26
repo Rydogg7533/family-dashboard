@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
 import type { AskReply, Turn } from "@/lib/ask-engine";
+import { FetchButton } from "@/components/FetchButton";
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
@@ -136,7 +137,9 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
                     <Link href={it.href} className="min-w-0 flex-1"><div className="font-semibold truncate">{it.name}</div>{it.detail && <div className="text-xs text-muted truncate">{it.detail}</div>}</Link>
                     {it.open
                       ? <a href={it.open} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>
-                      : <span className="shrink-0 text-[11px] text-muted">on the hub</span>}
+                      : it.fetch
+                        ? <FetchButton path={it.fetch.path} register={it.fetch.register} refId={it.fetch.ref} />
+                        : null}
                   </div>
                 ))}
               </div>
