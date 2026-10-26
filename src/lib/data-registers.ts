@@ -257,6 +257,9 @@ export async function getDevices(): Promise<Device[]> {
     } as Device;
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
+export async function getDevice(id: string): Promise<Device | null> {
+  return (await getDevices()).find((d) => d.id === id) ?? null;
+}
 export async function getMedications(person?: PersonId): Promise<Medication[]> {
   const people = await getPeople();
   const uuid = person ? people.find((p) => p.id === person)?.uuid : undefined;

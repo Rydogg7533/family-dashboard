@@ -1,4 +1,5 @@
 "use server";
+import { todayIso } from "@/lib/google-calendar";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { serviceClient } from "@/lib/setup-state";
@@ -27,12 +28,24 @@ const log = (svc: NonNullable<ReturnType<typeof serviceClient>>, actor: string, 
   svc.from("activity_log").insert({ actor, action, subject, undoable: false }).then(() => {}, () => {});
 const done = () => { revalidatePath("/settings/people"); revalidatePath("/family"); };
 
-export async function addChild(name: string, birthYear: number): Promise<{ ok: true } | Fail> {
+// A full birth date: the age is then exact, and the birthday is a date the household can use.
+// birth_year is written alongside it so everything that still reads the year keeps working.
+function checkedDate(birthDate: string, now = new Date()): { ok: true; y: number } | Fail {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return { ok: false, error: "Pick a birth date." };
+  const t = Date.parse(`${birthDate}T12:00:00Z`);
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== birthDate) return { ok: false, error: "That date does not exist." };
+  const y = Number(birthDate.slice(0, 4)); const thisYear = now.getFullYear();
+  if (t > now.getTime()) return { ok: false, error: "That date is in the future." };
+  if (!(y >= thisYear - 40)) return { ok: false, error: "Pick a birth date within the last 40 years." };
+  return { ok: true, y };
+}
+
+export async function addChild(name: string, birthDate: string): Promise<{ ok: true } | Fail> {
   const o = await owner(); if ("ok" in o) return o;
-  const n = clean(name, 40); const y = Math.trunc(Number(birthYear)); const now = new Date().getFullYear();
+  const n = clean(name, 40);
   if (!n) return { ok: false, error: "Give the child a name." };
-  if (!(y >= now - 18 && y <= now)) return { ok: false, error: "Pick a birth year within the last 18 years." };
-  const { error } = await o.svc.from("children").insert({ display_name: n, birth_year: y });
+  const d = checkedDate(birthDate); if ("error" in d) return d;
+  const { error } = await o.svc.from("children").insert({ display_name: n, birth_year: d.y, birth_date: birthDate });
   if (error) return { ok: false, error: error.message };
   await log(o.svc, o.name, "child_added", `Added ${n} to the family`);
   done(); return { ok: true };
@@ -70,7 +83,7 @@ export async function createChildLogin(childId: string, email: string): Promise<
   if (c.profile_id) return { ok: false, error: `${c.display_name} already has a login.` };
   const { data: hh } = await o.svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
   const houseMin = Number(hh?.child_login_min_age ?? 10);
-  if (!loginAllowed(c, houseMin)) return { ok: false, error: `${c.display_name} is under the login age (${minAgeFor(c, houseMin)}). Change the age for this child first if you want to allow it.` };
+  if (!loginAllowed(c, houseMin, await todayIso())) return { ok: false, error: `${c.display_name} is under the login age (${minAgeFor(c, houseMin)}). Change the age for this child first if you want to allow it.` };
   const password = tempPassword();
   const { data, error } = await o.svc.auth.admin.createUser({ email: addr, password, email_confirm: true, user_metadata: { display_name: c.display_name } });
   if (error || !data.user) return { ok: false, error: `Could not create the login: ${error?.message ?? "unknown error"}.` };
@@ -145,7 +158,7 @@ export async function createChildInvite(childId: string, email: string): Promise
   if (!c || c.archived_at) return { ok: false, error: "That child was not found." };
   if (c.profile_id) return { ok: false, error: `${c.display_name} already has a login.` };
   const { data: hh } = await o.svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
-  if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10))) return { ok: false, error: `${c.display_name} is under the login age (${minAgeFor(c, Number(hh?.child_login_min_age ?? 10))}). Change the age for this child first.` };
+  if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10), await todayIso())) return { ok: false, error: `${c.display_name} is under the login age (${minAgeFor(c, Number(hh?.child_login_min_age ?? 10))}). Change the age for this child first.` };
   const { newToken, hashToken } = await import("@/lib/pin");
   const QR = (await import("qrcode")).default;
   // One open invite per child: older ones are revoked, never deleted.
@@ -166,4 +179,16 @@ export async function revokeChildInvite(inviteId: string): Promise<{ ok: true } 
   if (error || !data?.length) return { ok: false, error: "That invite was already used or cancelled." };
   await log(o.svc, o.name, "child_invite_cancelled", "An invite was cancelled");
   done(); return { ok: true };
+}
+
+// Set or correct a birth date, for a child or for a parent.
+export async function setBirthDate(who: "child" | "profile", id: string, birthDate: string): Promise<{ ok: true } | Fail> {
+  const o = await owner(); if ("ok" in o) return o;
+  const d = checkedDate(birthDate); if ("error" in d) return d;
+  const table = who === "child" ? "children" : "profiles";
+  const patch = who === "child" ? { birth_date: birthDate, birth_year: d.y } : { birth_date: birthDate };
+  const { error } = await o.svc.from(table).update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings/people"); revalidatePath("/family");
+  return { ok: true };
 }

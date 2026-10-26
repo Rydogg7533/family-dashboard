@@ -1,4 +1,5 @@
 "use server";
+import { todayIso } from "@/lib/google-calendar";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { serviceClient } from "@/lib/setup-state";
@@ -35,7 +36,7 @@ export async function acceptInvite(token: string, pin: string): Promise<{ ok: tr
   const { data: c } = await svc.from("children").select("id,display_name,birth_year,login_min_age,profile_id").eq("id", inv.child_id).maybeSingle();
   if (!c || c.profile_id) return { ok: false, error: "This login was already set up." };
   const { data: hh } = await svc.from("household").select("child_login_min_age").eq("id", 1).maybeSingle();
-  if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10))) return { ok: false, error: "A parent needs to allow a login for you first." };
+  if (!loginAllowed(c, Number(hh?.child_login_min_age ?? 10), await todayIso())) return { ok: false, error: "A parent needs to allow a login for you first." };
   // Claim the invite first so the same link cannot be used twice at once.
   const { data: claimed } = await svc.from("child_invites").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id).is("accepted_at", null).is("revoked_at", null).select("id");
   if (!claimed?.length) return { ok: false, error: "This invite was just used. Sign in instead." };

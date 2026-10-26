@@ -13,19 +13,19 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return (<label className="flex flex-col gap-1"><span className="text-xs font-semibold">{label}</span>{children}{hint && <span className="text-[11px] text-muted">{hint}</span>}</label>);
 }
 
-export function DeviceForm({ people }: { people: { id: string; name: string }[] }) {
+export function DeviceForm({ people, id = null, initial }: { people: { id: string; name: string }[]; id?: string | null; initial?: DeviceInput }) {
   const router = useRouter();
-  const [d, setD] = useState<DeviceInput>(blank);
+  const [d, setD] = useState<DeviceInput>(initial ?? blank);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof DeviceInput) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setD((s) => ({ ...s, [k]: e.target.value }));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setErr(null);
-    const r = await saveDevice(d);
+    const r = await saveDevice(d, id ?? undefined);
     setBusy(false);
     if (!r.ok) { setErr(r.error ?? "Could not save."); return; }
-    router.push("/devices?all=1"); router.refresh();
+    router.push(id ? `/devices/${id}` : `/devices/${r.id}`); router.refresh();
   }
 
   return (
@@ -64,8 +64,8 @@ export function DeviceForm({ people }: { people: { id: string; name: string }[] 
 
       {err && <div className="rounded-xl bg-red-bg text-red px-4 py-3 text-sm font-semibold">{err}</div>}
       <div className="fixed bottom-16 inset-x-0 z-30 bg-bg/95 backdrop-blur border-t border-line"><div className="max-w-md mx-auto px-5 py-3 flex gap-2">
-        <Link href="/devices" className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm inline-flex items-center">Cancel</Link>
-        <button disabled={busy} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? "Saving…" : "Add device"}</button>
+        <Link href={id ? `/devices/${id}` : "/devices"} className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm inline-flex items-center">Cancel</Link>
+        <button disabled={busy} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? "Saving…" : id ? "Save changes" : "Add device"}</button>
       </div></div>
     </form>
   );

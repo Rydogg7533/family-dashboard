@@ -2,20 +2,53 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { addChild, createChildLogin, createChildInvite, revokeChildInvite, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
+import { addChild, setBirthDate, createChildLogin, createChildInvite, revokeChildInvite, setChildLoginAge, setHouseholdLoginAge } from "@/app/settings/people/children-actions";
 import type { InviteRow } from "@/lib/data-children";
-import { ageFloor, ageText, loginAllowed, minAgeFor, type ChildRow } from "@/lib/children";
+import { ageFloor, ageOf, loginAllowed, minAgeFor, type ChildRow } from "@/lib/children";
 
 const input = "w-full min-h-11 px-3 rounded-xl border border-line bg-bg text-base";
 const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50";
 
-export function PeopleManager({ parents, kids, householdMin, canEdit, invites = [] }: { parents: string[]; kids: ChildRow[]; householdMin: number; canEdit: boolean; invites?: InviteRow[] }) {
+// A birthday: the date, the age it makes, and a tap to set or correct it. A row saved before dates were
+// kept shows the year it has and asks for the rest.
+function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child" | "profile"; id: string; date: string | null; today: string; canEdit: boolean; fallbackYear?: number }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(date ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, start] = useTransition();
+  const save = () => start(async () => {
+    const r = await setBirthDate(who, id, v);
+    if (!("ok" in r) || !r.ok) { setErr(("error" in r && r.error) || "Could not save."); return; }
+    setErr(null); setOpen(false); router.refresh();
+  });
+  const shown = date ? `${new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })} · ${ageOf({ birth_year: Number(date.slice(0, 4)), birth_date: date }, today)}`
+    : fallbackYear ? `born ${fallbackYear} · about ${ageOf({ birth_year: fallbackYear, birth_date: null }, today)}` : "No birthday yet";
+  if (!open) return (
+    <div className="text-xs text-muted text-right shrink-0">
+      {shown}{canEdit && <> · <button type="button" className="font-semibold text-accent" onClick={() => setOpen(true)}>{date ? "Change" : "Add"}</button></>}
+    </div>
+  );
+  return (
+    <div className="flex flex-col items-end gap-1 shrink-0">
+      <div className="flex gap-1.5 items-center">
+        <input type="date" value={v} max={today} onChange={(e) => setV(e.target.value)} className="min-h-9 rounded-lg border border-line bg-bg px-2 text-xs" />
+        <button type="button" disabled={busy || !v} className="min-h-9 px-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50" onClick={save}>{busy ? "…" : "Save"}</button>
+        <button type="button" className="min-h-9 px-2 text-xs font-semibold text-muted" onClick={() => { setOpen(false); setErr(null); }}>Cancel</button>
+      </div>
+      {err && <div className="text-[11px] font-semibold text-red">{err}</div>}
+    </div>
+  );
+}
+
+export function PeopleManager({ parents, kids, householdMin, canEdit, today, invites = [] }: { parents: { id: string; name: string; birth_date: string | null }[]; kids: ChildRow[]; householdMin: number; canEdit: boolean; today: string; invites?: InviteRow[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const thisYear = new Date().getFullYear();
-  const [year, setYear] = useState(String(thisYear - 8));
+  const thisYear = Number(today.slice(0, 4));
+  const todayMax = today;
+  const [dob, setDob] = useState("");
   const [minAge, setMinAge] = useState(String(householdMin));
   const [loginFor, setLoginFor] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -30,18 +63,26 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, invites = 
     <div className="flex flex-col gap-3 text-sm">
       <div className="card">
         <div className="font-semibold">Parents</div>
-        <div className="text-xs text-muted mt-1">{parents.join(", ") || "None yet"}</div>
+        <div className="flex flex-col gap-1 mt-1">
+          {parents.length === 0 && <div className="text-xs text-muted">None yet</div>}
+          {parents.map((p) => (
+            <div key={p.id} className="flex justify-between gap-2 items-baseline">
+              <div className="text-sm">{p.name}</div>
+              <Birthday who="profile" id={p.id} date={p.birth_date} today={today} canEdit={canEdit} />
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="card flex flex-col gap-3">
         <div className="font-semibold">Children</div>
         {kids.length === 0 && <div className="text-xs text-muted">No children added yet.</div>}
         {kids.map((k) => {
-          const allowed = loginAllowed(k, householdMin);
+          const allowed = loginAllowed(k, householdMin, today);
           const min = minAgeFor(k, householdMin);
           return (
             <div key={k.id} className="border-t border-line pt-3 first:border-t-0 first:pt-0">
-              <div className="flex justify-between gap-2 items-baseline"><div className="font-semibold">{k.display_name}</div><div className="text-xs text-muted">born {k.birth_year} · about {ageText(k.birth_year)}</div></div>
+              <div className="flex justify-between gap-2 items-baseline"><div className="font-semibold">{k.display_name}</div><Birthday who="child" id={k.id} date={k.birth_date ?? null} today={today} canEdit={canEdit} fallbackYear={k.birth_year} /></div>
               <Link href={`/settings/people/${k.id}`} className="inline-block mt-1 text-xs font-semibold text-accent">What {k.display_name} can see and do ›</Link>
               {k.profile_id ? <div className="text-xs text-green mt-1">Has a login{k.pin_login ? " with a 6-digit code" : ""}. It opens the kid page and sees only their own things.</div> : (
                 <div className="mt-1">
@@ -119,11 +160,11 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, invites = 
         <div className="card flex flex-col gap-2">
           <div className="font-semibold">Add a child</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={input} autoCapitalize="words" />
-          <label className="text-xs font-semibold">Birth year
-            <select value={year} onChange={(e) => setYear(e.target.value)} className={`${input} mt-1`}>{Array.from({ length: 19 }, (_, i) => thisYear - i).map((y) => <option key={y} value={y}>{y}</option>)}</select>
+          <label className="text-xs font-semibold">Birth date
+            <input type="date" value={dob} max={todayMax} min={`${thisYear - 40}-01-01`} onChange={(e) => setDob(e.target.value)} className={`${input} mt-1`} />
           </label>
-          <div className="text-xs text-muted">Only the year is saved; that is enough to check the login age.</div>
-          <button type="button" disabled={pending || !name.trim()} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, Number(year)), () => setName(""))}>{pending ? "Adding…" : "Add child"}</button>
+          <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, so it goes back 40 years.</div>
+          <button type="button" disabled={pending || !name.trim() || !dob} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); })}>{pending ? "Adding…" : "Add child"}</button>
         </div>
       )}
 

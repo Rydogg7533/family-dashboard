@@ -11,7 +11,7 @@ const STATUSES = ["in use", "spare", "loaned", "retired"];
 const clean = (s: string) => s.replace(/\s+/g, " ").trim();
 
 // Adds a device. Owners only (RLS agrees). Serials are last digits only; the full serial stays in the vault.
-export async function saveDevice(d: DeviceInput): Promise<{ ok: boolean; id?: string; error?: string }> {
+export async function saveDevice(d: DeviceInput, id?: string): Promise<{ ok: boolean; id?: string; error?: string }> {
   if (!hasSupabaseEnv()) return { ok: true, id: "sample" };
   const name = clean(d.name), kind = clean(d.kind);
   if (!name) return { ok: false, error: "Give the device a name." };
@@ -27,9 +27,30 @@ export async function saveDevice(d: DeviceInput): Promise<{ ok: boolean; id?: st
     plan_name: clean(d.planName) || null, plan_end: d.planEnd || null, subscription: clean(d.subscription) || null, note: clean(d.note) || null,
     added_by: user.email ?? "member", updated_by: user.email ?? "member",
   };
+  if (id) {
+    const { error } = await sb.from("devices").update({ ...row, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "device_saved", subject: name, ref: id, undoable: false }).then(() => {}, () => {});
+    revalidatePath("/devices"); revalidatePath(`/devices/${id}`);
+    return { ok: true, id };
+  }
   const { data, error } = await sb.from("devices").insert(row).select("id").single();
   if (error) return { ok: false, error: error.message };
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "device_added", subject: name, ref: data.id as string, undoable: false }).then(() => {}, () => {});
   revalidatePath("/devices");
   return { ok: true, id: data.id as string };
+}
+
+// Retire, sell, lose or bring back. Never a delete: the row keeps its history and the register keeps the record.
+export async function setDeviceStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
+  if (!hasSupabaseEnv()) return { ok: true };
+  if (!["in use", "spare", "loaned", "for sale", "retired", "lost"].includes(status)) return { ok: false, error: "Unknown status." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in again." };
+  const { data, error } = await sb.from("devices").update({ status, updated_by: user.email ?? "member", updated_at: new Date().toISOString() }).eq("id", id).select("name").single();
+  if (error) return { ok: false, error: error.message };
+  await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "device_status", subject: `${data?.name ?? "Device"}: ${status}`, ref: id, undoable: false }).then(() => {}, () => {});
+  revalidatePath("/devices"); revalidatePath(`/devices/${id}`);
+  return { ok: true };
 }
