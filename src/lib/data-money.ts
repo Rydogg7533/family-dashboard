@@ -11,6 +11,7 @@ export type Account = {
 };
 export type Transaction = {
   id: string; account_id: string; amount: number; merchant: string; date: string; category: string | null; entity: string;
+  category_hint?: string | null;   // the aggregator's guess from Tiller; shown as a guess, never treated as the category
   status: "matched" | "classified" | "unknown" | "personal" | "transfer" | "refund_pending" | "disputed" | "reimbursable";
   matched_receipt: string | null; note: string | null; searched: string[]; flag: string | null;
   for_person: string; captured_by: string; // "Always say who": whose purchase, who captured or synced it

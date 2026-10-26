@@ -41,7 +41,7 @@ export function TxCard({ tx, proofs, accounts, compact = false }: { tx: Transact
           <span className="mt-1.5"><ProofDot state={p.state} /></span>
           <div className="min-w-0">
             <div className="font-semibold text-sm truncate">{tx.merchant}</div>
-            <div className="text-xs text-muted">{shortDate(tx.date)} · {accountLabel(acc)} · {tx.category ?? "uncategorised"} · {tx.entity}</div>
+            <div className="text-xs text-muted">{shortDate(tx.date)} · {accountLabel(acc)} · {tx.category ?? (tx.category_hint ? <span title="A guess from the bank feed, not a category">{tx.category_hint}?</span> : "uncategorised")} · {tx.entity}</div>
             <div className="text-[11px] text-muted">{tx.for_person === "Joint" ? "Joint card" : `${tx.for_person}'s card`} · {tx.captured_by} · <a href="#" className="font-semibold text-accent">Open in Tiller</a></div>
           </div>
         </div>

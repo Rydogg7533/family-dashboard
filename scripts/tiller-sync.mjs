@@ -3,6 +3,9 @@
 //
 //   node scripts/tiller-sync.mjs --account admin@shvr.co            # DRY RUN (default): counts and account mapping only, writes nothing
 //   node scripts/tiller-sync.mjs --account admin@shvr.co --apply    # inserts the new accounts and transactions, then verifies
+//   node scripts/tiller-sync.mjs --account admin@shvr.co --apply --backfill-hints
+//                                       # ALSO fills category_hint on rows already in the database that have none.
+//                                       # Touches that one column only; status, note, category and matched receipt stay as they are.
 //
 // Rules: the sheet is read with GET only (the sign-in is read-only). Each Tiller "Transaction ID" becomes one transactions.id.
 // Rows already in the database are never touched (insert-only, "ignore duplicates"), so re-running is safe and never overwrites
@@ -20,6 +23,7 @@ import { toDate, parseAmount, appAmount, last4, accountSlug, guessKind, cleanMer
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 const APPLY = args.includes("--apply");
+const BACKFILL_HINTS = args.includes("--backfill-hints");
 const die = (m) => { console.error(`STOP: ${m}`); process.exit(2); };
 const account = (opt("--account") || "").trim().toLowerCase();
 const SHEET = opt("--sheet") || "1uCaFIbh5uTHzLZb-wqUs9GDAm1nOQNbFyLDzv6Ynenk";
@@ -70,7 +74,7 @@ async function main() {
   console.log(`TILLER SYNC — ${APPLY ? "APPLY" : "DRY RUN (nothing will be written)"} — sheet read as ${account}\n`);
   const rows = await tab("Transactions");
   const head = rows[0] || [];
-  const c = { date: idx(head, /^date$/i), desc: idx(head, /^description$/i), cat: idx(head, /^category$/i), amt: idx(head, /^amount$/i), acct: idx(head, /^account$/i), num: idx(head, /^account #$/i), inst: idx(head, /^institution$/i), id: idx(head, /^transaction id$/i), aid: idx(head, /^account id$/i), full: idx(head, /^full description$/i) };
+  const c = { date: idx(head, /^date$/i), desc: idx(head, /^description$/i), cat: idx(head, /^category$/i), amt: idx(head, /^amount$/i), acct: idx(head, /^account$/i), num: idx(head, /^account #$/i), inst: idx(head, /^institution$/i), id: idx(head, /^transaction id$/i), aid: idx(head, /^account id$/i), full: idx(head, /^full description$/i), hint: idx(head, /^category hint$/i) };
   const missing = Object.entries({ Date: c.date, Description: c.desc, Amount: c.amt, Account: c.acct, "Transaction ID": c.id }).filter(([, v]) => v < 0).map(([k]) => k);
   if (missing.length) die(`the Transactions tab is missing column(s): ${missing.join(", ")}. Run tiller-inspect.mjs to see the layout.`);
 
@@ -82,6 +86,7 @@ async function main() {
     for (const r of ar.slice(1)) { const key = a.id >= 0 ? r[a.id] : null; if (key) meta.set(String(key), { type: r[a.type] || "", klass: r[a.klass] || "" }); }
   } catch (e) { console.log(`(Accounts tab not read: ${e.message}; guessing kinds from names)`); }
 
+  if (BACKFILL_HINTS && !APPLY) console.log("(--backfill-hints noted; nothing is written without --apply)\n");
   const skipped = { noId: 0, noDate: 0, noAmount: 0, dupId: 0 };
   const seen = new Set(), tx = [];
   const acctByKey = new Map();   // sheet account key → { name, number, institution, aid, count, kind, id }
@@ -95,7 +100,7 @@ async function main() {
     const key = aid || name;
     if (!acctByKey.has(key)) acctByKey.set(key, { name, number: c.num >= 0 ? r[c.num] : "", institution: c.inst >= 0 ? String(r[c.inst] ?? "").trim() : "", aid, count: 0 });
     acctByKey.get(key).count++;
-    tx.push({ id, key, date, amount: appAmount(amt), merchant: cleanMerchant(r[c.desc], c.full >= 0 ? r[c.full] : ""), category: c.cat >= 0 ? (String(r[c.cat] ?? "").trim() || null) : null });
+    tx.push({ id, key, date, amount: appAmount(amt), merchant: cleanMerchant(r[c.desc], c.full >= 0 ? r[c.full] : ""), category: c.cat >= 0 ? (String(r[c.cat] ?? "").trim() || null) : null, hint: c.hint >= 0 ? (String(r[c.hint] ?? "").trim() || null) : null });
   }
 
   // Accounts: kind, short id (slug) with collision guard.
@@ -129,8 +134,27 @@ async function main() {
   const newAccts = loadable.filter((a) => !existingAcct.has(a.id)).map((a) => ({ id: a.id, kind: a.kind, institution: a.institution || a.name, last4: a.last4, owner: "Joint", entity: "Personal", source: "Tiller sheet" }));
   if (newAccts.length) await rest("POST", "accounts?on_conflict=id", newAccts, { Prefer: "resolution=ignore-duplicates,return=minimal" });
   const idOf = new Map([...acctByKey].map(([k, a]) => [k, a.id]));
-  const payload = fresh.map((t) => ({ id: t.id, account_id: idOf.get(t.key), amount: t.amount, merchant: t.merchant, date: t.date, category: t.category }));   // uniform keys in every object
+  const payload = fresh.map((t) => ({ id: t.id, account_id: idOf.get(t.key), amount: t.amount, merchant: t.merchant, date: t.date, category: t.category, category_hint: t.hint }));   // uniform keys in every object
   for (let i = 0; i < payload.length; i += 200) await rest("POST", "transactions?on_conflict=id", payload.slice(i, i + 200), { Prefer: "resolution=ignore-duplicates,return=minimal" });
+
+  // ---------- backfill hints on rows that pre-date the column ----------
+  // A partial upsert cannot do this: Postgres checks NOT NULL on the proposed row BEFORE it looks for a conflict,
+  // so {id, category_hint} alone fails on account_id even when the row exists (seen 2026-10-26). So this is a real
+  // UPDATE: PATCH by id list, filtered to rows whose hint is still null (idempotent at the database, not just here),
+  // grouped by hint value so every row in a request takes the same body. Touches one column. Prints counts only.
+  let hintsFilled = 0;
+  if (BACKFILL_HINTS) {
+    const have = new Map((await allRows("transactions?select=id,category_hint")).map((x) => [x.id, x.category_hint]));
+    const byHint = new Map();
+    for (const t of toLoad) if (t.hint && have.has(t.id) && !have.get(t.id)) { if (!byHint.has(t.hint)) byHint.set(t.hint, []); byHint.get(t.hint).push(t.id); }
+    for (const [hint, ids] of byHint) {
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        await rest("PATCH", `transactions?id=in.(${chunk.map(encodeURIComponent).join(",")})&category_hint=is.null`, { category_hint: hint }, { Prefer: "return=minimal" });
+        hintsFilled += chunk.length;
+      }
+    }
+  }
 
   // ---------- verify against the database, not the command's exit ----------
   const db = await allRows("transactions?select=id,account_id,amount");
@@ -142,6 +166,10 @@ async function main() {
   for (const d of db) if (sumSheet.has(d.account_id)) sumDb.set(d.account_id, (sumDb.get(d.account_id) || 0) + Number(d.amount));
   const sumsMatch = [...sumSheet].every(([k, v]) => Math.abs((sumDb.get(k) || 0) - v) < 0.01);
   console.log(`\nINSERTED: ${newAccts.length} account(s), ${payload.length} transaction(s).`);
+  if (BACKFILL_HINTS) {
+    const withHint = (await allRows("transactions?select=id&category_hint=not.is.null")).length;
+    console.log(`HINTS: filled ${hintsFilled} existing row(s); ${withHint} of ${db.length} transactions now carry a category hint.`);
+  }
   console.log(`VERIFIED in the database: ${toLoad.length - missingRows} of ${toLoad.length} sheet transactions present; ${wrongAcct} on the wrong account; ${wrongAmt} with a different amount; per-account totals ${sumsMatch ? "match the sheet" : "DO NOT MATCH the sheet"}.`);
   if (missingRows || wrongAcct || wrongAmt || !sumsMatch) { console.log("NOT VERIFIED. Paste this output back to Claude."); process.exit(1); }
   console.log("All verified. The sheet was only read; nothing in it changed.");
