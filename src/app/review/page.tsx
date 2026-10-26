@@ -2,6 +2,7 @@ import { H1, Card } from "@/components/ui";
 import { getReview } from "@/lib/data-review";
 import { ReviewTask } from "@/components/ReviewTask";
 import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
+import { TriageVerdict } from "@/components/TriageVerdict";
 import { ConfirmWeek } from "@/components/ConfirmWeek";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,14 @@ export default async function ReviewPage() {
       {r.asking.length > 0 && (<>
         <Head>STILL ASKING ({r.asking.length})</Head>
         <div className="flex flex-col gap-2 mb-4">{r.asking.map((c) => <Card key={c.id}><div className="font-semibold text-sm mb-1">Is {c.name} a subscription?</div><SubscriptionCandidate c={c} /></Card>)}</div>
+      </>)}
+
+      {r.triage.length > 0 && (<>
+        <Head>DID WE GET THESE RIGHT? ({r.triageJudged} of {r.triage.length} judged)</Head>
+        <p className="text-[11px] text-muted mb-1.5 leading-snug">Tasks made from email. Judging them is what decides whether triage is trusted to run on its own; it does not change the task.</p>
+        <div className="flex flex-col gap-2">{r.triage.slice(0, 12).map((t) => <TriageVerdict key={t.id} item={t} />)}</div>
+        {r.triage.length > 12 && <p className="text-xs text-muted mt-2 mb-4">and {r.triage.length - 12} more, which appear as these are answered.</p>}
+        {r.triage.length <= 12 && <div className="mb-4" />}
       </>)}
 
       <Head>THIS WEEK</Head>
