@@ -36,7 +36,7 @@ function checkedDate(birthDate: string, now = new Date()): { ok: true; y: number
   if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== birthDate) return { ok: false, error: "That date does not exist." };
   const y = Number(birthDate.slice(0, 4)); const thisYear = now.getFullYear();
   if (t > now.getTime()) return { ok: false, error: "That date is in the future." };
-  if (!(y >= thisYear - 40)) return { ok: false, error: "Pick a birth date within the last 40 years." };
+  if (!(y >= thisYear - 100)) return { ok: false, error: "Pick a birth date within the last 100 years." };
   return { ok: true, y };
 }
 

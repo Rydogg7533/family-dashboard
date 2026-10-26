@@ -9,6 +9,38 @@ import { ageFloor, ageOf, loginAllowed, minAgeFor, type ChildRow } from "@/lib/c
 const input = "w-full min-h-11 px-3 rounded-xl border border-line bg-bg text-base";
 const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50";
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-based; handles February
+
+// Month, day and year as three lists. A native date field makes you scroll a month at a time, which is
+// painful for a birthday decades back. Emits YYYY-MM-DD once all three are chosen, "" until then.
+function DatePick({ value, onChange, today, back = 100 }: { value: string; onChange: (v: string) => void; today: string; back?: number }) {
+  const thisYear = Number(today.slice(0, 4));
+  const [y, m, d] = value ? value.split("-") : ["", "", ""];
+  const sel = "min-h-11 rounded-xl border border-line bg-bg px-2 text-sm";
+  const set = (ny: string, nm: string, nd: string) => {
+    if (ny && nm) { const max = daysInMonth(Number(ny), Number(nm)); if (nd && Number(nd) > max) nd = String(max).padStart(2, "0"); }
+    onChange(ny && nm && nd ? `${ny}-${nm}-${nd}` : "");
+  };
+  const days = y && m ? daysInMonth(Number(y), Number(m)) : 31;
+  return (
+    <div className="flex gap-1.5">
+      <select aria-label="Month" value={m} onChange={(e) => set(y, e.target.value, d)} className={`${sel} flex-1 min-w-0`}>
+        <option value="">Month</option>
+        {MONTHS.map((name, i) => <option key={name} value={String(i + 1).padStart(2, "0")}>{name}</option>)}
+      </select>
+      <select aria-label="Day" value={d} onChange={(e) => set(y, m, e.target.value)} className={sel}>
+        <option value="">Day</option>
+        {Array.from({ length: days }, (_, i) => String(i + 1).padStart(2, "0")).map((n) => <option key={n} value={n}>{Number(n)}</option>)}
+      </select>
+      <select aria-label="Year" value={y} onChange={(e) => set(e.target.value, m, d)} className={sel}>
+        <option value="">Year</option>
+        {Array.from({ length: back + 1 }, (_, i) => String(thisYear - i)).map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+    </div>
+  );
+}
+
 // A birthday: the date, the age it makes, and a tap to set or correct it. A row saved before dates were
 // kept shows the year it has and asks for the rest.
 function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child" | "profile"; id: string; date: string | null; today: string; canEdit: boolean; fallbackYear?: number }) {
@@ -30,12 +62,13 @@ function Birthday({ who, id, date, today, canEdit, fallbackYear }: { who: "child
     </div>
   );
   return (
-    <div className="flex flex-col items-end gap-1 shrink-0">
-      <div className="flex gap-1.5 items-center">
-        <input type="date" value={v} max={today} onChange={(e) => setV(e.target.value)} className="min-h-9 rounded-lg border border-line bg-bg px-2 text-xs" />
-        <button type="button" disabled={busy || !v} className="min-h-9 px-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50" onClick={save}>{busy ? "…" : "Save"}</button>
+    <div className="flex flex-col items-end gap-1.5 min-w-0">
+      <div className="flex gap-1.5 items-center flex-wrap justify-end">
+        <DatePick value={v} onChange={setV} today={today} />
+        <button type="button" disabled={busy || !v || v > today} className="min-h-9 px-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50" onClick={save}>{busy ? "…" : "Save"}</button>
         <button type="button" className="min-h-9 px-2 text-xs font-semibold text-muted" onClick={() => { setOpen(false); setErr(null); }}>Cancel</button>
       </div>
+      {v && v > today && <div className="text-[11px] font-semibold text-red">That date is in the future.</div>}
       {err && <div className="text-[11px] font-semibold text-red">{err}</div>}
     </div>
   );
@@ -46,7 +79,6 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const thisYear = Number(today.slice(0, 4));
   const todayMax = today;
   const [dob, setDob] = useState("");
   const [minAge, setMinAge] = useState(String(householdMin));
@@ -161,10 +193,10 @@ export function PeopleManager({ parents, kids, householdMin, canEdit, today, inv
           <div className="font-semibold">Add a child</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={input} autoCapitalize="words" />
           <label className="text-xs font-semibold">Birth date
-            <input type="date" value={dob} max={todayMax} min={`${thisYear - 40}-01-01`} onChange={(e) => setDob(e.target.value)} className={`${input} mt-1`} />
+            <div className="mt-1"><DatePick value={dob} onChange={setDob} today={todayMax} /></div>
           </label>
-          <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, so it goes back 40 years.</div>
-          <button type="button" disabled={pending || !name.trim() || !dob} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); })}>{pending ? "Adding…" : "Add child"}</button>
+          <div className="text-xs text-muted">The date gives the exact age for the login rule, and a birthday the household can use. A grown child keeps their place here, and a grandparent may be a member too, so it goes back 100 years.</div>
+          <button type="button" disabled={pending || !name.trim() || !dob || dob > todayMax} className={`${btn} bg-accent text-white`} onClick={() => run(() => addChild(name, dob), () => { setName(""); setDob(""); })}>{pending ? "Adding…" : "Add child"}</button>
         </div>
       )}
 
