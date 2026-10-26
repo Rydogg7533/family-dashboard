@@ -1,4 +1,5 @@
 "use server";
+import { runTool } from "@/lib/tools/run";
 // Server-action wrappers around the AI layer so client components never hold the key.
 import { callModel, type Job, type Message, type ModelResult } from "@/lib/ai";
 import { answerAsk, type AskReply, type EventDraft, type Turn } from "@/lib/ask-engine";
@@ -79,4 +80,10 @@ export async function parkThreadInInbox(thread: Turn[]) {
     thread: thread.map((t) => ({ at: new Date().toISOString(), who: t.role === "user" ? "you" : "assistant", text: t.text })),
   });
   return { ok: !error };
+}
+
+// A write the model chose and the person then agreed to. Everything — permission, the tier, the log line —
+// is decided by the tool itself, so asking and tapping cannot end up with different rules.
+export async function confirmTool(name: string, args: Record<string, unknown>) {
+  return runTool(name, args);
 }

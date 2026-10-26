@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, parkThreadInInbox } from "@/lib/ai-actions";
+import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox } from "@/lib/ai-actions";
 import type { AskReply, Turn } from "@/lib/ask-engine";
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; eventResult?: { ok: boolean; text: string; href?: string } };
+type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
 
 export function AskChat({ prefill, sample, who }: { prefill: string; sample: boolean; who: string }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -41,6 +41,15 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     }
     setBubbles([...next, bubble]);
     setBusy(false);
+  }
+
+  // A write the model chose. It has not run yet; this is where the person agrees to it.
+  async function runChosen(i: number) {
+    const t = bubbles[i].reply?.tool; if (!t) return;
+    setBusy(true);
+    const r = await confirmTool(t.name, t.args).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : "That did not work." }));
+    setBusy(false);
+    setBubbles((bs) => bs.map((x, j) => (j === i ? { ...x, toolResult: r.ok ? { ok: true, text: r.summary, href: r.href } : { ok: false, text: r.error } } : x)));
   }
 
   async function confirm(i: number) {
@@ -81,6 +90,25 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
         ) : (
           <div key={i} className="self-start max-w-[92%] flex flex-col gap-1.5">
             <div className={`card text-sm whitespace-pre-wrap ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
+            {b.reply?.kind === "tool_confirm" && b.reply.tool && (
+              b.toolResult
+                ? <div className={`text-xs font-semibold px-1 ${b.toolResult.ok ? "text-green" : "text-red"}`}>{b.toolResult.text}{b.toolResult.ok && b.toolResult.href ? <> · <Link href={b.toolResult.href} className="text-accent">Open</Link></> : null}</div>
+                : (
+                  <div className={`card flex flex-col gap-2 ${b.reply.tool.tier === 3 ? "border-amber" : ""}`}>
+                    <div className="text-sm font-semibold">{b.reply.tool.title}</div>
+                    <dl className="text-xs text-muted flex flex-col gap-0.5">
+                      {Object.entries(b.reply.tool.args).filter(([, v]) => v !== "" && v !== null && v !== undefined).map(([k, v]) => (
+                        <div key={k} className="flex gap-2"><dt className="shrink-0">{k}</dt><dd className="text-fg min-w-0 break-words">{String(v)}</dd></div>
+                      ))}
+                    </dl>
+                    <div className="text-[11px] text-muted">{who} asked · from Ask · nothing has changed yet</div>
+                    <div className="flex gap-2">
+                      <button disabled={busy} onClick={() => runChosen(i)} className="min-h-11 flex-1 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50">{busy ? "Doing it…" : "Do it"}</button>
+                      <button onClick={() => setInput(b.text)} className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm">Change</button>
+                    </div>
+                  </div>
+                )
+            )}
             {b.reply?.kind === "instruction" && b.reply.confirm && <ConfirmCard b={b} who={who} onConfirm={() => confirm(i)} onChange={() => setInput(b.reply!.confirm!.summary)} />}
             {(b.reply?.kind === "event_confirm" || b.reply?.kind === "event_move") && b.reply.draft && (i === bubbles.length - 1 || b.eventResult) && (
               b.eventResult?.ok

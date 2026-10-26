@@ -109,6 +109,48 @@ export async function callModel({ job, messages, system, maxTokens = 600, reason
   return r;
 }
 
+// ---- tools (D80) ----
+// The same door, with the registry attached. The model picks a tool and names its arguments rather than the
+// code guessing intent from prose with regular expressions, which is what Ask did before and why it could
+// only ever do the handful of things somebody had written a pattern for.
+export type ToolSpec = { name: string; description: string; input_schema: unknown };
+export type ToolCall = { id: string; name: string; input: Record<string, unknown> };
+export type Block = { type: string; [k: string]: unknown };
+export type ToolTurn = { role: "user" | "assistant"; content: string | Block[] };
+
+export async function callModelTools({ job, messages, system, tools, maxTokens = 1024, feature }:
+  { job: Job; messages: ToolTurn[]; system?: string; tools: ToolSpec[]; maxTokens?: number; feature?: string },
+): Promise<ModelResult & { calls: ToolCall[]; blocks: Block[] }> {
+  const model = MODEL_FOR_JOB[job];
+  if (!hasAiKey()) {
+    const r = sampleResult(job, model, messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "[blocks]" })));
+    await recordUsage(r, feature, {});
+    return { ...r, calls: [], blocks: [] };
+  }
+  const t0 = Date.now();
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, system: system ?? SCOPE_SYSTEM_PROMPT, messages, tools }),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Messages API ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { content: Block[]; usage: { input_tokens: number; output_tokens: number } };
+  const blocks = data.content ?? [];
+  const text = blocks.filter((c) => c.type === "text").map((c) => String(c.text ?? "")).join("");
+  const calls: ToolCall[] = blocks.filter((c) => c.type === "tool_use").map((c) => ({ id: String(c.id), name: String(c.name), input: (c.input ?? {}) as Record<string, unknown> }));
+  const r: ModelResult = {
+    text, model, job,
+    inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+    cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens),
+    sample: false, latencyMs: Date.now() - t0,
+  };
+  await recordUsage(r, feature, {});
+  return { ...r, calls, blocks };
+}
+
 // A deterministic stand-in: same input, same output, with token counts sized like a real call so the
 // cost line on the page looks like the real thing.
 function sampleResult(job: Job, model: ModelId, messages: Message[]): ModelResult {

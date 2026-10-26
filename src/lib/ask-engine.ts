@@ -3,22 +3,25 @@
 // confirmation card written by Sonnet with only the relevant records; 4) off-scope questions get the
 // one "is this related?" check before deflection. Without an API key the same shape is produced by
 // keyword matching so the page feels real in preview.
-import { callModel, formatCost, isStructuredInput, hasAiKey, SCOPE_SYSTEM_PROMPT, type Message } from "@/lib/ai";
+import { callModel, callModelTools, formatCost, isStructuredInput, hasAiKey, SCOPE_SYSTEM_PROMPT, type Block, type Message, type ToolTurn } from "@/lib/ai";
+import { TOOLS } from "@/lib/tools/registry";
+import { toolSpec } from "@/lib/tools/types";
+import { runTool, toolByName, toolCtx } from "@/lib/tools/run";
 import { getOpenTasks } from "@/lib/data";
 import { eventTurn } from "@/lib/ask-calendar";
-import { getCalendarEvents } from "@/lib/data-day";
-import { sampleTransactions, sampleRecurring, sampleReconciliations, money, shortDate } from "@/lib/data-money";
+import { sampleTransactions, money, shortDate } from "@/lib/data-money";   // preview only: the no-key path
 
 export type Tier = 1 | 2 | 3;
 export type EventDraft = { title: string | null; date: string | null; endDate: string | null; allDay: boolean; start: string | null; end: string | null; location: string | null; reminders: number[] | null; guests: string[] };
 export type AskReply = {
-  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm" | "event_conflict" | "event_move";
+  kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm" | "event_conflict" | "event_move" | "tool_confirm";
   feedId?: string | null;                               // this proposal's row in the Assistant feed
   draft?: EventDraft;
   move?: { calendarId: string; id: string; title: string; date: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string };   // an existing event to move first                                   // an event waiting for the person's Add tap
   text: string;
   source?: { label: string; href: string };            // "Open in …"
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
+  tool?: { name: string; title: string; args: Record<string, unknown>; tier: Tier };   // a write the person has not agreed to yet
   chips?: string[];                                     // suggested next taps
   scopeRule?: string;                                   // learned when the person connects an off-scope question
   cost: number; costText: string; model: string; sample: boolean;
@@ -27,7 +30,6 @@ export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["
 
 const FAMILY_WORDS = /\b(confirmation|reservation|hotel|flight|ticket|claim|warranty|return|record|today|tomorrow|week|schedule|calendar|appointment|dentist|doctor|school|practice|kid|child|son|daughter|ryan|melissa|tahoe|sienna|car|oil|registration|insurance|title|document|file|where|receipt|charge|paid|pay|cost|spent|spend|money|amex|visa|card|bill|subscription|statement|budget|medication|meds|melatonin|dose|device|laptop|serial|filter|furnace|home|house|yard|contact|grandma|birthday|task|email|reply|draft|inbox|setting|notification|rain|weather|trip|pack|checklist|shop|order|buy|need)\b/i;
 
-const CHILD = /\[child \d\]|\bchild\b|\bson\b|\bdaughter\b|\bkid\b/i;
 
 export const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
@@ -62,21 +64,47 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
   if (intent.startsWith("event")) return eventTurn(thread);
   if (intent.startsWith("offscope")) return { kind: "scope_check", text: "Is this related to the family management system? If so, how?", chips: ["No, never mind"], ...costOf(cls) };
 
-  // 3) Sonnet writes the answer or the confirmation line with only the relevant records.
-  const context = await relevantRecords(q);
-  const r = await callModel({ job: "chat", feature: "ask", messages: toMessages(thread), system: SCOPE_SYSTEM_PROMPT + `\n\nRelevant records (names, dates, links; never contents):\n${context}\n\nIf the input is an instruction, reply in exactly this form on one line: CONFIRM | <what you understood> | <Settings section or register> | <tier 1, 2 or 3> | <one missing fact, or none>. Tier 1: a note, a checklist item, a shop list item. Tier 2: a medication, a vehicle date, a contact, a rule, a notification, a record (a confirmation number for a reservation, ticket, claim, return, appointment; target "Records › <kind>"). Tier 3: money set-up, access, another person's settings.` });
-  const total = cls.cost + r.cost;
-  const base = { cost: total, costText: `this answer ~${formatCost(total)}`, model: r.model, sample: false };
-  const m = r.text.match(/^CONFIRM\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(?:tier\s*)?([123])\s*\|\s*(.*)$/im);
-  if (m) {
-    const missing = m[4].trim().toLowerCase() === "none" ? undefined : m[4].trim();
-    if (missing) return { kind: "clarify", text: missing, chips: CHILD.test(q) ? ["[Child 1]", "[Child 2]"] : undefined, ...base };
-    return { kind: "instruction", text: `${m[1]} → ${m[2]}. Confirm?`, confirm: { summary: m[1], target: m[2], tier: Number(m[3]) as Tier }, ...base };
+  // 3) Sonnet, with the registry attached (D80). It reads with the read tools as often as it needs, and the
+  // first tool that would CHANGE something stops the loop and comes back as a card for the person to agree
+  // to. Nothing is written here. An instruction with no tool behind it is answered honestly rather than
+  // confirmed and dropped, which is what the old regex route did.
+  const ctx = await toolCtx();
+  const specs = TOOLS.map(toolSpec);
+  const system = SCOPE_SYSTEM_PROMPT + `
+
+You have tools for the things this household's app can do. Today is ${ctx?.today ?? "unknown"} in ${ctx?.tz ?? "the household's time zone"}.
+- Look things up with the read tools before answering. Never guess a number, a date or a name you have not read.
+- Before adding anything, search for it first: say so if something close already exists, rather than making a second one.
+- A tool that changes something is not run by you; the person sees what you chose and agrees to it. Say in one line what you are about to do.
+- If what they asked for has no tool, say plainly that you cannot do it yet and name the page where they can. Never say you have saved or changed something.
+- Short answers. Names, dates and links, never the contents of documents.`;
+
+  const turns: ToolTurn[] = toMessages(thread) as ToolTurn[];
+  let spend = cls.cost;
+  let saidLast = "";
+  for (let round = 0; round < 4; round++) {
+    const r = await callModelTools({ job: "chat", feature: "ask", messages: turns, system, tools: specs, maxTokens: 1200 });
+    spend += r.cost;
+    saidLast = r.text || saidLast;
+    const base2 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: r.model, sample: r.sample };
+    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", ...base2 };
+
+    const write = r.calls.find((cl) => toolByName(cl.name)?.kind === "write");
+    if (write) {
+      const t = toolByName(write.name)!;
+      return { kind: "tool_confirm", text: r.text.trim() || `${t.title}. Confirm?`, tool: { name: t.name, title: t.title, args: write.input, tier: t.tier }, ...base2 };
+    }
+
+    turns.push({ role: "assistant", content: r.blocks });
+    const results: Block[] = [];
+    for (const cl of r.calls) {
+      const out = ctx ? await runTool(cl.name, cl.input, ctx) : { ok: false as const, error: "Not signed in." };
+      results.push({ type: "tool_result", tool_use_id: cl.id, content: JSON.stringify(out).slice(0, 6000) });
+    }
+    turns.push({ role: "user", content: results });
   }
-  const src = r.text.match(/^Source:\s*(.+)$/im);
-  const text = r.text.replace(/^Source:.*$/im, "").trim();
-  if (/i (don'?t|do not) (know|have)|couldn'?t find|not sure/i.test(text) && text.length < 220) return { kind: "inbox", text: `${text}\n\nSaved to Inbox with your words; I'll ask the one thing I'm missing there.`, source: { label: "Inbox", href: "/inbox" }, ...base };
-  return { kind: "answer", text, source: src ? { label: src[1].trim(), href: "#" } : undefined, ...base };
+  const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: "claude-sonnet-5-5", sample: false };
+  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", ...base3 };
 }
 
 // ---- helpers ----
@@ -113,27 +141,6 @@ function structured(q: string): AskReply {
   return { kind: "structured", text, source, cost: 0, costText: "no model used (recognised locally)", model: "none", sample: !hasAiKey() };
 }
 
-async function relevantRecords(q: string): Promise<string> {
-  const lines: string[] = [];
-  if (/task|today|need|due|email|reply/i.test(q)) {
-    const tasks = await getOpenTasks();
-    lines.push("Open tasks: " + tasks.map((t) => `${t.kind}: ${t.title}${t.due_at ? ` (due ${shortDate(t.due_at.slice(0, 10))})` : ""}`).join("; "));
-  }
-  if (/calendar|schedule|appointment|meeting|today|tomorrow|week|weekend|free|busy|when|what'?s on|coming up|saturday|sunday|monday|tuesday|wednesday|thursday|friday/i.test(q)) {
-    try {
-      const evs = await getCalendarEvents(undefined, 14);   // real events, live from Google (D72)
-      lines.push("Calendar, next 14 days (live from Google): " + (evs.length ? evs.map((e) => `${e.date}${e.allDay ? " all day" : e.start ? ` ${e.start}${e.end ? `–${e.end}` : ""}` : ""} ${e.title}${e.place ? ` @ ${e.place}` : ""} [${e.person}]`).join("; ") : "nothing scheduled"));
-    } catch { /* the answer just won't have calendar facts */ }
-  }
-  if (/pay|paid|cost|spent|spend|charge|receipt|money|card|amex|visa|bill|subscription/i.test(q)) {
-    lines.push("Recent charges: " + sampleTransactions.slice(0, 6).map((t) => `${t.merchant} ${money(t.amount)} ${shortDate(t.date)} (${t.status})`).join("; "));
-    lines.push("Recurring: " + sampleRecurring.map((r) => `${r.name} ${money(r.amount)}/${r.cycle} next ${shortDate(r.next_charge)}`).join("; "));
-    lines.push("Reconciliations: " + sampleReconciliations.map((r) => `${r.period} ${r.account_id} ${r.status}, ${r.to_explain} to explain`).join("; "));
-  }
-  if (/registration|title|insurance|card|passport|document|where/i.test(q)) lines.push("Vault item names (1Password): Sienna registration 2026; Tahoe registration 2026; Auto insurance cards; [Child 1] insurance card. Organized: Personal/Documents/Vehicles/{Sienna,Tahoe}.");
-  if (/filter|furnace|home|house/i.test(q)) lines.push("Home register: furnace filter 16x25x1 MERV 11, last replaced [DATE], usual source [Store], usual price $[PRICE].");
-  return lines.join("\n") || "(no records matched the question)";
-}
 
 // ---- sample mode: keyword routing so preview feels like the real thing ----
 async function sampleRoute(thread: Turn[], q: string): Promise<AskReply> {
