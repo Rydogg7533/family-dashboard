@@ -21,6 +21,7 @@ export type AskReply = {
   text: string;
   source?: { label: string; href: string };            // "Open in …"
   items?: AskItem[];                                    // things a read tool found, each with somewhere to go
+  trace?: { name: string; args: Record<string, unknown>; ok: boolean; summary: string }[];   // every read the loop made, for the eval runner and for a thumbs-down report
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
   tool?: { name: string; title: string; args: Record<string, unknown>; tier: Tier };   // a write the person has not agreed to yet
   chips?: string[];                                     // suggested next taps
@@ -91,6 +92,7 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
   // the model's text says what was found, the rows are how they get to it. Without this the find was
   // honest but useless -- "AAA, Oct 11, $242.88" with no way to open it.
   let items: AskItem[] = [];
+  const trace: NonNullable<AskReply["trace"]> = [];
   const keep = (out: unknown) => {
     const data = (out as { ok?: boolean; data?: unknown })?.data;
     if (!Array.isArray(data)) return;
@@ -106,12 +108,12 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     spend += r.cost;
     saidLast = r.text || saidLast;
     const base2 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: r.model, sample: r.sample };
-    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", items: items.length ? items.slice(0, 12) : undefined, ...base2 };
+    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base2 };
 
     const write = r.calls.find((cl) => toolByName(cl.name)?.kind === "write");
     if (write) {
       const t = toolByName(write.name)!;
-      return { kind: "tool_confirm", text: r.text.trim() || `${t.title}. Confirm?`, tool: { name: t.name, title: t.title, args: write.input, tier: t.tier }, ...base2 };
+      return { kind: "tool_confirm", text: r.text.trim() || `${t.title}. Confirm?`, tool: { name: t.name, title: t.title, args: write.input, tier: t.tier }, items: items.length ? items.slice(0, 12) : undefined, trace, ...base2 };
     }
 
     turns.push({ role: "assistant", content: r.blocks });
@@ -122,12 +124,13 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     for (const cl of r.calls) {
       const out = ctx ? await runTool(cl.name, cl.input, ctx) : { ok: false as const, error: "Not signed in." };
       keep(out);
+      trace.push({ name: cl.name, args: cl.input, ok: (out as { ok: boolean }).ok, summary: ((out as { summary?: string; error?: string }).summary ?? (out as { error?: string }).error ?? "").slice(0, 200) });
       results.push({ type: "tool_result", tool_use_id: cl.id, content: JSON.stringify(out).slice(0, 6000) });
     }
     turns.push({ role: "user", content: results });
   }
   const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: "claude-sonnet-5-5", sample: false };
-  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", items: items.length ? items.slice(0, 12) : undefined, ...base3 };
+  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base3 };
 }
 
 // ---- helpers ----
