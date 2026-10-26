@@ -12,18 +12,20 @@ const btn = "min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50"
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-based; handles February
 
-const ROW = 40;              // px per row
-const SEEN = 5;              // rows visible
+const ROW = 44;              // px per row
+const SEEN = 3;              // rows the window is tall: the chosen one, with a ghost either side
 const PAD = ((SEEN - 1) / 2) * ROW;   // blank space top and bottom, so the first and last row can reach the middle
+// Only the middle line is fully painted; the rows either side fade out, so the window reads as one line.
+const FADE = "linear-gradient(to bottom, transparent 0%, #000 32%, #000 68%, transparent 100%)";
 
-// One wheel. The row sitting under the band in the middle is the chosen one: scroll the column and it
-// changes when the scrolling settles. Rows are real buttons as well, so a tap or a keyboard still works.
+// One wheel. The row sitting on the middle line is the chosen one: scroll the column and it changes when
+// the scrolling settles. Rows are real buttons as well, so a tap or a keyboard still works.
 function Wheel({ label, items, value, onChange }: { label: string; items: { v: string; t: string }[]; value: string; onChange: (v: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const i = Math.max(0, items.findIndex((x) => x.v === value));
 
-  // Put the chosen row under the band. Nothing is written when it is already there, so settling cannot loop.
+  // Put the chosen row on the line. Nothing is written when it is already there, so settling cannot loop.
   useEffect(() => {
     const el = box.current; if (!el) return;
     const want = i * ROW;
@@ -39,24 +41,24 @@ function Wheel({ label, items, value, onChange }: { label: string; items: { v: s
       const n = Math.min(items.length - 1, Math.max(0, Math.round(el.scrollTop / ROW)));
       const v = items[n]?.v;
       if (v && v !== value) onChange(v);
-    }, 110);
+    }, 100);
   };
 
   return (
     <div className="flex-1 min-w-0">
       <div className="text-[11px] font-semibold text-muted text-center mb-1">{label}</div>
       <div className="relative">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 z-10 rounded-md border-y border-accent bg-accent/10" style={{ top: PAD, height: ROW }} />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 rounded-lg bg-soft" style={{ top: PAD, height: ROW }} />
         <div ref={box} onScroll={onScroll} role="listbox" aria-label={label} tabIndex={0}
-          className="overflow-y-auto rounded-xl border border-line"
-          style={{ height: SEEN * ROW, scrollSnapType: "y mandatory", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", scrollbarWidth: "none" }}>
+          className="relative overflow-y-auto"
+          style={{ height: SEEN * ROW, scrollSnapType: "y mandatory", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", scrollbarWidth: "none", maskImage: FADE, WebkitMaskImage: FADE }}>
           <div style={{ height: PAD }} aria-hidden="true" />
           {items.map((it) => {
             const on = it.v === value;
             return (
               <button key={it.v} type="button" role="option" aria-selected={on} onClick={() => onChange(it.v)}
-                style={{ height: ROW, scrollSnapAlign: "center" }}
-                className={`block w-full text-center text-sm leading-[40px] ${on ? "font-bold" : "text-muted"}`}>
+                style={{ height: ROW, scrollSnapAlign: "center", lineHeight: `${ROW}px` }}
+                className={`block w-full text-center tabular-nums ${on ? "text-[17px] font-semibold" : "text-[15px] text-muted"}`}>
                 {it.t}
               </button>
             );
