@@ -43,7 +43,7 @@ const row = (t: Tx) => ({ id: t.id, name: `${t.merchant} ${money(t.amount)}`, da
 export const moneyTools: Tool[] = [
   {
     name: "money.spend", title: "Spending total", kind: "read", tier: 1,
-    description: "How much was spent: in a date range (default this month), optionally in one category or at one vendor. Returns the total, the count, and a breakdown by category. Transfers between own accounts are not counted.",
+    description: "How much was spent: in a date range (default this month; default the last 12 months when a vendor is given), optionally in one category or at one vendor. Returns the total, the count, and a breakdown by category. Transfers between own accounts are not counted.",
     input: {
       from: { type: "date", describe: "Start of the period; default the 1st of this month", required: false },
       to: { type: "date", describe: "End of the period; default today", required: false },
@@ -52,7 +52,10 @@ export const moneyTools: Tool[] = [
     },
     async run(a, c) {
       const d = thisMonth(c.today);
-      const from = str(a.from) || d.from, to = str(a.to) || d.to, cat = str(a.category), ws = words(str(a.vendor));
+      const ws = words(str(a.vendor));
+      // "This month" is the default for a bare "how much have we spent"; a vendor question with no period
+      // means "ever, within reason", so it looks back a year.
+      const from = str(a.from) || (ws.length ? new Date(Date.parse(c.today) - 365 * 86_400_000).toISOString().slice(0, 10) : d.from), to = str(a.to) || d.to, cat = str(a.category);
       const rows = (await ledger(c, from, to)).filter(isSpend).filter((t) => (!cat || t.category === cat) && (!ws.length || matches(ws, t.merchant)));
       const total = rows.reduce((s, t) => s + t.amount, 0);
       const by = new Map<string, number>();
@@ -81,7 +84,11 @@ export const moneyTools: Tool[] = [
       const ws = words(str(a.text)); const amt = a.amount === undefined ? NaN : num(a.amount);
       if (!ws.length && !Number.isFinite(amt) && !str(a.from)) return { ok: false, error: "Say a vendor, an amount or a date range." };
       const from = str(a.from) || new Date(Date.parse(c.today) - 90 * 86_400_000).toISOString().slice(0, 10);
-      const rows = (await ledger(c, from, str(a.to))).filter((t) => (!ws.length || matches(ws, t.merchant)) && (!Number.isFinite(amt) || Math.abs(Math.abs(t.amount) - Math.abs(amt)) < 0.005));
+      // "$118" means the dollars; "$118.39" means the cents too. A whole-dollar ask that only matched to the
+      // cent made the loop ask the person for cents they never saw.
+      const whole = Number.isFinite(amt) && Math.abs(amt - Math.round(amt)) < 0.005;
+      const amtOk = (x: number) => !Number.isFinite(amt) || (whole ? Math.floor(Math.abs(x)) === Math.abs(Math.round(amt)) : Math.abs(Math.abs(x) - Math.abs(amt)) < 0.005);
+      const rows = (await ledger(c, from, str(a.to))).filter((t) => (!ws.length || matches(ws, t.merchant)) && amtOk(t.amount));
       const want = Number.isFinite(num(a.limit)) && num(a.limit) > 0 ? Math.min(num(a.limit), 20) : 20;
       const shown = rows.slice(0, want).map(row);
       return { ok: true, summary: rows.length === 0 ? `No charge matches that since ${from}.` : `${rows.length} charge${rows.length === 1 ? "" : "s"} match${rows.length === 1 ? "es" : ""}${rows.length > want ? `; showing the newest ${want}` : ""}. The person sees these as rows; do not repeat them.`, data: shown, href: shown.length === 1 ? shown[0].href : "/money/receipts?view=history" };
