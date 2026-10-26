@@ -9,6 +9,13 @@ import { ReportIssueSheet } from "@/components/ReportIssue";
 export function QuickBar() {
   const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false); const [away, setAway] = useState(false);
   useEffect(() => { setPlus(false); setAway(false); }, [path]);
+  // Escape closes the menu too, for a keyboard; the transparent catcher below handles a tap outside it.
+  useEffect(() => {
+    if (!plus) return;
+    const on = (e: KeyboardEvent) => { if (e.key === "Escape") setPlus(false); };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [plus]);
   // Slides out of the way when you scroll down (so it never covers a button); a little scroll up, or the top of the page, brings it back.
   useEffect(() => {
     let last = window.scrollY;
@@ -22,6 +29,7 @@ export function QuickBar() {
   return (
     <>
     <ReportIssueSheet open={report} onClose={() => setReport(false)} />
+    {plus && <div aria-hidden="true" onClick={() => setPlus(false)} className="fixed inset-0 z-20" />}
     <div className={`fixed left-0 right-0 bottom-[calc(var(--bar-bottom)+12px)] pointer-events-none z-20 transition-transform duration-200 ${away && !plus ? "translate-y-24" : ""}`}>
       <div className="max-w-md mx-auto px-5 flex justify-end pointer-events-auto">
         <div className="relative">
