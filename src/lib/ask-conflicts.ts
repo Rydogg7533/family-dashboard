@@ -1,7 +1,7 @@
 import "server-only";
 // Conflict check and free windows for Ask (D72). Pure arithmetic on what Google returned; the model is not involved.
 // Busy = timed events on that day across every calendar the app can see. All-day events (birthdays, trips) do not block.
-import { listCalendars, listEvents, type GEvent } from "@/lib/google-calendar";
+import { listEvents, type GEvent } from "@/lib/google-calendar";
 
 export const DAY_START = 8 * 60, DAY_END = 18 * 60, STEP = 30;
 export const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
@@ -27,7 +27,7 @@ export function freeSlots(busy: Span[], len: number, near: number, max = 3): { s
 }
 
 export async function checkDay(date: string, start: string, end: string) {
-  const evs = await listEvents(date, date, await listCalendars());
+  const evs = await listEvents(date, date);
   const all = spans(evs, date), s = toMin(start), e = toMin(end);
   const conflicts = all.filter((b) => s < b.e && b.s < e);
   return { all, conflicts, len: e - s, near: s };

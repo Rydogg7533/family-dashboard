@@ -1,4 +1,5 @@
 import "server-only";
+import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 // Google Calendar, direct from the app (D72): Google is the only place events live. The app reads live and writes back with a
 // calendar-only token (GOOGLE_CAL_* in the Vercel settings, made by `node scripts/google-auth.mjs --purpose calendar`).
 // Nothing here is cached beyond the short access token; every page load asks Google, so what you see is what Google has.
@@ -89,9 +90,42 @@ export async function listCalendars(): Promise<GCal[]> {
   return (j.items || []).filter((c) => !c.hidden).map((c) => ({ id: c.id, name: c.summaryOverride || c.summary, color: c.backgroundColor || null, primary: !!c.primary, canWrite: ["owner", "writer"].includes(c.accessRole || "") }))
     .sort((a, b) => Number(b.primary) - Number(a.primary) || a.name.localeCompare(b.name));
 }
+export type CalRole = "show" | "suggestions" | "default";
+export type GCalChoice = GCal & { shown: boolean; role: CalRole; isNew: boolean };
+
+// Every calendar on the account with this person's choice attached (D73). A person's first run seeds
+// every calendar as shown, so nothing disappears the day this ships; after that a calendar with no row
+// is one Google added later, and it stays hidden until it is ticked.
+export async function calendarsWithChoices(): Promise<GCalChoice[]> {
+  const all = await listCalendars();
+  const open = (c: GCal): GCalChoice => ({ ...c, shown: true, role: c.primary ? "default" : "show", isNew: false });
+  if (!hasSupabaseEnv()) return all.map(open);
+  try {
+    const sb = await createClient();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return all.map(open);
+    const account = googleCalAccount();
+    const { data } = await sb.from("calendar_choices").select("calendar_id, shown, role").eq("person", user.id).eq("account", account);
+    const rows = data ?? [];
+    if (!rows.length) {
+      await sb.from("calendar_choices").upsert(all.map((c) => ({ person: user.id, account, calendar_id: c.id, shown: true, role: c.primary ? "default" : "show", name: c.name, color: c.color })),
+        { onConflict: "person,account,calendar_id", ignoreDuplicates: true }).then(() => {}, () => {});
+      return all.map(open);
+    }
+    const by = new Map(rows.map((r) => [String(r.calendar_id), r as { shown: boolean; role: CalRole }]));
+    return all.map((c) => { const r = by.get(c.id); return { ...c, shown: r ? !!r.shown : false, role: r?.role ?? "show", isNew: !r }; });
+  } catch { return all.map(open); }
+}
+
+// The calendars every reader uses. Untick one and it is gone from the calendar, Today, sitter detection,
+// place suggestions and Ask at once. Untick them all and the app shows nothing, which is the honest answer.
+export async function shownCalendars(): Promise<GCal[]> {
+  return (await calendarsWithChoices()).filter((c) => c.shown);
+}
+
 // Every event (single instances, repeats expanded) between two household-zone dates, inclusive, across the chosen calendars.
 export async function listEvents(fromDate: string, toDate: string, calendars?: GCal[]): Promise<GEvent[]> {
-  const cals = calendars ?? (await listCalendars());
+  const cals = calendars ?? (await shownCalendars());
   const timeMin = localToIso(fromDate, "00:00"), timeMax = localToIso(toDate, "23:59");
   const all = await Promise.all(cals.map(async (cal) => {
     const out: GEvent[] = []; let pageToken = "";

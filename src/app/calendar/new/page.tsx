@@ -1,6 +1,6 @@
 import { H1, Card } from "@/components/ui";
 import { EventForm } from "@/components/EventForm";
-import { hasGoogleCal, listCalendars, googleCalAccount } from "@/lib/google-calendar";
+import { hasGoogleCal, shownCalendars, googleCalAccount } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export default async function NewEvent({ searchParams }: PageProps<"/calendar/ne
   const s = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
   if (!hasGoogleCal()) return <><H1>New event</H1><Card>Google Calendar is not connected to the app yet. Run the calendar sign-in on the Mac mini and add the GOOGLE_CAL settings to Vercel.</Card></>;
   let calendars;
-  try { calendars = await listCalendars(); }
+  try { calendars = await shownCalendars(); }
   catch (e) { return <><H1>New event</H1><Card>Google Calendar did not answer: {(e as Error).message.slice(0, 300)}</Card></>; }
   return (
     <>

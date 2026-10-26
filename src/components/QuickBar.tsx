@@ -4,7 +4,8 @@ import { isFrameless } from "@/lib/frameless";
 import { useEffect, useState } from "react";
 import { ReportIssueSheet } from "@/components/ReportIssue";
 
-// Floating "+" on every working page: capture, ask about this page, report a problem. Ask itself is the Ask tab (one tap).
+// Floating "+" on every working page: the handful of things done often from anywhere. Frequency earns a slot here
+// (a calendar event is daily; adding a device is twice a year and stays a button on its own page). Ask itself is the Ask tab (one tap).
 export function QuickBar() {
   const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false); const [away, setAway] = useState(false);
   useEffect(() => { setPlus(false); setAway(false); }, [path]);
@@ -26,9 +27,9 @@ export function QuickBar() {
         <div className="relative">
           {plus && (
             <div className="absolute bottom-12 right-0 card shadow-lg flex flex-col gap-1 w-48 text-sm font-semibold">
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/calendar/new")}>Add to calendar</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=photo")}>Take photo</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload photo or file</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=bulk")}>Bulk drop</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload photos or files</button>
               <div className="border-t border-line my-0.5" />
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/ask")}>Ask</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft text-amber" onClick={() => { setPlus(false); setReport(true); }}>Report a problem</button>
