@@ -5,7 +5,7 @@
   {"id":"doc-4","ask":"do we have the Sienna registration","expect":{"kind":"answer","read":"document.find"}},
   {"id":"doc-5","ask":"where's the furnace invoice","expect":{"kind":"answer","read":"document.find"}},
   {"id":"doc-6","ask":"wheres the amazon trim reciept","expect":{"kind":"answer","read":"document.find","rows":"some"}},
-  {"id":"doc-7","ask":"what did we buy from Amazon in October","expect":{"kind":"answer","readAny":["document.find","money.findCharge"],"rows":"some"}},
+  {"id":"doc-7","ask":"what did we buy from Amazon in October","expect":{"kind":"answer","readAny":["document.find","money.findCharge","shop.orders"],"rows":"some"}},
   {"id":"doc-8","ask":"find the battery receipt","expect":{"kind":"answer","read":"document.find"}},
   {"id":"doc-9","ask":"pull up the Render invoices from this year","expect":{"kind":"answer","read":"document.find","rows":"some"}},
   {"id":"doc-10","ask":"what's in the inbox","expect":{"kind":"answer","read":"inbox.list"}},

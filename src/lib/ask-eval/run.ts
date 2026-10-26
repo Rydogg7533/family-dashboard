@@ -26,7 +26,9 @@ const argsOk = (got: Record<string, unknown> | undefined, want: Record<string, u
 export function judge(c: Case, r: AskReply): Result {
   const e = c.expect; const why: string[] = [];
   const tool = r.tool?.name ?? null;
-  const reads = (r.trace ?? []).map((t) => t.name);
+  // The model calls tools by their API name (document_find); the registry and the cases use document.find.
+  const dot = (n: string) => n.replace("_", ".");
+  const reads = (r.trace ?? []).map((t) => dot(t.name));
   const rows = r.items?.length ?? 0;
   if (e.kind && r.kind !== e.kind) why.push(`kind ${r.kind}, wanted ${e.kind}`);
   if (e.kindAny && !e.kindAny.includes(r.kind)) why.push(`kind ${r.kind}, wanted one of ${e.kindAny.join("/")}`);
@@ -35,7 +37,7 @@ export function judge(c: Case, r: AskReply): Result {
   if (e.args && !argsOk(r.tool?.args, e.args)) why.push(`args ${JSON.stringify(r.tool?.args ?? {})} missing ${JSON.stringify(e.args)}`);
   if (e.read && !reads.includes(e.read)) why.push(`never read ${e.read} (read: ${reads.join(", ") || "nothing"})`);
   if (e.readAny && !e.readAny.some((x) => reads.includes(x))) why.push(`read none of ${e.readAny.join("/")} (read: ${reads.join(", ") || "nothing"})`);
-  if (e.readArgs) { const t = (r.trace ?? []).find((x) => x.name === (e.read ?? "")); if (!t || !argsOk(t.args, e.readArgs)) why.push(`read args ${JSON.stringify(t?.args ?? {})} missing ${JSON.stringify(e.readArgs)}`); }
+  if (e.readArgs) { const t = (r.trace ?? []).find((x) => dot(x.name) === (e.read ?? "")); if (!t || !argsOk(t.args, e.readArgs)) why.push(`read args ${JSON.stringify(t?.args ?? {})} missing ${JSON.stringify(e.readArgs)}`); }
   if (e.rows === "some" && rows === 0) why.push("no rows shown");
   if (e.rows === "none" && rows > 0) why.push(`${rows} rows shown, wanted none`);
   if (typeof e.rows === "number" && rows !== e.rows) why.push(`${rows} rows shown, wanted ${e.rows}`);
