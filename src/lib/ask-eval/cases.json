@@ -14,7 +14,7 @@
 
   {"id":"money-1","ask":"how much have we spent this month","expect":{"kind":"answer","read":"money.spend"}},
   {"id":"money-2","ask":"how much did we spend on groceries in September","expect":{"kind":"answer","read":"money.spend","readArgs":{"from":"2026-09-01"}}},
-  {"id":"money-3","ask":"what's the $118 Amazon charge","expect":{"kind":"answer","read":"money.findCharge"}},
+  {"id":"money-3","ask":"what's the $118 Amazon charge","expect":{"kind":"answer","read":"money.findCharge","readAny":["document.find"],"mentions":["118.39"]}},
   {"id":"money-4","ask":"which charges have no receipt","expect":{"kind":"answer","read":"money.noReceipt"}},
   {"id":"money-5","ask":"what subscriptions do we have","expect":{"kind":"answer","read":"money.recurring"}},
   {"id":"money-6","ask":"did we pay the water bill","expect":{"kind":"answer","readAny":["money.findCharge","money.recurring"]}},

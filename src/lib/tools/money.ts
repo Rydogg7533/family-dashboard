@@ -91,7 +91,7 @@ export const moneyTools: Tool[] = [
       const rows = (await ledger(c, from, str(a.to))).filter((t) => (!ws.length || matches(ws, t.merchant)) && amtOk(t.amount));
       const want = Number.isFinite(num(a.limit)) && num(a.limit) > 0 ? Math.min(num(a.limit), 20) : 20;
       const shown = rows.slice(0, want).map(row);
-      return { ok: true, summary: rows.length === 0 ? `No charge matches that since ${from}.` : `${rows.length} charge${rows.length === 1 ? "" : "s"} match${rows.length === 1 ? "es" : ""}${rows.length > want ? `; showing the newest ${want}` : ""}. The person sees these as rows; do not repeat them.`, data: shown, href: shown.length === 1 ? shown[0].href : "/money/receipts?view=history" };
+      return { ok: true, summary: rows.length === 0 ? `No charge on the ledger matches that since ${from}. The ledger only has what the bank feed has synced; check document.find for a receipt before telling the person there is nothing.` : `${rows.length} charge${rows.length === 1 ? "" : "s"} match${rows.length === 1 ? "es" : ""}${rows.length > want ? `; showing the newest ${want}` : ""}. The person sees these as rows; do not repeat them.`, data: shown, href: shown.length === 1 ? shown[0].href : "/money/receipts?view=history" };
     },
   },
   {
