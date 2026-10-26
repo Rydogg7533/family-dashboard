@@ -9,7 +9,7 @@ const SEV: { id: Sev; label: string; hint: string }[] = [
   { id: "blocks", label: "Blocks me", hint: "I can't do the thing" },
   { id: "annoying", label: "Annoying", hint: "Works, but badly" },
   { id: "cosmetic", label: "Cosmetic", hint: "Looks wrong" },
-  { id: "idea", label: "Idea", hint: "Something it should do" },
+  { id: "idea", label: "Feature request", hint: "Something it should do but does not" },
 ];
 
 // Works out what the report is about from the URL: /tasks/<id> → task, /records/<id> → record, etc.
@@ -72,7 +72,7 @@ export function ReportIssueSheet({ open, onClose, onSent }: { open: boolean; onC
       <button aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-md bg-bg rounded-t-2xl border-t border-line p-5 pb-[max(20px,env(safe-area-inset-bottom))] flex flex-col gap-3 shadow-xl">
         <div className="flex justify-between items-baseline">
-          <h2 id="ri-title" className="text-lg">Report a problem</h2>
+          <h2 id="ri-title" className="text-lg">Report a problem or request a feature</h2>
           <button className="text-sm text-muted min-h-9 px-2" onClick={onClose}>Close</button>
         </div>
         {done ? (
@@ -111,7 +111,7 @@ export function ReportIssueSheet({ open, onClose, onSent }: { open: boolean; onC
 }
 
 // A plain button that opens the sheet; used on pages like System health and Settings.
-export function ReportIssueButton({ label = "Report a problem", className = "" }: { label?: string; className?: string }) {
+export function ReportIssueButton({ label = "Report a problem or request a feature", className = "" }: { label?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>

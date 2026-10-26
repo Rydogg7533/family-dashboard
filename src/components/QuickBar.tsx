@@ -40,7 +40,7 @@ export function QuickBar() {
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload photos or files</button>
               <div className="border-t border-line my-0.5" />
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/ask")}>Ask</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft text-amber" onClick={() => { setPlus(false); setReport(true); }}>Report a problem</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft text-amber" onClick={() => { setPlus(false); setReport(true); }}>Report a problem or request a feature</button>
             </div>
           )}
           <button aria-label="Add" aria-expanded={plus} onClick={() => setPlus((v) => !v)} className="w-11 h-11 rounded-full bg-accent text-white text-2xl leading-none shadow-md">+</button>
