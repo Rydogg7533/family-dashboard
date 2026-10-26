@@ -60,6 +60,9 @@ export async function getRegister(): Promise<RegisterRow[]> {
 export async function getOpenTasks(): Promise<Task[]> {
   if (!hasSupabaseEnv()) return sampleTasks;
   const sb = await createClient();
+  // A snoozed task comes back by itself when its time passes. Nothing else wakes them: before this, a
+  // snoozed task stayed snoozed forever, which made Snooze a quiet way to lose a task.
+  await sb.from("tasks").update({ status: "open", snoozed_until: null, updated_at: new Date().toISOString() }).eq("status", "snoozed").lte("snoozed_until", new Date().toISOString()).then(() => {}, () => {});
   const { data } = await sb.from("tasks").select("*").eq("status", "open").order("due_at", { ascending: true, nullsFirst: false });
   return (data as Task[]) ?? [];
 }
