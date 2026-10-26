@@ -11,7 +11,7 @@ function DeviceRow({ d }: { d: Device }) {
     <div className="py-2 border-b border-line last:border-b-0">
       <div className="flex justify-between items-start gap-2">
         <div className="min-w-0">
-          <div className="font-semibold text-sm">{d.name} <span className="text-muted font-normal">· {d.make}</span></div>
+          <div className="font-semibold text-sm">{d.name}{d.make ? <span className="text-muted font-normal"> · {d.make}</span> : null}</div>
           <div className="text-xs text-muted">{d.kind} · {d.status}{d.serialLast4 ? ` · serial ····${d.serialLast4}` : ""}{d.subscription ? ` · ${d.subscription}` : ""}</div>
           {d.note && <div className="text-xs text-muted">{d.note}</div>}
         </div>
@@ -42,6 +42,7 @@ export default async function Devices({ searchParams }: PageProps<"/devices">) {
   return (
     <>
       <H1 right={`${devices.length} items`}>Devices and belongings</H1>
+      <Link href="/devices/new" className="min-h-11 rounded-xl bg-accent text-white font-semibold inline-flex items-center justify-center px-4 mb-2 w-full">Add a device</Link>
 
       <SectionTitle right={`${surfaced.length} due`}>Needs a decision</SectionTitle>
       {surfaced.length === 0 ? <Card className="text-muted text-sm">Nothing due. The full register is below.</Card> : (
@@ -92,7 +93,7 @@ export default async function Devices({ searchParams }: PageProps<"/devices">) {
         </Card>
       )}
 
-      <p className="text-xs text-muted mt-4">Serials and IMEIs: last digits only, with a pointer to the vault. Add with &quot;+&quot; (snap the serial plate or receipt). Retire or Sold moves an item to history; nothing is deleted. People: {people.map((p) => p.name).join(", ")} and the household.</p>
+      <p className="text-xs text-muted mt-4">Serials and IMEIs: last digits only, with a pointer to the vault. Retire or Sold moves an item to history; nothing is deleted. People: {people.map((p) => p.name).join(", ")} and the household.</p>
       <PageSources items={[{ label: "Find My", href: "#findmy" }, { label: "AppleCare", href: "#applecare" }, { label: "Carrier", href: "#carrier" }, { label: "1Password", href: "#1password" }, { label: "Receipts (Organized)", href: "#finder-devices" }]} />
     </>
   );

@@ -243,10 +243,19 @@ export async function getVehicles(): Promise<Vehicle[]> {
   } catch { return sampleVehicles; }
 }
 export async function getDevices(): Promise<Device[]> {
-  const rows = await table<Device>("devices", sampleDevices);
-  if (!hasSupabaseEnv()) return rows;
+  if (!hasSupabaseEnv()) return sampleDevices;
+  const rows = await table<Record<string, unknown>>("devices", []);
   const people = await getPeople(); // real rows carry the profile uuid (null = household); the pages use the short ids
-  return rows.map((d) => { const u = d.person as unknown as string | null; return { ...d, person: u ? people.find((p) => p.uuid === u)?.id ?? u : "household" } as Device; });
+  const str = (v: unknown) => (v == null || v === "" ? null : String(v));
+  return rows.map((r) => {
+    const u = r.person as string | null;
+    const open = r.open_in as { label?: string; href?: string } | null;
+    return {
+      id: String(r.id), person: (u ? people.find((p) => p.uuid === u)?.id ?? u : "household") as Device["person"], name: String(r.name), kind: String(r.kind), make: String(r.make ?? ""),
+      status: r.status as Device["status"], serialLast4: str(r.serial_last4), serialPointer: str(r.serial_pointer), warrantyEnd: str(r.warranty_end), planName: str(r.plan_name), planEnd: str(r.plan_end),
+      subscription: str(r.subscription), note: str(r.note), openIn: open?.label ? { label: open.label, href: open.href ?? "#" } : { label: "Receipts (Organized)", href: "#finder-devices" }, addedBy: String(r.added_by ?? ""),
+    } as Device;
+  }).sort((a, b) => a.name.localeCompare(b.name));
 }
 export async function getMedications(person?: PersonId): Promise<Medication[]> {
   const people = await getPeople();
