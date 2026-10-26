@@ -7,6 +7,7 @@ import { feedPropose, feedResolve, feedDeclineThread, threadKeyOf } from "@/lib/
 import { listCalendars } from "@/lib/google-calendar";
 import { saveEvent, moveEventTime } from "@/app/calendar/actions";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { reportIssue } from "@/app/issues/actions";
 
 export async function callModelAction(args: { job: Job; messages: Message[]; system?: string; feature?: string }): Promise<ModelResult> {
   return callModel(args);
@@ -86,4 +87,24 @@ export async function parkThreadInInbox(thread: Turn[]) {
 // is decided by the tool itself, so asking and tapping cannot end up with different rules.
 export async function confirmTool(name: string, args: Record<string, unknown>) {
   return runTool(name, args);
+}
+
+// A thumbs-down on an Ask reply files itself: the question, the answer, and every tool the loop called with
+// what came back. That is the whole trace the maintainer needs, so a miss never has to be described in chat.
+// Tool results are summaries (names, counts, dates), never document contents, so the issue row stays clean.
+export async function flagAskReply(question: string, reply: AskReply, note?: string): Promise<{ ok: boolean; error?: string }> {
+  const NL = String.fromCharCode(10);
+  const tools = (reply.trace ?? []).map((t) => `${t.name}(${JSON.stringify(t.args)}) → ${t.ok ? "ok" : "ERR"}: ${t.summary}`);
+  const card = reply.tool ? `Proposed write: ${reply.tool.name} ${JSON.stringify(reply.tool.args)}` : null;
+  const text = [
+    `Ask miss${note ? `: ${note.trim().slice(0, 200)}` : ""}`,
+    `Q: ${question.slice(0, 300)}`,
+    `A (${reply.kind}): ${reply.text.slice(0, 500)}`,
+    card,
+    reply.items?.length ? `Rows shown: ${reply.items.length}` : null,
+    tools.length ? `Tools:${NL}${tools.join(NL)}` : "Tools: none",
+    `Model: ${reply.model} · ${reply.costText}`,
+  ].filter(Boolean).join(NL + NL);
+  const r = await reportIssue({ text: text.slice(0, 2000), severity: "annoying", page: "/ask", item_kind: "ask", user_agent: "Ask thumbs-down" });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
 }

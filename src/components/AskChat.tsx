@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox } from "@/lib/ai-actions";
+import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
 import type { AskReply, Turn } from "@/lib/ask-engine";
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
+type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
 
 export function AskChat({ prefill, sample, who }: { prefill: string; sample: boolean; who: string }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -20,6 +20,15 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
   useEffect(() => { if (prefill && !sent.current) { sent.current = true; void send(prefill); } }, [prefill]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [bubbles, busy]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
+
+  // One tap files the miss with its trace; the maintainer reads the issue, fixes it, and the question joins the set.
+  async function flag(i: number) {
+    const b = bubbles[i]; if (!b?.reply) return;
+    const q = [...bubbles.slice(0, i)].reverse().find((x) => x.role === "user")?.text ?? "";
+    const r = await flagAskReply(q, b.reply);
+    if (r.ok) { setBubbles((cur) => cur.map((x, j) => (j === i ? { ...x, flagged: true } : x))); setToast({ text: "Filed for the maintainer with what Ask looked at." }); }
+    else setToast({ text: r.error ?? "Could not file it." });
+  }
 
   async function send(text: string) {
     const q = text.trim();
@@ -136,6 +145,11 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
             {b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
             <div className="text-[11px] text-muted px-1 flex flex-wrap gap-x-2">
               {b.reply?.source && <a href={b.reply.source.href} className="font-semibold text-accent">Open in {b.reply.source.label.replace(/^Open in /, "")}</a>}
+              {b.reply && b.reply.kind !== "deflect" && b.reply.kind !== "scope_check" && (
+                b.flagged
+                  ? <span className="text-green font-semibold">Flagged for the maintainer</span>
+                  : <button type="button" onClick={() => flag(i)} className="font-semibold text-muted underline-offset-2 hover:underline">Wrong answer?</button>
+              )}
               {b.reply?.kind !== "instruction" && <span>{who} asked · from Ask</span>}
               <span>{b.reply?.costText}{b.reply?.model && b.reply.model !== "none" ? ` · ${b.reply.model.replace("claude-", "").replace("-5-5", "")}` : ""}{b.reply?.sample ? " · sample" : ""}</span>
             </div>
