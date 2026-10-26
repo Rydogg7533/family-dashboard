@@ -7,8 +7,8 @@ const BATCH = 8;   // a Vercel function cannot sit through 80 vision reads; eigh
 // Re-read documents that were read before the reader returned line items (capture-read-v5 and earlier), so
 // they gain lines on the current category list. Idempotent: skips anything that already has lines, so asking
 // again continues where it left off and asking once more after the end does nothing. A re-read never touches
-// status, filed or resolution; on a resolved item it also clears missing and options afterwards, so no stale
-// question or old button is left on it (build rule: reset an item by clearing options, not just read state).
+// status, filed or resolution; on a resolved item it also empties options afterwards, so no old button is
+// left on it (build rule: reset an item by clearing options, not just read state).
 export const inboxTools: Tool[] = [
   {
     name: "inbox.reread", title: "Re-read old documents", kind: "write", tier: 2, ownerOnly: true,
@@ -28,7 +28,13 @@ export const inboxTools: Tool[] = [
           await c.sb.from("inbox_items").update({ read_at: null }).eq("id", r.id);
           const res = await readCapture(r.id);
           if (!res.ok || ("already" in res && res.already)) { failed++; continue; }
-          if (r.status !== "open") await c.sb.from("inbox_items").update({ missing: null, options: null }).eq("id", r.id);
+          // options is NOT NULL with default [] and the Inbox maps over it, so [] is "no buttons"; missing is NOT
+          // NULL too and is only text, inert on a resolved item, so it stays. The first version of this wrote
+          // null to both, violated the constraint, and the client swallowed the error: check it.
+          if (r.status !== "open") {
+            const { error } = await c.sb.from("inbox_items").update({ options: [] }).eq("id", r.id);
+            if (error) { failed++; continue; }
+          }
           done++;
         } catch { failed++; }
       }
