@@ -129,8 +129,15 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     }
     turns.push({ role: "user", content: results });
   }
-  const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: "claude-sonnet-5-5", sample: false };
-  return { kind: "answer", text: saidLast.trim() || "That took more looking up than I can do in one go. Ask me for one piece of it.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base3 };
+  // Out of rounds. One last call with no tools, so the person gets what was found ("no task about X is
+  // open") rather than a shrug. Before this, six searches that found nothing ended in "that took more
+  // looking up than I can do", which told them nothing.
+  turns.push({ role: "user", content: "Stop looking. Answer now, in two or three sentences, from what you have found so far. If you found nothing, say what you looked for and that it is not there." });
+  // The tools stay attached (the API requires them once tool blocks are in the thread); the instruction is what stops the looking.
+  const wrap = await callModelTools({ job: "chat", feature: "ask", messages: turns, system, tools: specs, maxTokens: 400 });
+  spend += wrap.cost;
+  const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: wrap.model, sample: wrap.sample };
+  return { kind: "answer", text: (wrap.text || saidLast).trim() || "I could not find that.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base3 };
 }
 
 // ---- helpers ----

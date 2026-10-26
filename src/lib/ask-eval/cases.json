@@ -33,8 +33,9 @@
   {"id":"task-9","ask":"give the furnace filter task to Melissa","expect":{"kind":"tool_confirm","tool":"task.assign","args":{"to":"melissa"}}},
   {"id":"task-10","ask":"I'll take the furnace filter task","expect":{"kind":"tool_confirm","tool":"task.take"}},
   {"id":"task-10b","ask":"I'll take the AAA task","expect":{"kindAny":["answer","tool_confirm"],"read":"task.find"}},
-  {"id":"task-11","ask":"done with the Wells Fargo one","expect":{"kind":"tool_confirm","tool":"task.done","read":"task.find"}},
-  {"id":"task-12","ask":"drop the Audrey messages task, we decided no","expect":{"kind":"tool_confirm","toolAny":["task.drop","task.done"]}},
+  {"id":"task-11","ask":"done with the Wells Fargo one","expect":{"kindAny":["answer","tool_confirm"],"read":"task.find"}},
+  {"id":"task-11b","ask":"done with the furnace filter","expect":{"kind":"tool_confirm","tool":"task.done","read":"task.find"}},
+  {"id":"task-12","ask":"drop the Audrey messages task, we decided no","expect":{"kind":"answer","noWrite":true,"read":"task.find","mentions":["Audrey"]}},
 
   {"id":"cal-1","ask":"what's Saturday look like","expect":{"kind":"answer","read":"calendar.find"}},
   {"id":"cal-2","ask":"is Melissa free Thursday afternoon","expect":{"kind":"answer","read":"calendar.find"}},
