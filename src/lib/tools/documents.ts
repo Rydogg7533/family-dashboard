@@ -27,12 +27,13 @@ const inRange = (d: string | null, from: string, to: string) => !d ? !from && !t
 export const documentTools: Tool[] = [
   {
     name: "document.find", title: "Find documents", kind: "read", tier: 1,
-    description: "Find receipts, bills, statements and records the household has filed, by vendor, words in the name, date range or category. Returns names, dates, amounts and where each one lives, never what is inside it. Use for 'do we have', 'when did we', 'find the ... receipt'.",
+    description: "Find receipts, bills, statements and records the household has filed, by vendor, words in the name, date range or category. Returns names, dates, amounts and where each one lives, never what is inside it. Use for 'do we have', 'when did we', 'find the ... receipt'. Only what this call returns is shown to the person, so narrow it (limit, dates, words) to exactly what they asked for.",
     input: {
       text: { type: "string", describe: "Vendor, item or words from the document's name, e.g. 'AAA', 'furnace', 'Amazon trim'", required: false },
       from: { type: "date", describe: "Earliest document date to include", required: false },
       to: { type: "date", describe: "Latest document date to include", required: false },
       category: { type: "enum", options: [...CATEGORY_IDS], describe: "Limit to one spending category", required: false },
+      limit: { type: "number", describe: "How many to return, newest first. Use 1 when the person asks for 'the latest', 'the most recent' or 'the' one thing; leave unset to see what exists", required: false },
     },
     async run(a, c) {
       const ws = words(str(a.text));
@@ -85,12 +86,13 @@ export const documentTools: Tool[] = [
       const inboxHrefs = new Set(hits.filter((h) => h.register === "inbox").map((h) => h.href));
       const once = hits.filter((h) => !(h.register === "receipt" && inboxHrefs.has(h.href)));
       once.sort((x, y) => (y.date ?? "").localeCompare(x.date ?? ""));
-      const shown = once.slice(0, LIMIT);
+      const want = Number.isFinite(Number(a.limit)) && Number(a.limit) > 0 ? Math.min(Number(a.limit), LIMIT) : LIMIT;
+      const shown = once.slice(0, want);
       const openable = shown.filter((h) => h.open).length;
       const what = [ws.length ? `"${str(a.text)}"` : "", cat ? `in ${cat.replace("_", " ")}` : "", from || to ? `${from || "…"} to ${to || "…"}` : ""].filter(Boolean).join(", ");
       return {
         ok: true,
-        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > LIMIT ? `; showing the newest ${LIMIT}` : ""}. ${openable} can be opened from here; the rest live in the Organized folder on the hub (see "where"). The person sees each one as a row with an Open link; do not repeat the list.`,
+        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > want ? `; showing the newest ${want} of them` : ""}. ${openable} can be opened from here; the rest live in the Organized folder on the hub (see "where"). The person sees each one as a row with an Open link; do not repeat the list.`,
         data: shown,
         href: shown.length === 1 ? shown[0].href : undefined,
       };

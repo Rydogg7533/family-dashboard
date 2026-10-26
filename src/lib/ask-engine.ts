@@ -78,7 +78,9 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
 - Before adding anything, search for it first: say so if something close already exists, rather than making a second one.
 - A tool that changes something is not run by you; the person sees what you chose and agrees to it. Say in one line what you are about to do.
 - If what they asked for has no tool, say plainly that you cannot do it yet and name the page where they can. Never say you have saved or changed something.
-- Short answers. Names, dates and links, never the contents of documents.`;
+- Short answers. Names, dates and links, never the contents of documents.
+- Give the person exactly what they asked for, not everything that matched. "The latest", "the most recent", "the" one thing means one: narrow the search (limit 1, a date range, more words) until one comes back. If several could be meant and the words do not settle it (which vehicle, which year, which of two vendors), ask one short question instead of listing them all; a list is for "what do we have".
+- The person sees the rows from your LAST search only, so finish with the search that returns just what they meant.`;
 
   const turns: ToolTurn[] = toMessages(thread) as ToolTurn[];
   let spend = cls.cost;
@@ -86,7 +88,7 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
   // Anything a read tool found that has somewhere to go is carried to the person as a row, not as prose:
   // the model's text says what was found, the rows are how they get to it. Without this the find was
   // honest but useless -- "AAA, Oct 11, $242.88" with no way to open it.
-  const items: AskItem[] = [];
+  let items: AskItem[] = [];
   const keep = (out: unknown) => {
     const data = (out as { ok?: boolean; data?: unknown })?.data;
     if (!Array.isArray(data)) return;
@@ -111,6 +113,9 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     }
 
     turns.push({ role: "assistant", content: r.blocks });
+    // Each round replaces the rows: when the model searches wide, then narrows to the one thing the person
+    // meant, only the narrow result reaches them. Otherwise "the latest AAA receipt" showed all four.
+    items = [];
     const results: Block[] = [];
     for (const cl of r.calls) {
       const out = ctx ? await runTool(cl.name, cl.input, ctx) : { ok: false as const, error: "Not signed in." };
