@@ -1,4 +1,6 @@
+import Link from "next/link";
 import type { Task } from "@/lib/data";
+import { taskDestination } from "@/lib/task-destination";
 import { TaskActions } from "./TaskActions";
 import { TaskWho } from "./TaskWho";
 
@@ -48,6 +50,7 @@ export function TaskRow({ task, me = null, names = {}, members = [] }: { task: T
   const chip = dueChip(task.due_at ? new Date(task.due_at) : null);
   const { text: summary, from } = splitSummary(task.summary);
   const others = members.filter((m) => m.id !== me);
+  const dest = taskDestination(task);
   const isFyi = !!me && task.audience !== "both" && !!task.person && task.person !== me && (task.fyi ?? []).includes(me);
   const addedBy = task.origin_kind === "person" && task.origin_ref ? names[task.origin_ref] : null;
   const source = from ?? (addedBy ? `${addedBy} added this` : ORIGIN[task.origin_kind] ?? task.origin_kind);
@@ -60,7 +63,13 @@ export function TaskRow({ task, me = null, names = {}, members = [] }: { task: T
     <div className="card flex flex-col gap-2.5">
       {l && <div className={`text-[11px] font-bold tracking-wide ${l.cls}`}>{l.text}</div>}
       <div className="flex gap-2.5 items-start">
-        <div className="font-semibold text-base leading-snug min-w-0 flex-1">{task.title}</div>
+        {/* The title is the link, never the whole card: the card holds Done, Snooze and the who button,
+            and a link wrapping buttons is invalid and makes taps ambiguous. */}
+        {dest
+          ? (dest.external
+              ? <a href={dest.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-base leading-snug min-w-0 flex-1 underline decoration-line underline-offset-2">{task.title}</a>
+              : <Link href={dest.href} className="font-semibold text-base leading-snug min-w-0 flex-1 underline decoration-line underline-offset-2">{task.title}</Link>)
+          : <div className="font-semibold text-base leading-snug min-w-0 flex-1">{task.title}</div>}
         {chip && <span className={`flex-none text-[11px] font-bold rounded-full px-2 py-0.5 whitespace-nowrap ${chip.late ? "bg-red-bg text-red" : "bg-soft text-muted"}`}>{chip.text}</span>}
       </div>
       {summary && <div className="text-sm text-muted leading-snug line-clamp-2">{summary}</div>}

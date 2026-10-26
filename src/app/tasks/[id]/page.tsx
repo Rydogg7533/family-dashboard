@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOpenTasks, ago } from "@/lib/data";
+import { taskDestination } from "@/lib/task-destination";
 import { getDraftForTask } from "@/lib/data-email";
 import { H1 } from "@/components/ui";
 import { getDisplayName } from "@/lib/data";
@@ -22,7 +23,7 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
   const cand = await getCandidateForTask(task.id);
   const draft = task.kind === "reply" ? await getDraftForTask(task.id) : null;
   const due = task.due_at ? new Date(task.due_at) : null;
-  const originLabel = task.origin_kind === "email" ? "Gmail" : task.origin_kind === "message" ? "Messages" : task.origin_kind === "receipt" ? "Money" : task.origin_kind === "calendar" ? "Calendar" : task.origin_ref === "/places" ? "Places" : "Source";
+  const dest = taskDestination(task);
 
   return (
     <>
@@ -34,7 +35,9 @@ export default async function TaskDetail({ params }: PageProps<"/tasks/[id]">) {
         <div className="text-xs text-muted">
           {draft ? `For ${draft.requested_by}` : task.origin_kind === "system" ? "System" : `For ${name || "you"}`} · from {task.origin_kind}{task.origin_kind === "email" ? ` (${draft?.account ?? `${name || "Ryan"}'s mailbox`})` : ""} · {ago(task.created_at)}
           {due && <span className={isPast(task.due_at!) ? " text-red font-semibold" : ""}> · due {due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>}
-          {" · "}<a href={task.origin_ref ?? "#"} className="font-semibold text-accent">Open in {originLabel}</a>
+          {dest && <>{" · "}{dest.external
+            ? <a href={dest.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent">Open {dest.label}</a>
+            : <Link href={dest.href} className="font-semibold text-accent">Open {dest.label}</Link>}</>}
         </div>
         <TaskActions id={task.id} kind={cand && cand.status === "asking" ? "snooze" : task.kind} />
       </div>
