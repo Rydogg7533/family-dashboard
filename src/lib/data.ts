@@ -2,7 +2,7 @@ import { createClient, getRequestUser, hasSupabaseEnv } from "@/lib/supabase/ser
 
 export type Status = { key: string; state: "ok" | "warn" | "error" | "unknown"; summary: string; detail: string | null; value_num: number | null; updated_at: string };
 export type RegisterRow = { id: string; source: string; kind: string | null; status: "DONE" | "RUNNING" | "TODO" | "WAIT" | "OUT"; landed_at: string | null; route: string | null; backup: string | null; last_verified: string | null; open_items: string | null; owner: string | null; sort_order: number };
-export type Task = { id: string; kind: "reply" | "do" | "decide" | "fyi"; title: string; summary: string | null; origin_kind: string; origin_ref: string | null; due_at: string | null; tier: number; status: string; created_at: string; person?: string | null; audience?: "one" | "both"; fyi?: string[]; done_by?: string | null };
+export type Task = { id: string; kind: "reply" | "do" | "decide" | "fyi"; title: string; summary: string | null; origin_kind: string; origin_ref: string | null; due_at: string | null; tier: number; status: string; created_at: string; person?: string | null; audience?: "one" | "both"; fyi?: string[]; done_by?: string | null; updated_at?: string | null };
 export type LogRow = { id: number; at: string; actor: string; action: string; subject: string; undoable: boolean };
 
 export const HEARTBEAT_MAX_HOURS = 26;
@@ -61,6 +61,16 @@ export async function getOpenTasks(): Promise<Task[]> {
   if (!hasSupabaseEnv()) return sampleTasks;
   const sb = await createClient();
   const { data } = await sb.from("tasks").select("*").eq("status", "open").order("due_at", { ascending: true, nullsFirst: false });
+  return (data as Task[]) ?? [];
+}
+
+// Done and dismissed, newest first. They are not gone. Most tasks are marked done BY HAND because the
+// app cannot watch the job happen -- nothing tells it the furnace filter was changed -- so Done is a
+// person's assertion, and an assertion can be wrong or mistapped. Everything here can be put back.
+export async function getFinishedTasks(limit = 60): Promise<Task[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("tasks").select("*").in("status", ["done", "dismissed"]).order("updated_at", { ascending: false }).limit(limit);
   return (data as Task[]) ?? [];
 }
 
