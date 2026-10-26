@@ -1,14 +1,14 @@
 // Correcting what the app read from a document (card redesign, decisions log (j) item 6): a person taps a field, types the right value, and the plan
 // is rebuilt WITHOUT reading the file again. The model's original value is kept beside the correction. Pure helpers (client-safe).
+import { CATEGORIES as ALL, MIXED, byId, normalizeCategory } from "./categories.ts";
 export const EDITABLE_FIELDS = ["vendor", "amount", "date", "item", "category"] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
 export const FIELD_LABEL: Record<EditableField, string> = { vendor: "Vendor", amount: "Amount", date: "Date", item: "What", category: "Category" };
+// The picker is the household's one list (./categories), so a person and the reader choose from the same
+// definitions. This file used to carry its own copy of eight -- the drift D100a exists to stop.
 // "mixed" is worked out from the line items, never picked by hand.
-export const CATEGORIES: { value: string; label: string }[] = [
-  { value: "vehicle", label: "Vehicle" }, { value: "home", label: "Home" }, { value: "appliance_electronics", label: "Appliance or electronics" },
-  { value: "health", label: "Health" }, { value: "grocery_food", label: "Groceries" }, { value: "dining", label: "Dining" }, { value: "fuel", label: "Fuel" }, { value: "other", label: "Other" },
-];
-export const categoryLabel = (v: unknown) => (v === "mixed" ? "Mixed" : CATEGORIES.find((c) => c.value === v)?.label ?? (typeof v === "string" && v ? v : ""));
+export const CATEGORIES: { value: string; label: string; means: string }[] = ALL.map((c) => ({ value: c.id, label: c.label, means: c.means }));
+export const categoryLabel = (v: unknown) => (v === MIXED ? "Mixed" : byId(normalizeCategory(v))?.label ?? (typeof v === "string" && v ? v : ""));
 
 export type Correction = { original: unknown; value: unknown; by: string; at: string };
 export type Corrections = Partial<Record<EditableField, Correction>>;

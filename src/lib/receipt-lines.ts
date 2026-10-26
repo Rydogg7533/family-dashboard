@@ -1,7 +1,9 @@
 // Receipt line items and mixed receipts. A receipt can hold several kinds of purchase; the receipt itself stays whole and
 // is filed once. Lines only decide where a LINK goes (for example one tire line to a vehicle's service history).
 // Pure helpers (client-safe, no I/O).
-export const LINE_CATEGORIES = ["vehicle", "home", "appliance_electronics", "health", "grocery_food", "dining", "fuel", "other"] as const;
+import { CATEGORY_IDS, MIXED, normalizeCategory } from "./categories.ts";
+// Line categories are the household's one list (src/lib/categories.ts). A line is never "mixed"; the receipt is.
+export const LINE_CATEGORIES: readonly string[] = CATEGORY_IDS;
 export type Line = { description: string; amount: number | null; category: string };
 
 // What the reader returned, made safe: at most 15 lines, plain text, known categories, finite amounts.
@@ -14,16 +16,17 @@ export function cleanLines(raw: unknown): Line[] {
     const description = typeof o.description === "string" ? o.description.replace(/\s+/g, " ").trim().slice(0, 80) : "";
     if (!description) continue;
     const amount = typeof o.amount === "number" && Number.isFinite(o.amount) && o.amount >= 0 ? Math.round(o.amount * 100) / 100 : null;
-    const c = typeof o.category === "string" ? o.category : "other";
-    out.push({ description, amount, category: (LINE_CATEGORIES as readonly string[]).includes(c) ? c : "other" });
+    const c = normalizeCategory(o.category);
+    out.push({ description, amount, category: c === MIXED ? "other" : c });
   }
   return out;
 }
 
 // "mixed" when two or more kinds each make up at least 15% of the lines (by amount when known, else by count).
 export function effectiveCategory(category: string | null | undefined, lines: Line[]): string {
-  const base = category && category !== "mixed" ? category : "other";
-  if (category === "mixed" && lines.length < 2) return "mixed";
+  const cat = normalizeCategory(category);
+  const base = cat !== MIXED ? cat : "other";
+  if (cat === MIXED && lines.length < 2) return MIXED;
   if (lines.length < 2) return base;
   const known = lines.every((l) => l.amount != null);
   const total = known ? lines.reduce((s, l) => s + (l.amount as number), 0) : lines.length;

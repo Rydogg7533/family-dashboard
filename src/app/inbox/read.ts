@@ -2,6 +2,7 @@
 // Reads a stored capture once, right after upload: what is it, who from, how much, what for, and a proposed filename.
 // Output is a proposal only: it rewrites the Inbox question so the person confirms with one tap; nothing is filed here.
 import { cleanLines, effectiveCategory, vehicleLines } from "@/lib/receipt-lines";
+import { categoryPromptBlock } from "@/lib/categories";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
 import { matchAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
@@ -22,8 +23,8 @@ Return ONLY a JSON object with these keys:
 kind: "receipt" | "bill" | "statement" | "form" | "warranty" | "service_report" | "other". A document showing payment made (paid, charged, card approved, balance $0, thank you for your payment) is a "receipt" even if titled invoice; "bill" only when money is still owed
 vendor: string|null; amount: number|null (total, dollars); date: "YYYY-MM-DD"|null
 item: short plain description of what was bought or done (e.g. "car battery replacement")|null
-category: one of "vehicle","home","appliance_electronics","health","grocery_food","dining","fuel","other","mixed"; use "mixed" when the receipt holds clearly different kinds of purchase (for example groceries and tires)
-lines: the line items you can read clearly, at most 15, each {"description": short text, "amount": number|null, "category": same list as category except mixed}; use [] for a single-purpose receipt, a bill or a document with no readable lines
+${categoryPromptBlock()}
+lines: the line items you can read clearly, at most 15, each {"description": short text, "amount": number|null, "category": one of the ids above, never mixed}; use [] for a single-purpose receipt, a bill or a document with no readable lines
 for_vehicle_hint: any vehicle named or implied (make/model/year/plate last digits)|null
 warranty_relevant: true if this is a repair, part, appliance, electronics, tool or home-system purchase, or it states a warranty/return/claim window
 card_last4: the last four digits of the card paid with if printed (e.g. "1004"), else null; card_brand: "Visa"|"Mastercard"|"Amex"|"Discover"|null
@@ -90,7 +91,7 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
   // The plan: ONE place the file lives (FILE), and every other place that only points at it (LINK).
   const plan: { t: "file" | "link"; text: string }[] = [];
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
-  let home0 = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
+  let home0 = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home_repairs" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
   let ruleNote = "";
   if (!vehicle && parsed.vendor) {
     const { data: rule } = await sb.from("filing_rules").select("folder_template,vendor_label").eq("vendor_key", vendorKey(parsed.vendor)).maybeSingle();
@@ -163,7 +164,7 @@ export async function readCapture(inboxId: string) {
   }
   let parsed: Record<string, unknown> | null = null;
   try {
-    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v5", validate: jsonObjectValid });
+    const r = await callModelVision({ job: "extract", system: SYSTEM, prompt: (files.length > 1 ? `These ${files.length} images are consecutive pages of ONE document. Return one JSON for the whole document.` : "Read this document and return the JSON.") + " Reply with the JSON object only: no prose, no markdown fences, keep every text field short (under 200 characters).", files, maxTokens: 2500, feature: "capture-read", subject: { kind: "inbox_item", id: inboxId }, promptVersion: "capture-read-v6", validate: jsonObjectValid });
     const m = r.text.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }

@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { cleanLines, effectiveCategory, vehicleLines, lineLabel } from "../src/lib/receipt-lines.ts";
 const c = cleanLines([{ description: "  Kirkland   tires ", amount: 240, category: "vehicle" }, { description: "Rotisserie chicken", amount: "5", category: "grocery_food" }, { description: "", amount: 1 }, null, { description: "Gum", amount: -2, category: "candy" }]);
-assert.deepEqual(c, [{ description: "Kirkland tires", amount: 240, category: "vehicle" }, { description: "Rotisserie chicken", amount: null, category: "grocery_food" }, { description: "Gum", amount: null, category: "other" }]);
+// A legacy id from an older read ("grocery_food") lands on the current one; an unknown one lands on "other".
+assert.deepEqual(c, [{ description: "Kirkland tires", amount: 240, category: "vehicle" }, { description: "Rotisserie chicken", amount: null, category: "groceries" }, { description: "Gum", amount: null, category: "other" }]);
 assert.deepEqual(cleanLines("x"), []); assert.equal(cleanLines(Array.from({ length: 40 }, (_, i) => ({ description: `l${i}` }))).length, 15);
 const basket = [{ description: "Tires", amount: 240, category: "vehicle" }, { description: "Groceries", amount: 160, category: "grocery_food" }, { description: "Gum", amount: 2, category: "other" }];
 assert.equal(effectiveCategory("grocery_food", basket), "mixed");
