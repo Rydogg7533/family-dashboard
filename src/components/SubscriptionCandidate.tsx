@@ -1,6 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { answerSubscription } from "@/app/money/subscriptions/actions";
 import type { Candidate, Cycle } from "@/lib/data-subscriptions";
 
@@ -11,9 +11,10 @@ export function SubscriptionCandidate({ c }: { c: Candidate }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const path = usePathname();
   const send = (answer: "yes" | "no") => start(async () => {
     const r = await answerSubscription(c.id, answer, answer === "yes" ? parseFloat(amount.replace(/[$,]/g, "")) : undefined, cycle);
-    if (r.ok) { setMsg(answer === "yes" ? "Added to the register." : "Noted. It will not be asked about again."); router.refresh(); } else setMsg(("error" in r && r.error) || "Could not save.");
+    if (r.ok) { setMsg(answer === "yes" ? "Added to the register." : "Noted. It will not be asked about again."); if (path.startsWith("/tasks/")) router.replace("/tasks"); else router.refresh(); } // answering closes the task, so its own page no longer exists else setMsg(("error" in r && r.error) || "Could not save.");
   });
   const field = "min-h-11 px-3 rounded-xl border border-line bg-transparent text-sm";
   return (
