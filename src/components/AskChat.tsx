@@ -118,7 +118,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   useEffect(() => { onPending?.(pending); }, [pending, onPending]);
 
   return (
-    <div className={embedded ? "flex flex-col" : "flex flex-col min-h-[calc(100vh-140px)]"}>
+    <div className={embedded ? "flex flex-col min-h-0 flex-1" : "flex flex-col min-h-[calc(100vh-140px)]"}>
       <div className="flex items-center justify-end mb-1">
         <h1 className="sr-only">Ask</h1>
         <div className="flex items-center gap-3">
@@ -128,7 +128,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
       </div>
       {!embedded && <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>}
 
-      <div className={embedded ? "flex flex-col gap-2 overflow-y-auto max-h-[50vh] pr-1" : "flex-1 flex flex-col gap-2"}>
+      <div className={embedded ? "flex flex-col gap-2 overflow-y-auto overscroll-contain min-h-0 flex-1 pr-1" : "flex-1 flex flex-col gap-2"}>
         <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link> · the last 24 hours are here; everything is kept in history</div>
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Try one of the suggestions below, or ask anything the family&apos;s records can answer: schedules, documents, money, people, vehicles, home, your own health.</div>
