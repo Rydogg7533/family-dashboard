@@ -55,10 +55,12 @@ assert.equal(verifySender({ address: "news@acme.com", http: "https://acme.com/u"
 assert.equal(verifySender({ address: "news@acme.com", http: "https://acme.us17.list-manage.com/u", authResults: "mx.google.com; dkim=pass header.d=acme.com" }).ok, true, "known mailing service is fine");
 assert.equal(verifySender({ address: "news@acme.com", http: "https://acme.com/u", authResults: "mx.google.com; dkim=fail header.i=@acme.com; spf=softfail smtp.mailfrom=evil.com" }).ok, false, "failed Gmail's checks");
 assert.equal(verifySender({ address: "news@acme.com", http: "https://acme.com/u", authResults: "mx.google.com; dkim=pass header.i=@evil.com; spf=pass smtp.mailfrom=evil.com" }).ok, false, "signed by someone else");
-const spoof = verifySender({ address: "alerts@yourbank.com", http: "https://yourbank-secure-login.xyz/unsub", authResults: "mx.google.com; dkim=pass header.d=yourbank.com; dmarc=pass" });
-assert.equal(spoof.ok, false, "unsubscribe link off the sender's domain is suspicious"); assert.ok(!/xyz|yourbank/.test(spoof.note), "note never names the address");
+const via = verifySender({ address: "alerts@venmo.com", http: "https://01.emailinboundprocessing.com/u/abc?t=secret", authResults: "mx.google.com; dkim=pass header.d=venmo.com; dmarc=pass" });
+assert.equal(via.ok, true, "an authenticated sender may route its unsubscribe through another service"); assert.ok(/emailinboundprocessing\.com/.test(via.note) && !/secret|abc/.test(via.note), "note names the service, never the address or token");
+const spoof = verifySender({ address: "alerts@yourbank.com", http: "https://yourbank-secure-login.xyz/unsub", authResults: "mx.google.com; dkim=fail header.d=yourbank.com; spf=fail smtp.mailfrom=evil.xyz; dmarc=fail" });
+assert.equal(spoof.ok, false, "a forged bank mail fails Gmail's checks"); assert.ok(!/xyz|yourbank/.test(spoof.note), "note never names the address");
 assert.equal(verifySender({ address: "news@acme.com", http: null, mailto: "mailto:unsub@acme.com", authResults: "mx.google.com; dmarc=pass" }).ok, true);
-assert.equal(verifySender({ address: "news@acme.com", http: null, mailto: "mailto:unsub@other.net", authResults: "mx.google.com; dmarc=pass" }).ok, false);
+assert.equal(verifySender({ address: "news@acme.com", http: null, mailto: "mailto:unsub@other.net", authResults: "mx.google.com; dmarc=pass" }).ok, true, "authenticated: a mailto on another domain is noted, not blocked");
 assert.equal(verifySender({ address: "news@acme.com", http: "https://acme.com/u", authResults: "" }).ok, false, "no auth results at all is not verified");
 assert.equal(decideCheck({ auth_ok: true }), null);
 assert.equal(decideCheck({ auth_ok: false, auth_note: "x", trusted_at: "2026-10-27T00:00:00Z" }), null, "the person's say-so overrides");

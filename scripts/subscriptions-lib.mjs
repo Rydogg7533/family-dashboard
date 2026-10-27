@@ -101,8 +101,8 @@ export function planWrites({ groups, existing, person, mailbox, now }) {
       // Also when the rules have changed since the label was stored (the label is derived data; nothing the person sets).
       const backfill = {};
       if ((ex.category ?? null) !== g.category && (ex.category != null || g.subjects.length || g.category !== "unclear")) Object.assign(backfill, topic);
-      // Rows found before the sender check existed get their verdict once (derived from the newest message's headers).
-      if (ex.auth_ok == null && g.authOk != null) Object.assign(backfill, { auth_ok: g.authOk, auth_note: g.authNote ?? null });
+      // The verdict is derived data (newest message's headers + the current rules): filled when missing, refreshed when the rules changed it.
+      if (g.authOk != null && (ex.auth_ok ?? null) !== g.authOk) Object.assign(backfill, { auth_ok: g.authOk, auth_note: g.authNote ?? null });
       if (Object.keys(backfill).length) updates.push({ id: ex.id, patch: { ...backfill, updated_at: now } });
       continue;
     }

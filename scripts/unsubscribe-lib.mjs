@@ -138,7 +138,7 @@ export function decideOutcome(result, { hasLink, tries = 0 }) {
 
 // ---------- is this really the sender? ----------
 // Anyone can put a List-Unsubscribe header on a mail. Before the agent talks to the address (or shows it as a link), the mail must
-// have passed Gmail's own sender checks and the unsubscribe host must belong to the sender. Rows that fail are shown to the person as
+// have passed Gmail's own sender checks (SPF/DKIM/DMARC aligned with the From domain). Rows that fail are shown to the person as
 // "Check first" and nothing is sent unless they say they know the sender.
 const TWO_LEVEL = /^(co|com|org|net|gov|edu|ac|ne|or)$/i;
 export function registrableDomain(host) {
@@ -170,14 +170,14 @@ export function verifySender({ address, http, mailto, authResults }) {
     const passed = a.dkim.length || a.spf === "pass";
     return { ok: false, note: passed ? "The mail was sent through another domain, not the sender's own, so the sender could not be confirmed." : "The mail did not pass Gmail's sender checks, so it may not be from who it says." };
   }
+  // Authenticated: the sender itself wrote the List-Unsubscribe header, so the address is its choice. Most legitimate senders route
+  // it through a mailing service on another domain (seen live: Venmo, Zillow, MetaMask, HUB). That is noted, not blocked: a block
+  // here would only ever catch services missing from a hand-kept list, while a forged mail fails the alignment check above.
   const trusted = new Set([fromDom, ...a.dkim.map(registrableDomain), ...KNOWN_LIST_HOSTS]);
-  if (http) {
-    let host; try { host = new URL(http).hostname; } catch { return { ok: false, note: "The unsubscribe address could not be read." }; }
-    if (!trusted.has(registrableDomain(host))) return { ok: false, note: "The unsubscribe link points at a site that is not the sender's own and not a known mailing service." };
-  } else if (mailto) {
-    let dom; try { dom = decodeURIComponent(new URL(mailto).pathname).split("@")[1]; } catch { return { ok: false, note: "The unsubscribe address could not be read." }; }
-    if (!trusted.has(registrableDomain(dom || ""))) return { ok: false, note: "The unsubscribe email address is not at the sender's own domain or a known mailing service." };
-  }
+  let via = null;
+  if (http) { try { via = registrableDomain(new URL(http).hostname); } catch { return { ok: false, note: "The unsubscribe address could not be read." }; } }
+  else if (mailto) { try { via = registrableDomain(decodeURIComponent(new URL(mailto).pathname).split("@")[1] || ""); } catch { return { ok: false, note: "The unsubscribe address could not be read." }; } }
+  if (via && !trusted.has(via)) return { ok: true, note: `Sender verified by Gmail. Its unsubscribe goes through another service (${via}).` };
   return { ok: true, note: "Sender verified by Gmail and the unsubscribe address belongs to it." };
 }
 
