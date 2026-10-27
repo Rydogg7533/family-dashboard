@@ -126,7 +126,9 @@ async function sha(path) {
 function catalogue() {
   const seen = [];
   let added = 0, changed = 0;
-  const tx = db.transaction(() => {
+  // node:sqlite has no transaction() helper (that is better-sqlite3); begin/commit by hand.
+  db.exec("begin");
+  try {
     for (const abs of walk(ROOT)) {
       const rel = relative(HOME, abs);
       const ext = extname(abs).toLowerCase();
@@ -143,8 +145,8 @@ function catalogue() {
       }
     }
     q.gone.run(Date.now(), JSON.stringify(seen));
-  });
-  tx();
+    db.exec("commit");
+  } catch (e) { db.exec("rollback"); throw e; }
   return { seen: seen.length, added, changed };
 }
 
@@ -183,12 +185,13 @@ async function readPending(limit) {
       const digest = await sha(abs);
       const { pages, source } = textOf(abs, ext);
       const conf = pages.length ? pages.reduce((s, p) => s + (p.confidence ?? 0), 0) / pages.length : 0;
-      const tx = db.transaction(() => {
+      db.exec("begin");
+      try {
         q.delPages.run(row.id);
         for (const p of pages) q.insPage.run(row.id, p.n, p.text ?? "", p.confidence ?? null);
         q.setRead.run(digest, Date.now(), source, pages.length, conf, null, pages[0]?.text ? dateFromText(pages[0].text) : null, row.id);
-      });
-      tx();
+        db.exec("commit");
+      } catch (e) { db.exec("rollback"); throw e; }
       read++;
       if (read % 25 === 0) console.log(`${new Date().toISOString()} read ${read} (${row.path})`);
     } catch (e) {
