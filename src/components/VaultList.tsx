@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveVaultPointer, removeVaultPointer } from "@/app/settings/vault/actions";
+import { saveVaultPointer, removeVaultPointer, generateVaultChecklist } from "@/app/settings/vault/actions";
 import type { VaultPointer } from "@/lib/vault";
 
 type Group = { id: string; label: string; blurb: string };
@@ -24,8 +24,28 @@ export function VaultList({ rows, me, groups }: { rows: VaultPointer[]; me: stri
   };
   const remove = (id: string) => start(async () => { const r = await removeVaultPointer(id); if (!r.ok) setMsg(r.error ?? "Could not remove."); else router.refresh(); });
 
+  const [onlyTodo, setOnlyTodo] = useState(false);
+  const [gen, setGen] = useState<string | null>(null);
+  const generate = () => start(async () => {
+    const r = await generateVaultChecklist();
+    setGen(r.ok ? (r.added ? `Added ${r.added} item${r.added === 1 ? "" : "s"} for your family. ${r.total} in all.` : `Nothing new to add: all ${r.total} items are already listed.`) : (r.error ?? "Could not generate."));
+    router.refresh();
+  });
+  const linked = rows.filter((r) => r.link).length;
+  const shownRows = onlyTodo ? rows.filter((r) => !r.link) : rows;
+
   return (
     <div className="flex flex-col gap-3">
+      <div className="card flex flex-col gap-2 text-sm">
+        <div className="flex items-baseline justify-between"><span className="font-semibold">Checklist</span><span className="text-xs text-muted">{linked} of {rows.length} linked</span></div>
+        <div className="h-1.5 rounded-full bg-soft overflow-hidden"><div className="h-full bg-accent" style={{ width: `${rows.length ? Math.round((linked / rows.length) * 100) : 0}%` }} /></div>
+        <div className="flex gap-2">
+          <button type="button" disabled={busy} onClick={generate} className="min-h-11 flex-1 rounded-xl border border-line font-semibold text-sm disabled:opacity-50">Generate my checklist</button>
+          <button type="button" onClick={() => setOnlyTodo((v) => !v)} className={`min-h-11 px-4 rounded-xl font-semibold text-sm ${onlyTodo ? "bg-accent text-white" : "border border-line"}`}>{onlyTodo ? "Showing to-do" : "Show to-do only"}</button>
+        </div>
+        {gen && <div className="text-xs text-muted">{gen}</div>}
+        <div className="text-[11px] text-muted">Generate makes one item for each person, vehicle and business in the household, from the master list; tap it again after a new baby, car or business and it adds only what is new.</div>
+      </div>
       <button type="button" onClick={() => setEditing({ group: "identity", household: false })} className="min-h-11 rounded-xl bg-accent text-white font-semibold text-sm">Add a pointer</button>
       {editing && (
         <div className="card flex flex-col gap-2 text-sm">
@@ -49,7 +69,8 @@ export function VaultList({ rows, me, groups }: { rows: VaultPointer[]; me: stri
         </div>
       )}
       {groups.map((g) => {
-        const list = rows.filter((r) => r.group === g.id);
+        const list = shownRows.filter((r) => r.group === g.id);
+        if (onlyTodo && list.length === 0) return null;
         return (
           <section key={g.id}>
             <div className="flex items-baseline justify-between mb-1"><h2 className="font-semibold text-sm">{g.label}</h2><span className="text-[11px] text-muted">{list.length}</span></div>
