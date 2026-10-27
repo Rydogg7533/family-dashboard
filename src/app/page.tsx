@@ -6,7 +6,8 @@ import { getDisplayName, getOpenTasks, getPeopleNames, getStatus, overall } from
 import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
 import { splitTasks } from "@/lib/tasks-view";
 import { getReview } from "@/lib/data-review";
-import { Banner, Card, H1 } from "@/components/ui";
+import { Banner, Card } from "@/components/ui";
+import { TodayGreeting } from "@/components/TodayGreeting";
 import { TaskRow } from "@/components/TaskRow";
 import SetupCard from "@/components/c/SetupCard";
 import GuidedCard from "@/components/c/GuidedCard";
@@ -61,7 +62,7 @@ export default async function Today() {
 
   return (
     <>
-      <H1 right={name}>{today}</H1>
+      <TodayGreeting date={today} name={name} tz={tz} />
       <Link href="/health" className="block mb-4"><Banner level={o.level} text={o.level === "ok" ? "System: all good" : `System: ${o.text}`} /></Link>
 
       {(reviewOpen > 0 || isSunday) && <Link href="/review" className="block mb-3"><Card className="flex justify-between items-center gap-3"><div><div className="font-semibold">Weekly review</div><div className="text-xs text-muted">{reviewOpen > 0 ? `${reviewOpen} thing${reviewOpen === 1 ? "" : "s"} to settle` : "Nothing waiting. Confirm the week."}</div></div><span className="text-accent font-semibold text-sm flex-none">Open ›</span></Card></Link>}

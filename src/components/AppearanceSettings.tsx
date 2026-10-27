@@ -63,8 +63,10 @@ export function AppearanceSettings() {
   const saveMine = () => { try { localStorage.setItem(MY_PRESET_KEY, JSON.stringify({ ...a, preset: undefined })); setHasMine(true); set({ preset: "My preset" }); show("Saved as my preset"); } catch {} };
   const resetAll = () => { const snapshot = { ...a }; reset(); show("Reset to Classic", () => set(snapshot)); };
 
-  const greeting = a.greetingName ? `Good morning, ${a.greetingName}` : "Good morning";
-  const firstLine = a.firstLine === "date" ? new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : a.firstLine === "weather" ? "62° and clear in Orem" : a.firstLine === "quote" ? "“Silence means healthy.”" : null;
+  const hr = new Date().getHours(), part = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+  const greeting = a.greetingName.trim() ? `${part}, ${a.greetingName.trim()}` : part;
+  // Matches TodayGreeting: weather and quote have no source yet, so they show the date rather than an invented line.
+  const firstLine = a.firstLine === "none" ? null : new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
     <>
@@ -150,7 +152,7 @@ export function AppearanceSettings() {
 
         <Field label="Greeting">
           <input value={a.greetingName} onChange={(e) => set({ greetingName: e.target.value })} onBlur={() => show("Greeting name saved")} placeholder="Name shown (blank for none)" className="w-full min-h-10 px-3 rounded-xl border border-line bg-bg text-sm mb-2" aria-label="Greeting name" />
-          <Seg value={a.firstLine} onChange={(v) => change({ firstLine: v }, "First line")} options={[{ v: "date", label: "Date" }, { v: "weather", label: "Weather" }, { v: "quote", label: "Quote" }, { v: "none", label: "None" }]} />
+          <Seg value={a.firstLine} onChange={(v) => change({ firstLine: v }, "First line")} options={[{ v: "date", label: "Date" }, { v: "none", label: "None" }]} />
         </Field>
 
         <Field label="Motion">
