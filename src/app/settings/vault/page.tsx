@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { VAULT_GROUPS, type VaultPointer } from "@/lib/vault";
+import { VAULT_GROUPS, type VaultPointer, type VaultOwner } from "@/lib/vault";
 import { VaultList } from "@/components/VaultList";
 
 export const dynamic = "force-dynamic";
@@ -12,19 +12,34 @@ export const dynamic = "force-dynamic";
 export default async function VaultSettings() {
   let rows: VaultPointer[] = [];
   let me = "";
+  let adults: VaultOwner[] = [];
+  let kids: VaultOwner[] = [];
+  let retired: string[] = [];
+  let isOwner = false;
   if (hasSupabaseEnv()) {
     const sb = await createClient();
     const { data: { user } } = await sb.auth.getUser();
     me = user?.id ?? "";
-    const { data } = await sb.from("vault_pointers").select("id, person, \"group\", label, item_type, link, expires_on, attached_kind, attached_id, note, updated_at").is("deleted_at", null).order("group").order("label");
+    const [{ data }, { data: a }, { data: k }, { data: ret }, { data: prof }] = await Promise.all([
+      sb.from("vault_pointers").select("id, person, \"group\", label, item_type, link, expires_on, attached_kind, attached_id, note, updated_at").is("deleted_at", null).order("group").order("label"),
+      sb.from("profiles").select("id, display_name").neq("role", "child").order("created_at"),
+      sb.from("children").select("id, display_name, archived_at").order("birth_year"),
+      sb.from("vault_retired_owners").select("owner_key").not("retired_at", "is", null),
+      sb.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    ]);
+    isOwner = prof?.role === "owner";
     rows = (data ?? []) as VaultPointer[];
+    adults = (a ?? []).map((p) => ({ id: String(p.id), name: String(p.display_name ?? "Member") }));
+    kids = (k ?? []).map((c) => ({ id: String(c.id), name: String(c.display_name ?? "Child") }));
+    // Retired by hand here, or an archived child elsewhere in the app: either way the section is retired.
+    retired = [...(ret ?? []).map((r) => String(r.owner_key)), ...(k ?? []).filter((c) => c.archived_at).map((c) => `k:${c.id}`)];
   }
   return (
     <>
       <H1 right={<Link href="/settings" className="font-semibold text-accent">Settings ›</Link>}>1Password</H1>
-      <p className="text-xs text-muted mb-3">The sensitive things live in 1Password. This page holds only each item&rsquo;s name and its private link, so Ask can say &ldquo;it&rsquo;s in 1Password&rdquo; and open it behind your own unlock. Never a number, never a scan. <span className="text-fg">Your items</span> are yours alone; <span className="text-fg">household items</span> are the Shared vault and show for both parents.</p>
+      <p className="text-xs text-muted mb-3">The sensitive things live in 1Password. This page holds only each item&rsquo;s name and its private link, so Ask can say &ldquo;it&rsquo;s in 1Password&rdquo; and open it behind your own unlock. Never a number, never a scan. Items are grouped by person, the same way your 1Password vaults are: each adult&rsquo;s own items are theirs alone, each child&rsquo;s items sit under that child, and <span className="text-fg">Shared</span> is the vault both parents hold.</p>
       <p className="text-xs text-muted mb-3">To get a link: in 1Password, open the item &rsaquo; the &ldquo;&hellip;&rdquo; menu &rsaquo; <span className="text-fg">Copy Private Link</span>. It opens only for someone signed in to your 1Password.</p>
-      <VaultList rows={rows} me={me} groups={VAULT_GROUPS.map((g) => ({ id: g.id, label: g.label, blurb: g.blurb }))} />
+      <VaultList rows={rows} me={me} adults={adults} kids={kids} retired={retired} isOwner={isOwner} groups={VAULT_GROUPS.map((g) => ({ id: g.id, label: g.label, blurb: g.blurb }))} />
     </>
   );
 }

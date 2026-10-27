@@ -44,6 +44,23 @@ export async function removeVaultPointer(id: string): Promise<{ ok: boolean; err
   return { ok: true };
 }
 
+// Retire or restore a family member's section. Nothing is deleted: the pointers stay, the section just moves
+// to "Retired". Owner-only (the table's policy enforces it too). You cannot retire yourself.
+export async function setVaultOwnerRetired(ownerKey: string, retired: boolean): Promise<{ ok: boolean; error?: string }> {
+  if (!/^(a|k):[0-9a-f-]{36}$/i.test(ownerKey)) return { ok: false, error: "Not a family member." };
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+  if (retired && ownerKey === `a:${user.id}`) return { ok: false, error: "You cannot retire yourself." };
+  const now = new Date().toISOString();
+  const { error } = await sb.from("vault_retired_owners").upsert({ owner_key: ownerKey, retired_at: retired ? now : null, retired_by: user.id, updated_at: now }, { onConflict: "owner_key" });
+  if (error) return { ok: false, error: /row-level security/i.test(error.message) ? "Only the household owner can retire or restore a member." : error.message };
+  await sb.from("activity_log").insert({ actor: user.email ?? "member", action: retired ? "vault_owner_retired" : "vault_owner_restored", subject: ownerKey, undoable: false }).then(() => {}, () => {});
+  revalidatePath("/settings/vault");
+  return { ok: true };
+}
+
 // Generate the household's checklist from the master template (D116). Reads who and what the household
 // has -- adults, children, vehicles, business entities -- expands every template item against it, and adds
 // only the pointers that do not already exist (matched by label, case-insensitive, among live rows). Safe
@@ -54,14 +71,19 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, added: 0, total: 0, error: "Sign in first." };
   const { VAULT_TEMPLATE } = await import("@/lib/vault-template");
-  const [{ data: adults }, { data: kids }, { data: vehicles }, { data: docs }, { data: household }, { data: existing }] = await Promise.all([
+  const [{ data: adults0 }, { data: kids0 }, { data: vehicles }, { data: docs }, { data: household }, { data: existing }, { data: retiredRows }] = await Promise.all([
     sb.from("profiles").select("id, display_name, role").neq("role", "child").order("created_at"),
     sb.from("children").select("id, display_name, birth_year, profile_id").is("archived_at", null).order("birth_year"),
     sb.from("vehicles").select("id, short"),
     sb.from("documents").select("subject").like("subject", "Business/%").is("gone_at", null).limit(2000),
     sb.from("household").select("head_id").limit(1).maybeSingle(),
     sb.from("vault_pointers").select("label").is("deleted_at", null),
+    sb.from("vault_retired_owners").select("owner_key").not("retired_at", "is", null),
   ]);
+  // A retired member gets no new items.
+  const retired = new Set((retiredRows ?? []).map((r) => String(r.owner_key)));
+  const adults = (adults0 ?? []).filter((a) => !retired.has(`a:${a.id}`));
+  const kids = (kids0 ?? []).filter((k) => !retired.has(`k:${k.id}`));
   // Match on the label with any parenthetical dropped, so "VINs (Tahoe, Sienna)" counts as "VINs" and a
   // hand-named row is never duplicated by the template's plainer name.
   const key = (l: string) => l.replace(/\s*\([^)]*\)/g, "").replace(/\s+/g, " ").trim().toLowerCase();

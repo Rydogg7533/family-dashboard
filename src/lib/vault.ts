@@ -23,5 +23,18 @@ export type VaultPointer = {
   expires_on: string | null; attached_kind: string | null; attached_id: string | null; note: string | null; updated_at: string;
 };
 
+export type VaultOwner = { id: string; name: string };
+
+// Which person's section a pointer belongs to on Settings › 1Password. Mirrors the 1Password vaults: one per
+// adult, one per child, one Shared. Adult items carry the adult's id in `person`. Child and household items
+// both have person = null, so a child's item is recognised by its label starting with the child's name
+// ("Audrey passport"); everything else null is Shared. No schema change.
+export function ownerKey(r: Pick<VaultPointer, "person" | "label">, adults: VaultOwner[], kids: VaultOwner[]): string {
+  if (r.person) return adults.some((a) => a.id === r.person) ? `a:${r.person}` : "other";
+  const label = r.label.toLowerCase();
+  const kid = kids.find((k) => label.startsWith(k.name.toLowerCase() + " "));
+  return kid ? `k:${kid.id}` : "shared";
+}
+
 // A 1Password private link, or the app scheme. Anything else is refused so the Open button can be trusted.
 export const isVaultLink = (s: string) => /^https:\/\/start\.1password\.com\/open\//i.test(s) || /^onepassword:\/\//i.test(s) || /^https:\/\/[a-z0-9-]+\.1password\.com\//i.test(s);
