@@ -25,7 +25,7 @@ export const MODULES: ModuleDef[] = [
   { id: "home", label: "Home and property", note: "Register under Info; surfaces when due", tier: "off", href: "/home-property" },
   { id: "trips", label: "Trips", note: "A trip card still appears when the calendar has one", tier: "off" },
   { id: "meals", label: "Meals and groceries", note: "Small section on Today", tier: "off" },
-  { id: "work", label: "Work area", note: "Business pages; off until a parent turns them on", tier: "off" },
+  { id: "work", label: "Work area", note: "Business pages; off until a parent turns them on", tier: "off", href: "/work" },
   { id: "voice", label: "Voice and the car", note: "Later; depends on the phone app route", tier: "off" },
   { id: "kids", label: "Children's own logins", note: "Created by a parent", tier: "off" },
   { id: "applehealth", label: "Apple Health connection", note: "Off per person", tier: "off" },

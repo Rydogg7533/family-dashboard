@@ -167,11 +167,20 @@ function textOf(abs, ext) {
 }
 
 // The date the document says, when the file name did not: the first full date on the first page.
+// A real calendar date or null. Text like "2014-16-20" (a serial, not a date) must never reach the cloud:
+// Postgres rejects the whole batch with a 400 and nothing new gets pushed until it is fixed.
+function validDate(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? s : null;
+}
 function dateFromText(t) {
   const m = t.match(/\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b/) || t.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2}|19\d{2})\b/);
   if (!m) return null;
-  if (m[0].includes("/")) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-  return `${m[1]}-${m[2]}-${m[3]}`;
+  if (m[0].includes("/")) return validDate(`${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`);
+  return validDate(`${m[1]}-${m[2]}-${m[3]}`);
 }
 
 async function readPending(limit) {
@@ -211,7 +220,7 @@ async function pushCloud() {
   for (;;) {
     const rows = q.toCloud.all();
     if (!rows.length) break;
-    const body = rows.map((r) => ({ hub_id: r.id, path: r.path, name: r.name, ext: r.ext, size: r.size, sha256: r.sha256, kind: r.kind, doc_date: r.doc_date, subject: r.subject, pages: r.pages, read_at: r.read_at ? new Date(r.read_at).toISOString() : null, read_source: r.read_source, confidence: r.confidence, gone_at: r.gone_at ? new Date(r.gone_at).toISOString() : null }));
+    const body = rows.map((r) => ({ hub_id: r.id, path: r.path, name: r.name, ext: r.ext, size: r.size, sha256: r.sha256, kind: r.kind, doc_date: validDate(r.doc_date), subject: r.subject, pages: r.pages, read_at: r.read_at ? new Date(r.read_at).toISOString() : null, read_source: r.read_source, confidence: r.confidence, gone_at: r.gone_at ? new Date(r.gone_at).toISOString() : null }));
     // The push is best-effort: a dropped connection is retried once, then left for the next run. The
     // index on the hub is the truth; the cloud copy of the metadata only ever catches up.
     let res = null;

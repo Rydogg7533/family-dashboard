@@ -58,6 +58,8 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/register", label: "Source register", group: "settings", icon: "list" },
   { href: "/kid", label: "Child's page", group: "settings", icon: "baby" },
   { href: "/tv", label: "Household screen", group: "settings", icon: "tv" },
+  // Work area (F12.7)
+  { href: "/work", label: "Work", group: "records", icon: "folder" },
 ];
 
 // The More link a path belongs to (longest matching href), or null.
