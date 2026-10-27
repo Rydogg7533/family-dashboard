@@ -28,7 +28,8 @@ export function VaultList({ rows, me, groups }: { rows: VaultPointer[]; me: stri
   const [gen, setGen] = useState<string | null>(null);
   const generate = () => start(async () => {
     const r = await generateVaultChecklist();
-    setGen(r.ok ? (r.added ? `Added ${r.added} item${r.added === 1 ? "" : "s"} for your family. ${r.total} in all.` : `Nothing new to add: all ${r.total} items are already listed.`) : (r.error ?? "Could not generate."));
+    const tail = r.others?.length ? ` ${r.others.join(" and ")}'s own items appear when ${r.others.length === 1 ? "she taps" : "they tap"} Generate on ${r.others.length === 1 ? "her" : "their"} own login.` : "";
+    setGen(r.ok ? (r.added ? `Added ${r.added} item${r.added === 1 ? "" : "s"}. ${r.total} on your list.${tail}` : `Nothing new to add: all ${r.total} items you can see are already listed.${tail}`) : (r.error ?? "Could not generate."));
     router.refresh();
   });
   const linked = rows.filter((r) => r.link).length;

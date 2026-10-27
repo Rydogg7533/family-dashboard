@@ -48,7 +48,7 @@ export async function removeVaultPointer(id: string): Promise<{ ok: boolean; err
 // has -- adults, children, vehicles, business entities -- expands every template item against it, and adds
 // only the pointers that do not already exist (matched by label, case-insensitive, among live rows). Safe
 // to tap again after a new baby, a new car or a new business: it adds what is new and nothing else.
-export async function generateVaultChecklist(): Promise<{ ok: boolean; added: number; total: number; error?: string }> {
+export async function generateVaultChecklist(): Promise<{ ok: boolean; added: number; total: number; others?: string[]; error?: string }> {
   if (!hasSupabaseEnv()) return { ok: false, added: 0, total: 0, error: "Not available in preview." };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -77,7 +77,10 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   };
   for (const t of VAULT_TEMPLATE) {
     const base = t.note ?? null;
-    if (t.for === "adult") for (const a of adults ?? []) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base);
+    // Another adult's personal items are theirs to create (the database refuses them under this login, and
+    // this login cannot see them to know whether they exist), so they are made when that adult taps
+    // Generate on their own login. Household items are made here for everyone.
+    if (t.for === "adult") { for (const a of adults ?? []) { if (a.id === user.id) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base); } }
     else if (t.for === "child") for (const k of kids ?? []) {
       const grown = typeof k.birth_year === "number" && year - k.birth_year >= 18;
       const name = String(k.display_name ?? "Child");
@@ -88,11 +91,12 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
     else if (t.for === "head") push(head, t.group, t.label, t.type, base);
     else push(null, t.group, t.label, t.type, base);
   }
+  const others = (adults ?? []).filter((a) => a.id !== user.id).map((a) => String(a.display_name ?? "Member"));
   if (rows.length) {
     const { error } = await sb.from("vault_pointers").insert(rows);
-    if (error) return { ok: false, added: 0, total: have.size, error: error.message };
+    if (error) return { ok: false, added: 0, total: have.size, others, error: error.message };
     await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "vault_checklist_generated", subject: `${rows.length} items added`, undoable: false }).then(() => {}, () => {});
   }
   revalidatePath("/settings/vault");
-  return { ok: true, added: rows.length, total: have.size };
+  return { ok: true, added: rows.length, total: have.size, others };
 }
