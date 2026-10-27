@@ -2,6 +2,7 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { FinishCard } from "@/components/FinishCard";
 import { getAccounts, getReceipts, money, shortDate } from "@/lib/data-money";
+import { getPaymentCards, knownPaymentLabels, paidWithLabel } from "@/lib/data-payment-cards";
 import { splitToFinish, type FinishReceipt } from "@/lib/receipts-to-finish";
 import { suggestCard, suggestionReason, type CardHistory } from "@/lib/paid-with";
 import { normalizeVendor } from "@/lib/receipt-match";
@@ -12,15 +13,15 @@ const SHOW_FIRST = 5;
 export default async function ReceiptsToFinish({ searchParams }: PageProps<"/money/receipts-to-finish">) {
   const sp = await searchParams;
   const all = sp.all === "1";
-  const [accounts, receipts] = await Promise.all([getAccounts(), getReceipts()]);
+  const [accounts, receipts, cards] = await Promise.all([getAccounts(), getReceipts(), getPaymentCards()]);
   // getReceipts reads every column; uploaded_by and created_at are present at runtime.
   const rich = receipts as (typeof receipts[number] & { uploaded_by?: string | null; created_at?: string })[];
   const { noCard, waiting, total } = splitToFinish(rich as FinishReceipt[], Date.now());
   const history: CardHistory[] = rich.filter((r) => !!r.card).map((r) => ({ card: r.card as string, person: r.uploaded_by ?? null, vendorKey: normalizeVendor(r.merchant), at: String(r.created_at ?? r.date) }));
-  const known = Array.from(new Set([...accounts.filter((a) => !a.retired_at && a.kind !== "checking" && a.kind !== "savings").map((a) => `${a.institution} ${a.last4}`), ...history.map((h) => h.card as string).filter((c) => c !== "Cash")]));
+  const known = Array.from(new Set([...knownPaymentLabels(cards, accounts), ...history.map((h) => h.card as string).filter((c) => c !== "Cash")]));
   const props = (r: (typeof noCard)[number]) => {
     const s = r.card ? null : suggestCard(history, normalizeVendor(r.merchant), r.uploaded_by ?? null);
-    return { id: r.id, merchant: r.merchant, amountLabel: money(r.amount), dateLabel: shortDate(r.date), ageDays: r.ageDays, card: r.card ?? null, unconfirmed: r.unconfirmed, overdue: r.overdue, suggestion: s ? { card: s.card, reason: suggestionReason(s, r.merchant) } : null, known };
+    return { id: r.id, merchant: r.merchant, amountLabel: money(r.amount), dateLabel: shortDate(r.date), ageDays: r.ageDays, card: r.card ?? null, paidWith: paidWithLabel(r, cards, accounts), unconfirmed: r.unconfirmed, overdue: r.overdue, suggestion: s ? { card: s.card, reason: suggestionReason(s, r.merchant) } : null, known };
   };
   const noCardShown = all ? noCard : noCard.slice(0, SHOW_FIRST);
   const waitingShown = all ? waiting : waiting.slice(0, SHOW_FIRST);

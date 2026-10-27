@@ -5,7 +5,7 @@ import { setReceiptCard } from "@/app/money/actions";
 
 export type FinishCardProps = {
   id: string; merchant: string; amountLabel: string; dateLabel: string; ageDays: number;
-  card: string | null; unconfirmed: boolean; overdue: boolean;
+  card: string | null; paidWith?: string | null; unconfirmed: boolean; overdue: boolean;   // paidWith: "card → account" chain for display (D-2026-10-27)
   suggestion: { card: string; reason: string } | null; known: string[];
 };
 
@@ -35,6 +35,7 @@ export function FinishCard(p: FinishCardProps) {
 
   const tone = p.overdue ? "bg-amber-bg border-amber" : "";
   const hasCard = !!p.card;
+  const shown = p.paidWith ?? p.card;
   const chips = Array.from(new Set([...p.known, "Cash"]));
   const btnPrimary = "min-h-13 rounded-xl bg-accent text-white font-semibold text-base disabled:opacity-50";
   const btnOutline = "min-h-13 rounded-xl border border-line font-semibold text-base";
@@ -45,7 +46,7 @@ export function FinishCard(p: FinishCardProps) {
 
       {hasCard ? (
         <div className={`text-sm ${p.overdue ? "text-amber" : "text-muted"}`}>
-          {p.overdue ? "No charge found after 14 days. Check the card." : p.unconfirmed ? <>{p.card} printed on the receipt. Not confirmed yet · {p.ageDays} {p.ageDays === 1 ? "day" : "days"}</> : <>Paid with {p.card} · waiting for the charge · {p.ageDays} {p.ageDays === 1 ? "day" : "days"}</>}
+          {p.overdue ? "No charge found after 14 days. Check the card." : p.unconfirmed ? <>{shown} printed on the receipt. Not confirmed yet · {p.ageDays} {p.ageDays === 1 ? "day" : "days"}</> : <>Paid with {shown} · waiting for the charge · {p.ageDays} {p.ageDays === 1 ? "day" : "days"}</>}
         </div>
       ) : (
         <div className="text-sm text-muted">{p.suggestion ? `Likely ${p.suggestion.card}. ${p.suggestion.reason}.` : "Filing is waiting for a card."}</div>

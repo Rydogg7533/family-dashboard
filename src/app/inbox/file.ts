@@ -101,8 +101,14 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
 
   // 1b. The card printed on the receipt is one vote for which card paid (medium confidence; a tap or a statement outranks it).
   if (filed.receipt_id && r.card_last4 && /^\d{4}$/.test(String(r.card_last4))) {
-    const rows = await sb.from("receipts").select("card").not("card", "is", null).limit(200);
-    const known = ((rows.data ?? []) as { card: string }[]).map((x) => x.card).find((c) => c.replace(/\D/g, "").slice(-4) === r.card_last4);
+    // A listed card wins (D-2026-10-27: card → account); else a label typed on an earlier receipt with the same last four.
+    const listed = await sb.from("payment_cards").select("network, form, label, last4, accounts(kind)").eq("last4", r.card_last4).is("retired_at", null).limit(2);
+    const lc = ((listed.data ?? []) as unknown) as { network: string | null; form: string; label: string | null; last4: string; accounts: { kind: string } | { kind: string }[] | null }[];
+    const kindOf = (k?: string) => k === "checking" || k === "savings" ? "debit" : k === "credit" || k === "business" ? "credit" : "wallet";
+    const acctKind = (a: { kind: string } | { kind: string }[] | null) => (Array.isArray(a) ? a[0]?.kind : a?.kind);
+    const fromListed = lc.length === 1 ? `${lc[0].network ? `${lc[0].network} ` : ""}${kindOf(acctKind(lc[0].accounts))}${lc[0].form === "virtual" ? ` (${lc[0].label || "virtual"})` : lc[0].label ? ` (${lc[0].label})` : ""} ••${lc[0].last4}` : null;
+    const rows = fromListed ? { data: [] } : await sb.from("receipts").select("card").not("card", "is", null).limit(200);
+    const known = fromListed ?? ((rows.data ?? []) as { card: string }[]).map((x) => x.card).find((c) => c.replace(/\D/g, "").slice(-4) === r.card_last4);
     await sb.rpc("record_card_vote", { p_receipt: filed.receipt_id as string, p_source: "receipt_text", p_card: known ?? `${r.card_brand && r.card_brand !== "null" ? r.card_brand : "Card"} ${r.card_last4}`, p_conf: "medium" });
   }
 

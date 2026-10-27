@@ -3,6 +3,7 @@ import { H1 } from "@/components/ui";
 import { Section, OpenIn, TxCard, ProofDot } from "@/components/money";
 import { ChargeResolver, ReceiptAsk, BulkDrop, CardPicker, SubjectPicker } from "@/components/ReceiptTools";
 import { getAccounts, getTransactions, getReceipts, getProofs, getSubjects, proofState, money, shortDate } from "@/lib/data-money";
+import { getPaymentCards, knownPaymentLabels, paidWithLabel } from "@/lib/data-payment-cards";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,13 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
   const itemId = typeof sp.item === "string" ? sp.item : null;
   const history = sp.view === "history";
   const allMatched = sp.view === "matched";
-  const [accounts, tx, receipts, proofs, subj] = await Promise.all([getAccounts(), getTransactions(), getReceipts(), getProofs(), getSubjects()]);
+  const [accounts, tx, receipts, proofs, subj, cards] = await Promise.all([getAccounts(), getTransactions(), getReceipts(), getProofs(), getSubjects(), getPaymentCards()]);
   const target = forId ? tx.find((t) => t.id === forId) : null;
   const asks = receipts.filter((r) => r.status === "needs_info");
   const queue = tx.filter((t) => proofState(t.id, proofs).state !== "green" && t.status !== "transfer");
   const expecting = receipts.filter((r) => r.status === "expecting_charge");
-  const knownCards = Array.from(new Set([...accounts.filter((a) => !a.retired_at && a.kind !== "checking" && a.kind !== "savings").map((a) => `${a.institution} ${a.last4}`), ...receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")]));
+  // Chips: listed cards first (card → account), then accounts with no card, then labels typed on earlier receipts.
+  const knownCards = Array.from(new Set([...knownPaymentLabels(cards, accounts), ...receipts.map((r) => r.card).filter((c): c is string => !!c && c !== "Cash")]));
   const matched = receipts.filter((r) => r.status === "matched");
   const resolved = matched.length, total = matched.length + asks.length + expecting.length + queue.length;
 
@@ -71,7 +73,7 @@ export default async function Receipts({ searchParams }: PageProps<"/money/recei
       <Section title="Expecting a charge" right={<Link href="/money/receipts-to-finish" className="font-semibold text-accent">Receipts to finish ›</Link>}>
         {expecting.length === 0 ? <div className="card text-muted text-sm">No receipts waiting for their charge.</div> : (
           <div className="flex flex-col gap-2">{expecting.map((r) => (
-            <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives{r.home_path ? <> · filed at {r.home_path.replace(/^.*\/Organized\//, "Organized/")}</> : " · filed by card and month once you say which card"}</div><CardPicker r={r} known={knownCards} /><SubjectPicker r={r} subjects={subj.subjects} linked={subj.links.filter((l) => l.receipt_id === r.id).map((l) => l.subject_id)} /></div>
+            <div key={r.id} className="card flex flex-col gap-1"><div className="flex justify-between text-sm"><span className="font-semibold">{r.merchant}</span><span>{money(r.amount)}</span></div><div className="text-xs text-muted">{r.captured_by} · {shortDate(r.date)} · matches when the statement line arrives{r.home_path ? <> · filed at {r.home_path.replace(/^.*\/Organized\//, "Organized/")}</> : " · filed by card and month once you say which card"}</div><CardPicker r={r} known={knownCards} paidWith={paidWithLabel(r, cards, accounts)} /><SubjectPicker r={r} subjects={subj.subjects} linked={subj.links.filter((l) => l.receipt_id === r.id).map((l) => l.subject_id)} /></div>
           ))}</div>
         )}
       </Section>

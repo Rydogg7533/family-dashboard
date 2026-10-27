@@ -20,6 +20,7 @@ export type Receipt = {
   id: string; merchant: string; amount: number; date: string; source: "email" | "camera" | "upload" | "bulk" | "organized";
   file_path: string | null; transaction_id: string | null; status: "matched" | "expecting_charge" | "unmatched" | "needs_info";
   question: string | null; thumbnail: string | null; entity: string | null; captured_by: string; card?: string | null; card_confidence?: string | null; card_conflict?: boolean; home_path?: string | null;
+  paid_with_card_id?: string | null; paid_with_account_id?: string | null;   // the card row that paid (D-2026-10-27); card text stays as the typed label
 };
 export type Reconciliation = {
   id: string; account_id: string; period: string; kind: "card" | "debit"; status: "open" | "done" | "exceptions";

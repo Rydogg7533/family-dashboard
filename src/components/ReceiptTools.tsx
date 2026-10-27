@@ -102,19 +102,21 @@ export function BulkDrop() {
 
 // "Which card?" for a filed receipt waiting on its charge. Cards you have used before are chips; a new one is typed once
 // (name and last four, e.g. Amex 1004). The filing agent files the single copy by card and month once this is set.
-export function CardPicker({ r, known }: { r: Receipt; known: string[] }) {
+// paidWith is the chain "card → account" resolved on the server (D-2026-10-27); it is shown until the person changes the card here.
+export function CardPicker({ r, known, paidWith }: { r: Receipt; known: string[]; paidWith?: string | null }) {
   const [card, setCard] = useState<string | null>(r.card ?? null);
+  const [shown, setShown] = useState<string | null>(paidWith ?? r.card ?? null);
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
-  const save = async (c: string) => { setBusy(true); const x = await setReceiptCard(r.id, c); setBusy(false); if (x.ok) { setCard(c.trim()); setConfirmed(true); setTyping(false); } };
+  const save = async (c: string) => { setBusy(true); const x = await setReceiptCard(r.id, c); setBusy(false); if (x.ok) { setCard(c.trim()); setShown(c.trim()); setConfirmed(true); setTyping(false); } };
   if (card && !typing) {
     const weak = r.card_confidence === "medium" && !confirmed;
     return (
       <div className="text-xs text-muted">
         {r.card_conflict && <span className="text-amber font-semibold">Sources disagree about the card. </span>}
-        {weak ? <>The receipt shows <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={async () => { const x = await setReceiptCard(r.id, card); if (x.ok) setConfirmed(true); }}>that&apos;s right</button> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></> : <>Paid with <span className="font-semibold text-fg">{card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></>}
+        {weak ? <>The receipt shows <span className="font-semibold text-fg">{shown ?? card}</span> · <button className="font-semibold text-accent" onClick={async () => { const x = await setReceiptCard(r.id, card); if (x.ok) setConfirmed(true); }}>that&apos;s right</button> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></> : <>Paid with <span className="font-semibold text-fg">{shown ?? card}</span> · <button className="font-semibold text-accent" onClick={() => setTyping(true)}>change</button></>}
       </div>
     );
   }
