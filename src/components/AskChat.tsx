@@ -5,9 +5,14 @@ import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, conf
 import type { AskReply, Turn } from "@/lib/ask-engine";
 import { FetchButton } from "@/components/FetchButton";
 
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+const WINDOW_TURNS = 12;
+// The on-screen thread and the model's context are the same window; everything before it is on /ask/history.
+const inWindow = (bs: Bubble[]) => { const cut = Date.now() - WINDOW_MS; return bs.filter((b) => (b.at ?? 0) >= cut); };
+
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
+type Bubble = { at?: number; role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
 
 export function AskChat({ prefill, sample, who }: { prefill: string; sample: boolean; who: string }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
@@ -17,6 +22,26 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
   const [spent, setSpent] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
+  const restored = useRef(false);
+
+  // The thread survives leaving the page (F4): it is kept in this browser, per person, until "New chat".
+  // Only this device sees it; nothing about the thread goes to the database from here.
+  const storeKey = `ask-thread:${who}`;
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storeKey);
+      if (raw) { const saved = JSON.parse(raw) as { bubbles?: Bubble[]; spent?: number }; if (Array.isArray(saved.bubbles)) setBubbles(inWindow(saved.bubbles)); if (typeof saved.spent === "number") setSpent(saved.spent); }
+    } catch { /* storage unavailable: the thread just lives for this visit */ }
+    restored.current = true;
+  }, [storeKey]);
+  useEffect(() => {
+    if (!restored.current) return;
+    try { window.localStorage.setItem(storeKey, JSON.stringify({ bubbles: inWindow(bubbles).slice(-60), spent })); } catch { /* ignore */ }
+  }, [bubbles, spent, storeKey]);
+  function newChat() {
+    setBubbles([]); setSpent(0); setInput("");
+    try { window.localStorage.removeItem(storeKey); } catch { /* ignore */ }
+  }
 
   useEffect(() => { if (prefill && !sent.current) { sent.current = true; void send(prefill); } }, [prefill]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [bubbles, busy]);
@@ -35,14 +60,16 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     const q = text.trim();
     if (!q || busy) return;
     setInput("");
-    const next: Bubble[] = [...bubbles, { role: "user", text: q }];
+    const next: Bubble[] = [...bubbles, { at: Date.now(), role: "user", text: q }];
     setBubbles(next);
     setBusy(true);
-    const thread: Turn[] = next.map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
+    // The model sees the recent window only (last 24 h, at most 12 turns); older exchanges are in history and
+    // reachable through the ask.history tool, so an answer costs the same on day 30 as on day 1.
+    const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
     const reply = await askAction(thread);
     setSpent((s) => s + reply.cost);
     if (reply.kind === "inbox") void parkThreadInInbox(thread);
-    const bubble: Bubble = { role: "assistant", text: reply.text, reply };
+    const bubble: Bubble = { at: Date.now(), role: "assistant", text: reply.text, reply };
     // Tier 1 saves at once with Undo; no card.
     if (reply.kind === "instruction" && reply.confirm?.tier === 1) {
       bubble.confirmed = "saved";
@@ -60,6 +87,8 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     const r = await confirmTool(t.name, t.args).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : "That did not work." }));
     setBusy(false);
     setBubbles((bs) => bs.map((x, j) => (j === i ? { ...x, toolResult: r.ok ? { ok: true, text: r.summary, href: r.href } : { ok: false, text: r.error } } : x)));
+    // A send hands off to the phone's own Messages (F26): the app opens it with the text ready; the person taps Send there.
+    if (r.ok && r.href?.startsWith("sms:")) window.location.assign(r.href);
   }
 
   async function confirm(i: number) {
@@ -87,11 +116,15 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     <div className="flex flex-col min-h-[calc(100vh-140px)]">
       <div className="flex items-center justify-end mb-1">
         <h1 className="sr-only">Ask</h1>
-        <div className="text-xs text-muted">{sample ? "sample mode · no API key" : `~$${spent.toFixed(3)} this session`}</div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-muted">{sample ? "sample mode · no API key" : `~$${spent.toFixed(3)} this session`}</div>
+          {bubbles.length > 0 && <button type="button" onClick={newChat} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">New chat</button>}
+        </div>
       </div>
       <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>
 
       <div className="flex-1 flex flex-col gap-2">
+        <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link> · the last 24 hours are here; everything is kept in history</div>
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Try one of the suggestions below, or ask anything the family&apos;s records can answer: schedules, documents, money, people, vehicles, home, your own health.</div>
         )}
@@ -104,7 +137,7 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
             <div className={`card text-sm whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
             {b.reply?.kind === "tool_confirm" && b.reply.tool && (
               b.toolResult
-                ? <div className={`text-xs font-semibold px-1 ${b.toolResult.ok ? "text-green" : "text-red"}`}>{b.toolResult.text}{b.toolResult.ok && b.toolResult.href ? <> · <Link href={b.toolResult.href} className="text-accent">Open</Link></> : null}</div>
+                ? <div className={`text-xs font-semibold px-1 ${b.toolResult.ok ? "text-green" : "text-red"}`}>{b.toolResult.text}{b.toolResult.ok && b.toolResult.href ? <> · {b.toolResult.href.startsWith("sms:") ? <a href={b.toolResult.href} className="text-accent">Open Messages</a> : <Link href={b.toolResult.href} className="text-accent">Open</Link>}</> : null}</div>
                 : (
                   <div className={`card flex flex-col gap-2 ${b.reply.tool.tier === 3 ? "border-amber" : ""}`}>
                     <div className="text-sm font-semibold">{b.reply.tool.title}</div>

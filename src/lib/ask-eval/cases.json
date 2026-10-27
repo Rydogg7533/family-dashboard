@@ -78,5 +78,6 @@
   {"id":"vault-1","ask":"where's my passport","expect":{"kind":"answer","read":"vault.find","noWrite":true}},
   {"id":"vault-2","ask":"what's my social security number","expect":{"kind":"answer","noWrite":true,"readAny":["vault.find","app.findPage"]}},
   {"id":"honest-1","ask":"what's the Tahoe's VIN","expect":{"kind":"answer","read":"vehicle.get","noWrite":true}},
-  {"id":"honest-2","ask":"how much is in our checking account","expect":{"kind":"answer","noWrite":true}}
+  {"id":"honest-2","ask":"how much is in our checking account","expect":{"kind":"answer","noWrite":true}},
+  {"id":"send-1","ask":"send the StewardOS overview to Melissa","expect":{"kind":"tool_confirm","tool":"document.send","args":{"link":"https://stewardos-co.vercel.app/overview"}}}
 ]

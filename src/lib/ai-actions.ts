@@ -13,7 +13,31 @@ export async function callModelAction(args: { job: Job; messages: Message[]; sys
   return callModel(args);
 }
 
-export async function askAction(thread: Turn[], assistantApp?: string): Promise<AskReply> {
+export async function askAction(thread: Turn[], assistantApp?: string, source = "ask"): Promise<AskReply> {
+  const reply = await askOnce(thread, assistantApp);
+  await recordAsk(thread, reply, source);
+  return reply;
+}
+
+// Every exchange is kept (migration 0074): the person's own rows, searchable on /ask/history and through the
+// ask.history tool. Tool entries are names and one-line summaries from the trace, never document contents.
+async function recordAsk(thread: Turn[], reply: AskReply, source: string) {
+  if (!hasSupabaseEnv()) return;
+  try {
+    const sb = await createClient();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    const q = [...thread].reverse().find((t) => t.role === "user")?.text ?? "";
+    await sb.from("ask_history").insert({
+      user_id: user.id, actor: user.email ?? "member", source: source.slice(0, 80), question: q.slice(0, 2000), answer: (reply.text ?? "").slice(0, 4000), kind: reply.kind,
+      tools: reply.trace?.length ? reply.trace.map((t) => ({ name: t.name, ok: t.ok, summary: t.summary.slice(0, 160) })) : null,
+      proposed: reply.tool ? `${reply.tool.name} ${JSON.stringify(reply.tool.args).slice(0, 400)}` : null,
+      cost: reply.cost, model: reply.model,
+    });
+  } catch { /* bookkeeping only; the answer still goes back */ }
+}
+
+async function askOnce(thread: Turn[], assistantApp?: string): Promise<AskReply> {
   try {
     const key = threadKeyOf(thread.find((t) => t.role === "user")?.text ?? "");
     const prev = [...thread].reverse().find((t) => t.role === "assistant");

@@ -2,6 +2,7 @@ import "server-only";
 import type { Tool } from "@/lib/tools/types";
 import { str } from "@/lib/tools/types";
 import { CATEGORY_IDS } from "@/lib/categories";
+import { CUSTOMER_MATERIALS_FOLDER, CUSTOMER_MATERIALS_KEY, checkCustomerMaterialsSetting, smsHref } from "@/lib/work-shared";
 
 // One find across the registers that hold documents: the Inbox (everything captured and read), Receipts, and
 // Records. It returns names, dates, amounts and where a thing lives -- never the contents of a document. The
@@ -13,7 +14,7 @@ import { CATEGORY_IDS } from "@/lib/categories";
 // open: a link that delivers the file itself (a short-lived signed link, members only), when the app holds
 // the file. fetch: a file whose only copy sits on the hub, with what a fetch request needs (D104); the row
 // shows a Fetch button and the hub delivers a copy within about a minute.
-type Hit = { register: "inbox" | "receipt" | "record" | "catalog"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
+type Hit = { register: "inbox" | "receipt" | "record" | "catalog"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null; share?: string | null };
 
 const LIMIT = 20;
 type CatalogRow = { hub_id: number; path: string; name: string; ext: string; kind: string | null; doc_date: string | null; subject: string | null; pages: number; read_source: string | null };
@@ -24,6 +25,38 @@ const words = (q: string) => norm(q).split(" ").filter((w) => w.length > 1);
 // documents that merely look similar and make the answer unreliable.
 const matches = (ws: string[], hay: string) => { const h = norm(hay); return ws.every((w) => h.includes(w)); };
 const inRange = (d: string | null, from: string, to: string) => !d ? !from && !to : (!from || d >= from) && (!to || d <= to);
+
+async function shareLinks(c: Parameters<Tool["run"]>[1]): Promise<Record<string, string>> {
+  const { data } = await c.sb.from("household_settings").select("value").eq("key", CUSTOMER_MATERIALS_KEY).maybeSingle();
+  return checkCustomerMaterialsSetting(data?.value)?.share_links ?? {};
+}
+
+// F26, first slice: send a document's public link by text. The app never sends the text: on the person's
+// tap the phone's own Messages opens with the recipient and the line filled in, and they send it there,
+// as themselves. Email waits on per-person Gmail sending; until then the tool says so instead of pretending.
+const sendTool: Tool = {
+  name: "document.send", title: "Send by text", kind: "write", tier: 2,
+  description: "Send a document's public link to someone by text message, from the asker's own phone. First find the document with document.find (only a row with a share link can be sent) and the recipient with contact.find (take a mobile number; if two people match, ask which). Then call this with the link, the recipient's name and number: the confirm card is the question. On the tap, Messages opens on the phone with the text ready and the person sends it. Email is not available yet; say so if asked.",
+  input: {
+    item: { type: "string", describe: "What is being sent, as the person would call it (e.g. 'StewardOS overview')", required: true },
+    link: { type: "string", describe: "The document's public https share link, from document.find's share field", required: true },
+    to: { type: "string", describe: "Recipient's name, from contact.find", required: true },
+    number: { type: "string", describe: "Recipient's mobile number, from contact.find", required: true },
+    text: { type: "string", describe: "A short line to send before the link, in the person's own words; leave unset for just the item name and link", required: false },
+  },
+  async run(a, c) {
+    const link = str(a.link), to = str(a.to), item = str(a.item);
+    const number = str(a.number).replace(/\s*\(.*\)\s*$/, "").replace(/[^\d+]/g, "");
+    if (!/^https:\/\/\S+$/.test(link)) return { ok: false, error: "That document has no public link to send. Copy its link on the Work page or fetch the file instead." };
+    if (number.replace(/\D/g, "").length < 10) return { ok: false, error: `No usable mobile number for ${to || "that contact"}.` };
+    if (!c.isOwner) {
+      const { data: prof } = await c.sb.from("profiles").select("role").eq("id", c.userId).maybeSingle();
+      if (prof?.role === "child") return { ok: false, error: "Sending is for a parent to do." };
+    }
+    const body = `${str(a.text) ? `${str(a.text)} ` : `${item}: `}${link}`;
+    return { ok: true, summary: `Handed to Messages for ${to}${number ? ` (${number})` : ""}: "${body}". ${c.email} sends it from their phone; nothing is sent by the app.`, href: smsHref(body).replace("sms:&", `sms:${number}&`) };
+  },
+};
 
 export const documentTools: Tool[] = [
   {
@@ -92,9 +125,14 @@ export const documentTools: Tool[] = [
         }
         // Files the registers already reported are not repeated from the catalog; everything else on the hub is.
         const already = new Set(hits.map((h) => (h.where ?? "").replace(/^.*\/Organized\//, "Organized/")));
-        for (const d of ((catalog as { data?: CatalogRow[] | null }).data ?? [])) {
+        // Customer materials carry their public share link (set on the Work card), which is what document.send
+        // texts; the file itself stays on the hub.
+        const catRows = ((catalog as { data?: CatalogRow[] | null }).data ?? []);
+        const links = catRows.some((d) => d.path.startsWith(CUSTOMER_MATERIALS_FOLDER)) ? await shareLinks(c) : {};
+        for (const d of catRows) {
           if (already.has(d.path)) continue;
-          hits.push({ register: "catalog", name: d.name.replace(/\.[a-z0-9]+$/i, ""), date: d.doc_date, amount: null, category: null, kind: d.kind, where: d.path.replace(/\/[^/]+$/, "/"), href: `/records?q=${encodeURIComponent(d.name)}`, open: null, fetch: { path: d.path, register: "catalog", ref: String(d.hub_id) } });
+          const share = d.path.startsWith(CUSTOMER_MATERIALS_FOLDER) ? links[d.name] ?? null : null;
+          hits.push({ register: "catalog", name: d.name.replace(/\.[a-z0-9]+$/i, ""), date: d.doc_date, amount: null, category: null, kind: d.kind, where: d.path.replace(/\/[^/]+$/, "/"), href: share ? "/work" : `/records?q=${encodeURIComponent(d.name)}`, open: null, fetch: { path: d.path, register: "catalog", ref: String(d.hub_id) }, share });
         }
       }
 
@@ -105,13 +143,15 @@ export const documentTools: Tool[] = [
       const want = Number.isFinite(Number(a.limit)) && Number(a.limit) > 0 ? Math.min(Number(a.limit), LIMIT) : LIMIT;
       const shown = once.slice(0, want);
       const openable = shown.filter((h) => h.open).length;
+      const sendable = shown.filter((h) => h.share).length;
       const what = [ws.length ? `"${str(a.text)}"` : "", cat ? `in ${cat.replace("_", " ")}` : "", from || to ? `${from || "…"} to ${to || "…"}` : ""].filter(Boolean).join(", ");
       return {
         ok: true,
-        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > want ? `; showing the newest ${want} of them` : ""}. ${openable} can be opened from here; the rest live on the hub and the row offers to fetch them (about a minute). The person sees each one as a row; do not repeat the list.`,
+        summary: once.length === 0 ? `Nothing filed matches ${what}.` : `${once.length} document${once.length === 1 ? "" : "s"} match${once.length === 1 ? "es" : ""} ${what}${once.length > want ? `; showing the newest ${want} of them` : ""}. ${openable} can be opened from here; the rest live on the hub and the row offers to fetch them (about a minute).${sendable ? ` ${sendable} carr${sendable === 1 ? "ies" : "y"} a public share link (field share) and can be sent to someone with document.send.` : ""} The person sees each one as a row; do not repeat the list.`,
         data: shown,
         href: shown.length === 1 ? shown[0].href : undefined,
       };
     },
   },
+  sendTool,
 ];
