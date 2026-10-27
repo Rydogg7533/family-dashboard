@@ -205,7 +205,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
         </div>
       )}
 
-      <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className={embedded ? "flex gap-2 py-2 bg-bg" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
+      <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
         <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder="Ask or tell me something…" aria-label="Ask" className="flex-1 min-h-12 rounded-full border border-line bg-bg px-4 text-sm" />
         <button type="submit" disabled={busy || !input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">Send</button>
       </form>
