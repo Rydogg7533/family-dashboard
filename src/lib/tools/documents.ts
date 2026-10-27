@@ -13,9 +13,10 @@ import { CATEGORY_IDS } from "@/lib/categories";
 // open: a link that delivers the file itself (a short-lived signed link, members only), when the app holds
 // the file. fetch: a file whose only copy sits on the hub, with what a fetch request needs (D104); the row
 // shows a Fetch button and the hub delivers a copy within about a minute.
-type Hit = { register: "inbox" | "receipt" | "record"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
+type Hit = { register: "inbox" | "receipt" | "record" | "catalog"; name: string; date: string | null; amount: number | null; category: string | null; kind: string | null; where: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
 
 const LIMIT = 20;
+type CatalogRow = { hub_id: number; path: string; name: string; ext: string; kind: string | null; doc_date: string | null; subject: string | null; pages: number; read_source: string | null };
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9$.]+/g, " ").trim();
 const words = (q: string) => norm(q).split(" ").filter((w) => w.length > 1);
 // Every word the person typed has to appear somewhere in the row's searchable text. Vendor names are short
@@ -27,7 +28,7 @@ const inRange = (d: string | null, from: string, to: string) => !d ? !from && !t
 export const documentTools: Tool[] = [
   {
     name: "document.find", title: "Find documents", kind: "read", tier: 1,
-    description: "Find receipts, bills, statements and records the household has filed, by vendor, words in the name, date range or category. Returns names, dates, amounts and where each one lives, never what is inside it. Use for 'do we have', 'when did we', 'find the ... receipt'. Only what this call returns is shown to the person, so narrow it (limit, dates, words) to exactly what they asked for.",
+    description: "Find receipts, bills, statements, records and any filed document, by vendor, words in the name or folder, date range or category. Searches the app's registers and the catalog of every file on the hub (years before the app). Returns names, dates, amounts and where each one lives, never what is inside it. Use for 'do we have', 'when did we', 'find the ... policy'. Only what this call returns is shown to the person, so narrow it (limit, dates, words) to exactly what they asked for.",
     input: {
       text: { type: "string", describe: "Vendor, item or words from the document's name, e.g. 'AAA', 'furnace', 'Amazon trim'", required: false },
       from: { type: "date", describe: "Earliest document date to include", required: false },
@@ -40,10 +41,18 @@ export const documentTools: Tool[] = [
       const from = str(a.from), to = str(a.to), cat = str(a.category);
       if (!ws.length && !from && !to && !cat) return { ok: false, error: "Say what to look for: a vendor, some words, a date range or a category." };
 
-      const [inbox, receipts, records] = await Promise.all([
+      // The catalog (every file on the hub, by name, date, kind and subject; D98) is searched in the database
+      // because it is far bigger than the other registers. Words go against the path (name and folders). A
+      // spending category is not something the catalog knows, so a category search leaves it out.
+      let catQ = c.sb.from("documents").select("hub_id, path, name, ext, kind, doc_date, subject, pages, read_source").is("gone_at", null).order("doc_date", { ascending: false, nullsFirst: false }).limit(200);
+      for (const w of ws) catQ = catQ.ilike("path", `%${w.replace(/[%_]/g, "")}%`);
+      if (from) catQ = catQ.gte("doc_date", from);
+      if (to) catQ = catQ.lte("doc_date", to);
+      const [inbox, receipts, records, catalog] = await Promise.all([
         c.sb.from("inbox_items").select("id, title, status, filed, file_path, read_result").not("read_result", "is", null).is("copy_error", null).limit(1000),
         c.sb.from("receipts").select("id, merchant, amount, date, file_path, home_path, status").is("duplicate_of", null).limit(1000),
         c.sb.from("records").select("id, kind, title, happens_at, file_ref, confirmation_number, for_person").limit(1000),
+        cat ? Promise.resolve({ data: [] as CatalogRow[] }) : catQ,
       ]);
 
       const hits: Hit[] = [];
@@ -80,6 +89,12 @@ export const documentTools: Tool[] = [
           if (!inRange(date, from, to)) continue;
           if (ws.length && !matches(ws, `${r.title} ${r.kind} ${r.for_person ?? ""} ${r.confirmation_number ?? ""}`)) continue;
           hits.push({ register: "record", name: r.title, date, amount: null, category: null, kind: r.kind, where: r.file_ref, href: `/records/${r.id}`, open: null, fetch: r.file_ref && /\.[a-z0-9]{2,5}$/i.test(r.file_ref) ? { path: r.file_ref, register: "record", ref: r.id } : null });
+        }
+        // Files the registers already reported are not repeated from the catalog; everything else on the hub is.
+        const already = new Set(hits.map((h) => (h.where ?? "").replace(/^.*\/Organized\//, "Organized/")));
+        for (const d of ((catalog as { data?: CatalogRow[] | null }).data ?? [])) {
+          if (already.has(d.path)) continue;
+          hits.push({ register: "catalog", name: d.name.replace(/\.[a-z0-9]+$/i, ""), date: d.doc_date, amount: null, category: null, kind: d.kind, where: d.path.replace(/\/[^/]+$/, "/"), href: `/records?q=${encodeURIComponent(d.name)}`, open: null, fetch: { path: d.path, register: "catalog", ref: String(d.hub_id) } });
         }
       }
 
