@@ -6,13 +6,18 @@
 //   node scripts/email-unsubscribe.mjs           # does it, then checks in (system_status key email_unsubscriber)
 //
 // What it does, for each row a person marked `requested` in the app:
-//   - one-click sender (https, RFC 8058): sends the single standard request. Marks the row `done` ONLY when the sender answers 2xx.
-//     A redirect or a refusal hands the row to the person ("open_link": open the sender's page). A busy or silent sender is retried
+//   - first, every row must pass the sender check the scanner stored (auth_ok: Gmail's SPF/DKIM/DMARC result plus "the unsubscribe
+//     address belongs to the sender"). An unverified sender becomes `check`: nothing is sent, the app shows why, and the person can
+//     say "I know this sender", which marks the row trusted and requests it again.
+//   - one-click sender (https, RFC 8058): sends the single standard request. Marks the row `done` when the sender answers 2xx, or
+//     redirects (followed safely, at most 3 hops) to a page that answers 2xx — that is how most senders say "you are unsubscribed".
+//     Anything else hands the row to the person ("open_link": open the sender's page). A busy or silent sender is retried
 //     on later runs, three tries in all, then handed to the person.
 //   - mailto-only sender: NEVER sends mail from the person's mailbox. The row becomes `needs_tap`; the app shows the drafted message
 //     and the person sends it from their own mail app.
 //   - link-only sender: `open_link`.
 //   - rows waiting on the person for 21 quiet days after the request become `stopped`.
+//   - a `done` sender that has sent 2+ emails since is handed back to the person ("open_link" with its page) — the check that "done" was true.
 // Every outcome is written to activity_log naming who asked. The check-in (heartbeat) is what switches the Unsubscribe button on in the app.
 //
 // Safety rules:
@@ -27,7 +32,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { requestOneClick, validateUnsubUrl, decideOutcome, decideManual, parseTry, shouldMarkStopped } from "./unsubscribe-lib.mjs";
+import { requestOneClick, validateUnsubUrl, decideOutcome, decideManual, decideCheck, parseTry, shouldMarkStopped } from "./unsubscribe-lib.mjs";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry");
@@ -49,7 +54,7 @@ async function rest(method, path, body, extra = {}) {
   if (!r.ok) throw new Error(`${method} ${path.split("?")[0]} → ${r.status} ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : null;
 }
-const COLS = "id,person,mailbox,sender_name,address,method,one_click,unsub_http,unsub_mailto,status_note,requested_by,requested_at";
+const COLS = "id,person,mailbox,sender_name,address,method,one_click,unsub_http,unsub_mailto,status_note,requested_by,requested_at,auth_ok,auth_note,trusted_at";
 const label = (r) => r.sender_name || r.address || "a sender";
 const hostOf = (u) => { const v = validateUnsubUrl(u); return v.ok ? v.host : "(unusable address)"; };
 
@@ -63,7 +68,7 @@ async function main() {
 
   const rows = await rest("GET", `email_subscriptions?status=eq.requested&deleted_at=is.null&select=${COLS}&order=requested_at.asc&limit=${MAX}`);
   const people = Object.fromEntries((await rest("GET", "profiles?select=id,display_name")).map((p) => [p.id, p.display_name]));
-  const tally = { done: 0, needs_tap: 0, open_link: 0, failed: 0, retrying: 0, cancelled: 0 };
+  const tally = { done: 0, needs_tap: 0, open_link: 0, failed: 0, check: 0, retrying: 0, cancelled: 0 };
   console.log(rows.length ? `${rows.length} waiting.` : "Nothing waiting.");
 
   let sent = 0;
@@ -75,7 +80,11 @@ async function main() {
 
     let plan;
     const automatic = row.method === "one_click" && row.one_click && row.unsub_http;
-    if (automatic) {
+    const check = decideCheck(row);               // forged or unverified sender: nothing is sent; the person decides
+    if (check) {
+      plan = check;
+      if (DRY) { console.log(`  would mark check (unverified sender) for ${label(row)} (asked by ${who})`); continue; }
+    } else if (automatic) {
       if (DRY) { console.log(`  would send one-click request to ${hostOf(row.unsub_http)} (asked by ${who})`); continue; }
       if (sent++) await sleep(PAUSE_MS);
       const result = await requestOneClick(row.unsub_http);
@@ -93,7 +102,7 @@ async function main() {
     if (plan.status === "requested") tally.retrying++; else tally[plan.status]++;
     console.log(`  ${row.address ? row.address.split("@")[1] : "sender"}: ${plan.status}`);
     if (plan.status !== "requested") {
-      const verb = { done: "unsubscribed from", needs_tap: "needs a tap to unsubscribe from", open_link: "needs the person to finish unsubscribing from", failed: "could not unsubscribe from" }[plan.status];
+      const verb = { done: "unsubscribed from", needs_tap: "needs a tap to unsubscribe from", open_link: "needs the person to finish unsubscribing from", failed: "could not unsubscribe from", check: "could not verify the sender; asked the person to check" }[plan.status];
       await rest("POST", "activity_log", { actor: "email-unsubscriber", action: `email_unsubscribe_${plan.status}`, subject: `Asked by ${who}: ${verb} ${label(row)}`.slice(0, 200), ref: row.id, undoable: false }).catch(() => {});
     }
   }
@@ -109,9 +118,25 @@ async function main() {
     if (w?.length) { stopped++; await rest("POST", "activity_log", { actor: "email-unsubscriber", action: "email_unsubscribe_stopped", subject: `Asked by ${people[r.requested_by] || "a household member"}: ${label(r)} has stopped sending`.slice(0, 200), ref: r.id, undoable: false }).catch(() => {}); }
   }
 
+  // Verification loop: a sender that said "done" but has sent 2+ emails since is handed back to the person with its page link
+  // (some senders redirect to a preference page without actually unsubscribing). One email can already have been in flight.
+  let reopened = 0;
+  const liars = await rest("GET", `email_subscriptions?status=eq.done&deleted_at=is.null&messages_since_unsub=gte.2&select=id,sender_name,address,requested_by,messages_since_unsub,unsub_http,unsub_mailto,method`);
+  for (const r of liars) {
+    const hasLink = !!(r.unsub_http && validateUnsubUrl(r.unsub_http).ok);
+    const plan = hasLink ? { status: "open_link", note: `${r.messages_since_unsub} emails arrived after the sender said it had unsubscribed you. Open its page and finish there.` }
+      : r.unsub_mailto ? { status: "needs_tap", note: `${r.messages_since_unsub} emails arrived after the sender said it had unsubscribed you. Send its unsubscribe email from your mail app.` }
+      : { status: "failed", note: `${r.messages_since_unsub} emails arrived after the sender said it had unsubscribed you, and it offers no other way. Mark it as spam in Gmail.` };
+    if (DRY) { console.log(`  would reopen (${plan.status}): ${label(r)} kept sending`); reopened++; continue; }
+    const w = await rest("PATCH", `email_subscriptions?id=eq.${r.id}&status=eq.done`, { ...plan, completed_at: null, messages_since_unsub: 0, requested_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { Prefer: "return=representation" });
+    if (w?.length) { reopened++; await rest("POST", "activity_log", { actor: "email-unsubscriber", action: "email_unsubscribe_reopened", subject: `Asked by ${people[r.requested_by] || "a household member"}: ${label(r)} kept sending after saying it had unsubscribed; handed back`.slice(0, 200), ref: r.id, undoable: false }).catch(() => {}); }
+  }
+
   const parts = [`${tally.done} done`, `${tally.needs_tap + tally.open_link} need you`, `${tally.retrying} retrying`];
+  if (tally.check) parts.push(`${tally.check} to check first`);
   if (tally.failed) parts.push(`${tally.failed} failed`);
   if (stopped) parts.push(`${stopped} stopped sending`);
+  if (reopened) parts.push(`${reopened} kept sending, handed back`);
   const summary = `Unsubscribe agent: ${rows.length - tally.cancelled} handled (${parts.join(", ")})`;
   if (DRY) { console.log(`\nDRY RUN: nothing sent, nothing written.\n${summary}`); return; }
   await heartbeat(tally.failed ? "warn" : "ok", summary);

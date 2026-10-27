@@ -1,5 +1,6 @@
 // Pure helpers for scripts/email-subscriptions.mjs (no network, no files), so they can be tested offline.
-// Only HEADERS are ever looked at here: sender, subject, List-Id, List-Unsubscribe, List-Unsubscribe-Post and the date. Never the body.
+// Only HEADERS are ever looked at here: sender, subject, List-Id, List-Unsubscribe, List-Unsubscribe-Post, Authentication-Results and the date. Never the body.
+import { verifySender } from "./unsubscribe-lib.mjs";
 
 // "<https://x.com/u?id=1>, <mailto:unsub@x.com?subject=unsubscribe>" -> { http, mailto }
 // Only https links are used for web unsubscribes (plain http would send the person's token in the clear).
@@ -43,6 +44,8 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function parseMessage(msg) {
   const h = Object.fromEntries((msg.payload?.headers || []).map((x) => [x.name.toLowerCase(), x.value]));
   if (!h["list-unsubscribe"]) return null;
+  // Gmail can add several Authentication-Results headers (ARC); keep them all so a pass is not hidden by the last one.
+  const authResults = (msg.payload?.headers || []).filter((x) => x.name.toLowerCase() === "authentication-results").map((x) => x.value).join("; ");
   const from = h["from"] || "";
   const m = from.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
   const address = (m ? m[2] : from).trim().toLowerCase();
@@ -50,9 +53,11 @@ export function parseMessage(msg) {
   const { http, mailto } = parseListUnsubscribe(h["list-unsubscribe"]);
   if (!http && !mailto) return null;
   const listId = (h["list-id"] || "").match(/<([^>]+)>/)?.[1] || (h["list-id"] || "").trim() || null;
+  const auth = verifySender({ address, http, mailto, authResults });
   return {
     address, name: (m ? m[1] : "").trim() || null, domain: address.split("@")[1], listId,
     http, mailto, oneClick: isOneClick(h["list-unsubscribe-post"], http), ts: Number(msg.internalDate || 0), subject: cleanSubject(h["subject"]),
+    authOk: auth.ok, authNote: auth.note,
   };
 }
 
@@ -62,9 +67,9 @@ export function groupSenders(records) {
   const groups = new Map();
   for (const r of records) {
     let g = groups.get(r.address);
-    if (!g) { g = { address: r.address, name: r.name, domain: r.domain, listId: r.listId, http: r.http, mailto: r.mailto, oneClick: r.oneClick, newestTs: r.ts, ts: [], subs: [] }; groups.set(r.address, g); }
+    if (!g) { g = { address: r.address, name: r.name, domain: r.domain, listId: r.listId, http: r.http, mailto: r.mailto, oneClick: r.oneClick, authOk: r.authOk, authNote: r.authNote, newestTs: r.ts, ts: [], subs: [] }; groups.set(r.address, g); }
     g.ts.push(r.ts); if (r.subject) g.subs.push({ ts: r.ts, subject: r.subject });
-    if (r.ts >= g.newestTs) Object.assign(g, { name: r.name || g.name, listId: r.listId || g.listId, http: r.http, mailto: r.mailto, oneClick: r.oneClick, newestTs: r.ts });
+    if (r.ts >= g.newestTs) Object.assign(g, { name: r.name || g.name, listId: r.listId || g.listId, http: r.http, mailto: r.mailto, oneClick: r.oneClick, authOk: r.authOk, authNote: r.authNote, newestTs: r.ts });
   }
   for (const g of groups.values()) {
     g.method = methodOf(g);
@@ -83,7 +88,7 @@ export function planWrites({ groups, existing, person, mailbox, now }) {
     const ex = existing.get(g.address);
     const sorted = [...g.ts].sort((a, b) => a - b);
     const topic = { category: g.category, recent_subjects: g.category === "account" ? [] : g.subjects };   // account senders: label only, no subject text kept
-    const link = { sender_name: g.name, domain: g.domain, list_id: g.listId, unsub_http: g.http, unsub_mailto: g.mailto, one_click: g.oneClick, method: g.method };
+    const link = { sender_name: g.name, domain: g.domain, list_id: g.listId, unsub_http: g.http, unsub_mailto: g.mailto, one_click: g.oneClick, method: g.method, auth_ok: g.authOk ?? null, auth_note: g.authNote ?? null };
     if (!ex) {
       inserts.push({ person, mailbox, sender_key: g.address, address: g.address, ...link, ...topic, message_count: sorted.length, first_seen: isoDay(sorted[0]), last_seen: isoDay(sorted[sorted.length - 1]), last_message_ts: sorted[sorted.length - 1], updated_at: now });
       continue;
@@ -94,7 +99,11 @@ export function planWrites({ groups, existing, person, mailbox, now }) {
     if (!fresh.length) {
       // Rows found before topics existed get their label and subjects once, with no change to counts or dates.
       // Also when the rules have changed since the label was stored (the label is derived data; nothing the person sets).
-      if ((ex.category ?? null) !== g.category && (ex.category != null || g.subjects.length || g.category !== "unclear")) updates.push({ id: ex.id, patch: { ...topic, updated_at: now } });
+      const backfill = {};
+      if ((ex.category ?? null) !== g.category && (ex.category != null || g.subjects.length || g.category !== "unclear")) Object.assign(backfill, topic);
+      // Rows found before the sender check existed get their verdict once (derived from the newest message's headers).
+      if (ex.auth_ok == null && g.authOk != null) Object.assign(backfill, { auth_ok: g.authOk, auth_note: g.authNote ?? null });
+      if (Object.keys(backfill).length) updates.push({ id: ex.id, patch: { ...backfill, updated_at: now } });
       continue;
     }
     const patch = { ...link, ...topic, message_count: (ex.message_count || 0) + fresh.length, last_seen: isoDay(fresh[fresh.length - 1]), last_message_ts: fresh[fresh.length - 1], updated_at: now };

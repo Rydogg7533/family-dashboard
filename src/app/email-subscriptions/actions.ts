@@ -47,3 +47,36 @@ export async function cancelUnsubscribeRequest(ids: string[]) {
   await me.sb.from("activity_log").insert({ actor: me.name, action: "email_unsubscribe_cancelled", subject: `${me.name} cancelled ${data.length} unsubscribe request${data.length === 1 ? "" : "s"}`, ref: data[0].id, undoable: false }).then(() => {}, () => {});
   return { ok: true as const, count: data.length };
 }
+
+// "I know this sender": the agent refused to act because Gmail could not verify the sender (status 'check'). The person's say-so is
+// recorded (trusted_at/by) and the row is requested again; the agent then proceeds. Only from 'check', only your own rows.
+export async function trustAndRequest(ids: string[]) {
+  const list = cleanIds(ids);
+  if (!list.length) return { ok: false as const, error: "Nothing to do." };
+  if (!hasSupabaseEnv()) return { ok: true as const, sample: true, count: list.length };
+  const me = await who();
+  if (!me) return { ok: false as const, error: "Sign in again." };
+  const now = new Date().toISOString();
+  const { data, error } = await me.sb.from("email_subscriptions")
+    .update({ status: "requested", trusted_at: now, trusted_by: me.user.id, requested_at: now, requested_by: me.user.id, updated_at: now })
+    .in("id", list).eq("status", "check").eq("person", me.user.id).select("id,sender_name,address");
+  if (error) return { ok: false as const, error: "Could not save that." };
+  if (!data?.length) return { ok: false as const, error: "Nothing changed." };
+  await me.sb.from("activity_log").insert({ actor: me.name, action: "email_sender_trusted", subject: `${me.name} said they know ${data.map((r) => r.sender_name || r.address).slice(0, 3).join(", ")} and asked to unsubscribe anyway`.slice(0, 200), ref: data[0].id, undoable: false }).then(() => {}, () => {});
+  return { ok: true as const, count: data.length };
+}
+
+// "Try again": a row that was handed to the person (needs_tap, open_link, failed, check) goes back to the list so it can be ticked again.
+export async function retryLater(ids: string[]) {
+  const list = cleanIds(ids);
+  if (!list.length) return { ok: false as const, error: "Nothing to do." };
+  if (!hasSupabaseEnv()) return { ok: true as const, sample: true, count: list.length };
+  const me = await who();
+  if (!me) return { ok: false as const, error: "Sign in again." };
+  const { data, error } = await me.sb.from("email_subscriptions")
+    .update({ status: "active", requested_at: null, requested_by: null, updated_at: new Date().toISOString() })
+    .in("id", list).in("status", ["needs_tap", "open_link", "failed", "check"]).eq("person", me.user.id).select("id");
+  if (error) return { ok: false as const, error: "Could not put that back." };
+  if (!data?.length) return { ok: false as const, error: "Nothing changed." };
+  return { ok: true as const, count: data.length };
+}

@@ -45,7 +45,13 @@ assert.ok(!("status" in shop) && !("requested_at" in shop), "inserts never set s
 // second run over the SAME messages counts nothing twice
 const existing = new Map([["n@shop.com", { id: "a", message_count: 2, last_message_ts: day("2026-02-01"), first_seen: "2026-01-01", deleted_at: null, completed_at: null }]]);
 plan = planWrites({ groups: groupSenders(recs.slice(0, 2)), existing, ...base });
-assert.equal(plan.inserts.length, 0); assert.equal(plan.updates.length, 0, "overlapping scan adds nothing");
+assert.equal(plan.inserts.length, 0);
+assert.equal(plan.updates.length, 1, "a row from before the sender check gets its verdict once");
+assert.deepEqual(Object.keys(plan.updates[0].patch).sort(), ["auth_note", "auth_ok", "updated_at"], "…and nothing else");
+assert.equal(plan.updates[0].patch.auth_ok, false, "no Authentication-Results header means not verified");
+existing.get("n@shop.com").auth_ok = false;
+plan = planWrites({ groups: groupSenders(recs.slice(0, 2)), existing, ...base });
+assert.equal(plan.updates.length, 0, "overlapping scan adds nothing");
 
 // a newer message is added once, and never touches status
 const newer = [...recs.slice(0, 2), parseMessage(msg("Shop <n@shop.com>", { "List-Unsubscribe": "<https://shop.com/u/3>" }, day("2026-03-05")))];
@@ -92,7 +98,7 @@ const acct = groupSenders([parseMessage(msg("Venmo <v@venmo.com>", { "List-Unsub
 const pa = planWrites({ groups: acct, existing: new Map(), ...base }).inserts[0];
 assert.equal(pa.category, "account"); assert.deepEqual(pa.recent_subjects, [], "no subject text kept for account senders");
 // rows from before topics existed get a label once, counts untouched; then are left alone
-const old = new Map([["s@s.com", { id: "z", category: null, message_count: 5, last_message_ts: day("2026-01-05"), first_seen: "2026-01-01", deleted_at: null }]]);
+const old = new Map([["s@s.com", { id: "z", category: null, auth_ok: false, message_count: 5, last_message_ts: day("2026-01-05"), first_seen: "2026-01-01", deleted_at: null }]]);
 let bf = planWrites({ groups: g2, existing: old, ...base });
 assert.equal(bf.updates.length, 1); assert.equal(bf.updates[0].patch.category, "promos"); assert.ok(!("message_count" in bf.updates[0].patch) && !("last_seen" in bf.updates[0].patch));
 old.get("s@s.com").category = "promos";

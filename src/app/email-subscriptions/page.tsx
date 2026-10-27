@@ -2,7 +2,7 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section } from "@/components/money";
 import { getEmailSubs, getEmailSubsScan, getFinishLinks, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
-import { EmailSubscriptionList, CancelRequest, AutoRefresh } from "@/components/EmailSubscriptionList";
+import { EmailSubscriptionList, CancelRequest, AutoRefresh, CheckActions, TryAgain } from "@/components/EmailSubscriptionList";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,7 @@ const Box = ({ s }: { s: EmailSub }) => <div className="text-[11px] font-semibol
 export default async function EmailSubscriptions() {
   const [subs, scan, ready] = await Promise.all([getEmailSubs(), getEmailSubsScan(), getUnsubscribeAgentReady()]);
   const active = subs.filter((s) => s.status === "active");
+  const check = subs.filter((s) => s.status === "check");
   const needs = subs.filter((s) => s.status === "needs_tap" || s.status === "open_link" || s.status === "failed");
   const waiting = subs.filter((s) => s.status === "requested");
   const done = subs.filter((s) => s.status === "done" || s.status === "stopped");
@@ -35,6 +36,23 @@ export default async function EmailSubscriptions() {
         {scan.state === "warn" && <span className="text-amber font-semibold"> The last scan had trouble reading some mail.</span>}
       </p>
 
+      {check.length > 0 && (
+        <Section title="Check first" right={`${check.length}`}>
+          <div className="flex flex-col gap-2">
+            <div className="text-xs text-muted px-1">Gmail could not confirm these senders are who they say, so nothing was sent and no link is shown. Phishing mail often carries a fake &ldquo;unsubscribe&rdquo;. If you know the sender, say so and the unsubscribe goes ahead.</div>
+            {check.map((s) => (
+              <div key={s.id} className="card flex flex-col gap-1 border border-amber">
+                <div className="font-semibold text-sm">{name(s)}</div>
+                <div className="text-xs text-muted truncate">{s.address}</div>
+                <Box s={s} />
+                <div className="text-xs text-amber font-semibold">{s.auth_note || "This sender could not be verified."}</div>
+                <CheckActions id={s.id} />
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {needs.length > 0 && (
         <Section title="Needs me" right={`${needs.length}`}>
           <div className="flex flex-col gap-2">{needs.slice(0, 5).map((s) => (
@@ -45,8 +63,10 @@ export default async function EmailSubscriptions() {
               {s.status_note && <div className="text-xs text-muted">{s.status_note}</div>}
               {links[s.id]?.open && <a href={links[s.id].open} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-accent">Open to finish</a>}
               {links[s.id]?.mail && <a href={links[s.id].mail} className="text-xs font-semibold text-accent">Open the email to send</a>}
+              <TryAgain ids={[s.id]} />
             </div>
-          ))}{needs.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {needs.length - 5} more</span>}</div>
+          ))}{needs.length > 5 && <span className="text-sm font-semibold text-accent px-1">and {needs.length - 5} more</span>}
+          {needs.length > 1 && <div className="px-1"><TryAgain ids={needs.map((s) => s.id)} label={`Put all ${needs.length} back in the list to try again`} /></div>}</div>
         </Section>
       )}
 

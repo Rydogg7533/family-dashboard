@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { requestUnsubscribe, cancelUnsubscribeRequest } from "@/app/email-subscriptions/actions";
+import { requestUnsubscribe, cancelUnsubscribeRequest, trustAndRequest, retryLater } from "@/app/email-subscriptions/actions";
 import type { EmailSub } from "@/lib/data-email-subs";
 import { CATEGORY_LABEL, CATEGORY_ORDER, frequencyLabel, type EmailSubCategory } from "@/lib/email-sub-format";
 
@@ -37,6 +37,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
   });
   const groups = CATEGORY_ORDER.map((c) => ({ c, rows: subs.filter((s) => (s.category ?? "unclear") === c) })).filter((g) => g.rows.length > 0);
   const tickedAccount = subs.filter((s) => picked.has(s.id) && s.category === "account");
+  const tickedUnverified = subs.filter((s) => picked.has(s.id) && s.auth_ok === false && !s.trusted_at);
   const setGroup = (rows: EmailSub[], on: boolean) => { setConfirming(false); setMsg(null); setPicked((p) => { const q = new Set(p); rows.forEach((r) => (on ? q.add(r.id) : q.delete(r.id))); return q; }); };
 
   const bar = (
@@ -63,6 +64,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
         <div role="alertdialog" aria-label="Confirm unsubscribe" className="card flex flex-col gap-2 border border-amber max-h-[55vh] overflow-y-auto shadow-lg">
           <div className="text-sm font-semibold">Unsubscribe from {n} sender{n === 1 ? "" : "s"}?</div>
           {tickedAccount.length > 0 && <div className="text-xs text-amber font-semibold">{tickedAccount.length === 1 ? "One of these is an account notice" : `${tickedAccount.length} of these are account notices`} ({tickedAccount.slice(0, 3).map((s) => s.sender_name || s.address).join(", ")}{tickedAccount.length > 3 ? ", and more" : ""}). Those are often receipts, security alerts or bills. Make sure you want them gone.</div>}
+          {tickedUnverified.length > 0 && <div className="text-xs text-amber font-semibold">{tickedUnverified.length === 1 ? "One of these could not be verified as a real sender" : `${tickedUnverified.length} of these could not be verified as real senders`}. Nothing will be sent to those; they will come back here under &ldquo;Check first&rdquo; for you to decide.</div>}
           <div className="text-xs text-muted">Each sender is asked to stop. Your Mac mini sends the requests, and you can cancel until it starts. Once a sender has been told, it can&apos;t be undone from here.</div>
           <div className="flex gap-2">
             <button className="min-h-11 px-3 rounded-xl border border-accent bg-accent text-white font-semibold text-sm flex-1 disabled:opacity-50" disabled={pending} onClick={send}>{pending ? <><Spin />Working…</> : "Yes, unsubscribe"}</button>
@@ -100,6 +102,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
                       <span className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</span>
                       {s.recent_subjects.slice(0, 3).map((t, i) => <span key={i} className="text-xs truncate">&ldquo;{t}&rdquo;</span>)}
                       <span className="text-xs text-muted">{frequencyLabel(s.message_count, s.first_seen, s.last_seen)} · last {day(s.last_seen)}{(s.last_seen ?? "") < quietBefore ? " · quiet for 3+ months" : ""}{s.method !== "one_click" ? " · may need a tap from you" : ""}</span>
+                      {s.auth_ok === false && !s.trusted_at && <span className="text-xs text-amber font-semibold">Unverified sender: {s.auth_note || "could not be confirmed."}</span>}
                     </div>
                   )}
                 </div>
@@ -120,6 +123,38 @@ export function CancelRequest({ ids }: { ids: string[] }) {
   return (
     <span className="inline-flex flex-col">
       <button className="text-xs font-semibold text-accent text-left min-h-8 disabled:opacity-50" disabled={pending} onClick={go}>Cancel request</button>
+      {msg && <span className="text-[11px] text-amber font-semibold" role="status">{msg}</span>}
+    </span>
+  );
+}
+
+// "Check first": the Mac mini refused to act because the sender could not be verified. The person decides.
+export function CheckActions({ id }: { id: string }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const run = (fn: (ids: string[]) => Promise<{ ok: boolean; error?: string }>) => start(async () => { const r = await fn([id]); if (r.ok) router.refresh(); else setMsg(r.error ?? "Something went wrong."); });
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex gap-2">
+        <button className="min-h-10 px-3 rounded-xl border border-accent bg-accent text-white text-xs font-semibold disabled:opacity-50" disabled={pending} onClick={() => run(trustAndRequest)}>{pending ? "Working…" : "I know this sender, unsubscribe"}</button>
+        <button className="min-h-10 px-3 rounded-xl border border-line text-xs font-semibold disabled:opacity-50" disabled={pending} onClick={() => run(retryLater)}>Leave it</button>
+      </div>
+      <a href="https://mail.google.com/" className="text-xs font-semibold text-accent">Not sure? Look at it in Gmail (mark it spam there if it looks wrong)</a>
+      {msg && <span className="text-[11px] text-amber font-semibold" role="status">{msg}</span>}
+    </div>
+  );
+}
+
+// "Try again": puts a sender that was handed to the person back into the list so it can be ticked again.
+export function TryAgain({ ids, label }: { ids: string[]; label?: string }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const go = () => start(async () => { const r = await retryLater(ids); if (r.ok) router.refresh(); else setMsg(r.error); });
+  return (
+    <span className="inline-flex flex-col">
+      <button className="text-xs font-semibold text-accent text-left min-h-8 disabled:opacity-50" disabled={pending} onClick={go}>{pending ? "Working…" : label ?? "Put back in the list to try again"}</button>
       {msg && <span className="text-[11px] text-amber font-semibold" role="status">{msg}</span>}
     </span>
   );

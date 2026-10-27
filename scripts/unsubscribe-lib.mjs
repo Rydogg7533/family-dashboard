@@ -74,22 +74,40 @@ export function guardedLookup(hostname, options, cb) {
 }
 
 // ---------- the request (RFC 8058 one-click) ----------
-// POST "List-Unsubscribe=One-Click" to the https address. No cookies, no identity beyond what is already in the address, redirects are
-// NOT followed (a redirect is reported, not trusted). `lookup` and `tls` exist only so tests can talk to a local server; production
-// never passes them. The address itself is never put in a result, a note or a log (it can carry a personal token).
-export function requestOneClick(urlString, { lookup = guardedLookup, tls = {}, timeoutMs = 20000 } = {}) {
+// POST "List-Unsubscribe=One-Click" to the https address. No cookies, no identity beyond what is already in the address.
+// Most senders (Substack, Mailchimp, …) answer the POST with a redirect to their "you are unsubscribed" page, so a redirect is
+// FOLLOWED (as a plain GET, at most MAX_HOPS times) and every hop goes through the same guards as the first address: https on 443,
+// public host, guarded DNS at connect time. The result reports the first status and the final one. `lookup` and `tls` exist only so
+// tests can talk to a local server; production never passes them. The address itself is never put in a result, a note or a log (it
+// can carry a personal token).
+export const MAX_HOPS = 3;
+function oneRequest({ url, host, method, body, lookup, tls, timeoutMs }) {
   return new Promise((resolve) => {
-    const v = validateUnsubUrl(urlString);
-    if (!v.ok) return resolve({ kind: "refused", reason: v.reason });
-    const body = "List-Unsubscribe=One-Click";
-    const req = https.request({
-      hostname: v.host, port: 443, path: v.url.pathname + v.url.search, method: "POST", lookup, agent: false, timeout: timeoutMs,
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(body), "User-Agent": "StewardOS unsubscribe" }, ...tls,
-    }, (res) => { res.resume(); resolve({ kind: "http", status: res.statusCode, redirected: !!res.headers.location }); });
+    const headers = { "User-Agent": "StewardOS unsubscribe" };
+    if (body) Object.assign(headers, { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(body) });
+    const req = https.request({ hostname: host, port: 443, path: url.pathname + url.search, method, lookup, agent: false, timeout: timeoutMs, headers, ...tls },
+      (res) => { res.resume(); resolve({ kind: "http", status: res.statusCode, location: res.headers.location || null }); });
     req.on("timeout", () => req.destroy(new Error("timeout")));
     req.on("error", (e) => resolve(/^blocked:/.test(e.message) ? { kind: "refused", reason: "the host name points at a non-public address" } : { kind: "network", reason: e.code || e.message.slice(0, 40) }));
-    req.end(body);
+    req.end(body || undefined);
   });
+}
+export async function requestOneClick(urlString, { lookup = guardedLookup, tls = {}, timeoutMs = 20000 } = {}) {
+  let v = validateUnsubUrl(urlString);
+  if (!v.ok) return { kind: "refused", reason: v.reason };
+  let r = await oneRequest({ url: v.url, host: v.host, method: "POST", body: "List-Unsubscribe=One-Click", lookup, tls, timeoutMs });
+  if (r.kind !== "http") return r;
+  const first = r.status;
+  let hops = 0;
+  while (r.kind === "http" && r.status >= 300 && r.status < 400 && r.location && hops < MAX_HOPS) {
+    let next; try { next = new URL(r.location, v.url).toString(); } catch { break; }
+    v = validateUnsubUrl(next);
+    if (!v.ok) return { kind: "http", status: first, final: r.status, hops, redirected: true, unsafeHop: true };   // the sender pointed somewhere we refuse to go: stop, report the redirect
+    hops++;
+    r = await oneRequest({ url: v.url, host: v.host, method: "GET", lookup, tls, timeoutMs });
+  }
+  if (r.kind !== "http") return hops ? { kind: "http", status: first, final: null, hops, redirected: true } : r;
+  return { kind: "http", status: first, final: r.status, hops, redirected: hops > 0 || (r.status >= 300 && r.status < 400) };
 }
 
 // ---------- outcomes ----------
@@ -102,13 +120,73 @@ export function decideOutcome(result, { hasLink, tries = 0 }) {
   const finish = (reason) => hasLink ? { status: "open_link", note: `${reason} Open the sender's page to finish.` } : { status: "failed", note: reason };
   if (result.kind === "refused") return { status: "failed", note: "This sender's unsubscribe address looked unsafe, so it was not used." };
   if (result.kind === "http") {
-    const s = result.status;
+    const s = result.status, f = result.final ?? s;
+    if (s >= 300 && s < 400) {
+      // The sender redirected after the request. Followed through to its page: a 2xx there is the normal "you are unsubscribed" page.
+      if (result.hops && result.final == null) return retry(`HTTP ${s}, then no answer`, tries, finish);
+      if (f >= 200 && f < 300) return { status: "done", note: `The sender accepted and showed its confirmation page (HTTP ${s} → ${f}).`, completed: true };
+      if (result.unsafeHop) return finish(`The sender redirected to an address that failed the safety check (HTTP ${s}).`);
+      if (f >= 300 && f < 400) return finish(`The sender kept redirecting (HTTP ${s}).`);
+      return finish(`The sender redirected to a page that did not confirm (HTTP ${s} → ${f}).`);
+    }
     if (s >= 200 && s < 300) return { status: "done", note: `The sender confirmed (HTTP ${s}).`, completed: true };
-    if (s >= 300 && s < 400) return finish(`The sender redirected instead of confirming (HTTP ${s}).`);
     if (s === 429 || s >= 500) return retry(`HTTP ${s}`, tries, finish);
     return finish(`The sender refused the automatic request (HTTP ${s}).`);
   }
   return retry(result.reason || "no answer", tries, finish);
+}
+
+// ---------- is this really the sender? ----------
+// Anyone can put a List-Unsubscribe header on a mail. Before the agent talks to the address (or shows it as a link), the mail must
+// have passed Gmail's own sender checks and the unsubscribe host must belong to the sender. Rows that fail are shown to the person as
+// "Check first" and nothing is sent unless they say they know the sender.
+const TWO_LEVEL = /^(co|com|org|net|gov|edu|ac|ne|or)$/i;
+export function registrableDomain(host) {
+  const p = String(host || "").toLowerCase().replace(/\.$/, "").split(".").filter(Boolean);
+  if (p.length < 2) return p.join(".");
+  const n = p.length >= 3 && p[p.length - 1].length === 2 && TWO_LEVEL.test(p[p.length - 2]) ? 3 : 2;
+  return p.slice(-n).join(".");
+}
+// Mailing providers whose unsubscribe pages live on their own domain, not the sender's.
+export const KNOWN_LIST_HOSTS = ["substack.com", "list-manage.com", "mailchimp.com", "mailchimpapp.net", "sendgrid.net", "sendgrid.com", "convertkit.com", "kit.com", "beehiiv.com", "hubspot.com", "hubspotlinks.com", "hs-sites.com", "klaviyo.com", "klaviyomail.com", "constantcontact.com", "constantcontactpages.com", "campaign-archive.com", "mailgun.net", "mailgun.org", "sparkpostmail.com", "mailerlite.com", "mailerlite.io", "activehosted.com", "braze.com", "iterable.com", "sailthru.com", "cmail19.com", "cmail20.com", "createsend.com", "exacttarget.com", "salesforce.com", "marketo.com", "mktoweb.com", "mailjet.com", "emailoctopus.com", "aweber.com", "getresponse.com", "drip.com", "rsgsv.net", "sendinblue.com", "brevo.com", "sendibm1.com", "ghost.io", "buttondown.email", "buttondown.com", "mail.google.com", "google.com", "amazon.com", "linkedin.com", "facebookmail.com", "facebook.com", "email.apple.com", "apple.com", "microsoft.com", "nextdoor.com", "pinterest.com", "reddit.com"];
+
+// Gmail's Authentication-Results header(s) -> { spf, dkim: [domains that passed], dmarc, dmarcFrom }
+export function parseAuthResults(value) {
+  const v = String(value || "");
+  const out = { spf: null, dkim: [], dmarc: null, spfDomain: null };
+  const spf = v.match(/\bspf=(pass|fail|softfail|neutral|none|temperror|permerror)\b/i); if (spf) out.spf = spf[1].toLowerCase();
+  const mf = v.match(/smtp\.mailfrom=(?:[^;\s@]+@)?([^;\s]+)/i); if (mf) out.spfDomain = mf[1].toLowerCase();
+  for (const m of v.matchAll(/\bdkim=pass\b[^;]*?header\.(?:i=@|d=)([^;\s]+)/gi)) out.dkim.push(m[1].toLowerCase());
+  const dm = v.match(/\bdmarc=(pass|fail|none|bestguesspass)\b/i); if (dm) out.dmarc = dm[1].toLowerCase();
+  return out;
+}
+// Decide. Returns { ok: boolean, note: string }. `note` is shown to the person, so it never contains an address or a token.
+export function verifySender({ address, http, mailto, authResults }) {
+  const fromDom = registrableDomain(String(address || "").split("@")[1] || "");
+  if (!fromDom) return { ok: false, note: "The sender address could not be read." };
+  const a = parseAuthResults(authResults);
+  const aligned = a.dmarc === "pass" || a.dkim.some((d) => registrableDomain(d) === fromDom) || (a.spf === "pass" && a.spfDomain && registrableDomain(a.spfDomain) === fromDom);
+  if (!aligned) {
+    const passed = a.dkim.length || a.spf === "pass";
+    return { ok: false, note: passed ? "The mail was sent through another domain, not the sender's own, so the sender could not be confirmed." : "The mail did not pass Gmail's sender checks, so it may not be from who it says." };
+  }
+  const trusted = new Set([fromDom, ...a.dkim.map(registrableDomain), ...KNOWN_LIST_HOSTS]);
+  if (http) {
+    let host; try { host = new URL(http).hostname; } catch { return { ok: false, note: "The unsubscribe address could not be read." }; }
+    if (!trusted.has(registrableDomain(host))) return { ok: false, note: "The unsubscribe link points at a site that is not the sender's own and not a known mailing service." };
+  } else if (mailto) {
+    let dom; try { dom = decodeURIComponent(new URL(mailto).pathname).split("@")[1]; } catch { return { ok: false, note: "The unsubscribe address could not be read." }; }
+    if (!trusted.has(registrableDomain(dom || ""))) return { ok: false, note: "The unsubscribe email address is not at the sender's own domain or a known mailing service." };
+  }
+  return { ok: true, note: "Sender verified by Gmail and the unsubscribe address belongs to it." };
+}
+
+// Agent-side gate: a requested row the person has not marked as known must pass verification before anything is sent.
+export function decideCheck(row) {
+  if (row.trusted_at) return null;
+  if (row.auth_ok === true) return null;
+  const why = row.auth_ok === false ? row.auth_note || "The sender could not be verified." : "This sender has not been checked yet (it is checked on the next mail scan).";
+  return { status: "check", note: `${why} Nothing was sent. If you know this sender, tap "I know this sender" to go ahead; otherwise mark it as spam in Gmail.` };
 }
 function retry(reason, tries, finish) {
   const n = tries + 1;
