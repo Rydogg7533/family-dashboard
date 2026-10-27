@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
-import type { AskReply, Turn } from "@/lib/ask-engine";
+import type { AskItem, AskReply, Turn } from "@/lib/ask-engine";
+import { splitAnswer } from "@/lib/ask-shared";
 import { FetchButton } from "@/components/FetchButton";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -138,10 +139,10 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
           // min-w-0 and overflow-wrap:anywhere on the bubble: a folder path, an order number or a link has no
           // spaces to break at, and without these a flex child grows to fit it and the text runs past the card.
           <div key={i} className="self-start w-full max-w-[92%] min-w-0 flex flex-col gap-1.5">
-            <div className={`card text-sm whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${b.reply?.kind === "deflect" ? "text-muted" : ""}`}>{b.text}</div>
+            <AnswerText text={b.text} muted={b.reply?.kind === "deflect"} />
             {b.reply?.kind === "tool_confirm" && b.reply.tool && (
               b.toolResult
-                ? <div className={`text-xs font-semibold px-1 ${b.toolResult.ok ? "text-green" : "text-red"}`}>{b.toolResult.text}{b.toolResult.ok && b.toolResult.href ? <> · {b.toolResult.href.startsWith("sms:") ? <a href={b.toolResult.href} className="text-accent">Open Messages</a> : <Link href={b.toolResult.href} className="text-accent">Open</Link>}</> : null}</div>
+                ? <ResultLine ok={b.toolResult.ok} text={b.toolResult.text} href={b.toolResult.href} />
                 : (
                   <div className={`card flex flex-col gap-2 ${b.reply.tool.tier === 3 ? "border-amber" : ""}`}>
                     <div className="text-sm font-semibold">{b.reply.tool.title}</div>
@@ -171,7 +172,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
               <div className="card flex flex-col text-sm p-0 overflow-hidden">
                 {b.reply.items.map((it) => (
                   <div key={`${it.href}|${it.name}`} className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-0">
-                    <Link href={it.href} className="min-w-0 flex-1"><div className="font-semibold truncate">{it.name}</div>{it.detail && <div className="text-xs text-muted truncate">{it.detail}</div>}</Link>
+                    <ItemRow it={it} />
                     {it.open
                       ? <a href={it.open} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>
                       : it.fetch
@@ -190,8 +191,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
                   ? <span className="text-green font-semibold">Flagged for the maintainer</span>
                   : <button type="button" onClick={() => flag(i)} className="font-semibold text-muted underline-offset-2 hover:underline">Wrong answer?</button>
               )}
-              {b.reply?.kind !== "instruction" && <span>{who} asked · from Ask</span>}
-              <span>{b.reply?.costText}{b.reply?.model && b.reply.model !== "none" ? ` · ${b.reply.model.replace("claude-", "").replace("-5-5", "")}` : ""}{b.reply?.sample ? " · sample" : ""}</span>
+              {b.reply && <MetaInfo text={`${who} asked · from Ask · ${b.reply.costText}${b.reply.model && b.reply.model !== "none" ? ` · ${b.reply.model.replace("claude-", "").replace("-5-5", "")}` : ""}${b.reply.sample ? " · sample" : ""}`} />}
             </div>
           </div>
         ))}
@@ -235,4 +235,56 @@ function ConfirmCard({ b, who, onConfirm, onChange }: { b: Bubble; who: string; 
       </div>
     </div>
   );
+}
+
+// The answer, kept short: the model is told one or two sentences; if it runs on, the rest folds behind More.
+function AnswerText({ text, muted }: { text: string; muted?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { head, more } = splitAnswer(text);
+  return (
+    <div className={`card text-sm whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${muted ? "text-muted" : ""}`}>
+      {open ? `${head} ${more ?? ""}`.trim() : head}
+      {more && <button type="button" onClick={() => setOpen((v) => !v)} className="block mt-1 text-xs font-semibold text-accent">{open ? "Less" : "More"}</button>}
+    </div>
+  );
+}
+
+// A found thing: name and date up front; folder, amount and the rest under Details.
+function ItemRow({ it }: { it: AskItem }) {
+  const [open, setOpen] = useState(false);
+  const parts = (it.detail ?? "").split(" · ").filter(Boolean);
+  const date = parts.find((p) => /^\d{4}-\d{2}-\d{2}$/.test(p)) ?? null;
+  const rest = parts.filter((p) => p !== date);
+  return (
+    <div className="min-w-0 flex-1">
+      <Link href={it.href} className="block"><div className="font-semibold truncate">{it.name}</div></Link>
+      <div className="text-xs text-muted flex gap-2 min-w-0">
+        {date && <span>{date}</span>}
+        {rest.length > 0 && <button type="button" onClick={() => setOpen((v) => !v)} className="font-semibold text-accent">{open ? "Less" : "Details"}</button>}
+      </div>
+      {open && rest.length > 0 && <div className="text-xs text-muted [overflow-wrap:anywhere]">{rest.join(" · ")}</div>}
+    </div>
+  );
+}
+
+// What a tapped card did: one line, the full text behind Details.
+function ResultLine({ ok, text, href }: { ok: boolean; text: string; href?: string }) {
+  const [open, setOpen] = useState(false);
+  const short = ok ? text.split(/[:.]\s/)[0] : text;
+  const hasMore = ok && short.length < text.length - 2;
+  return (
+    <div className={`text-xs font-semibold px-1 ${ok ? "text-green" : "text-red"} [overflow-wrap:anywhere]`}>
+      {open ? text : short}
+      {href ? <> · {href.startsWith("sms:") ? <a href={href} className="text-accent">Open Messages</a> : <Link href={href} className="text-accent">Open</Link>}</> : null}
+      {hasMore && <> · <button type="button" onClick={() => setOpen((v) => !v)} className="text-muted font-semibold">{open ? "Less" : "Details"}</button></>}
+    </div>
+  );
+}
+
+// Who asked, what it cost, which model: behind one small (i) so the thread stays readable.
+function MetaInfo({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return open
+    ? <span>{text} · <button type="button" onClick={() => setOpen(false)} className="font-semibold">hide</button></span>
+    : <button type="button" aria-label="Details" onClick={() => setOpen(true)} className="font-semibold text-muted">ⓘ</button>;
 }
