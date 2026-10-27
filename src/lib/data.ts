@@ -47,7 +47,20 @@ export async function getStatus(): Promise<Status[]> {
   if (!hasSupabaseEnv()) return sampleStatus;
   const sb = await createClient();
   const { data } = await sb.from("system_status").select("*").order("key");
-  return (data as Status[]) ?? [];
+  return reconcile((data as Status[]) ?? []);
+}
+
+// The mirror row reports the LAST nightly run, so after a "not mounted" failure it stays red until the next
+// 2:30 AM run even once the drive is back. When the mini's own later reading says the 8TB is mounted again,
+// the failure is history, not a live fault: show it amber with what happens next, so the red banner clears
+// on the first refresh after the hourly report sees the drive. The row in the database is not changed.
+function reconcile(status: Status[]): Status[] {
+  const mirror = status.find((s) => s.key === "mirror"), drive = status.find((s) => s.key === "free_space_8tb");
+  if (!mirror || !drive || mirror.state !== "error" || drive.state !== "ok" || !/not mounted/i.test(mirror.summary)) return status;
+  const failedAt = mirror.summary.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/)?.[1];
+  return status.map((s) => s === mirror ? { ...s, state: "warn" as const,
+    summary: `Missed ${failedAt ? `the ${failedAt} run` : "last night's run"} (8TB was unplugged). The drive is back; the next nightly run catches up.`,
+    detail: s.summary } : s);
 }
 
 export async function getRegister(): Promise<RegisterRow[]> {
