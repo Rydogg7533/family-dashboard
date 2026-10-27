@@ -14,7 +14,9 @@ const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", 
 
 type Bubble = { at?: number; role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
 
-export function AskChat({ prefill, sample, who }: { prefill: string; sample: boolean; who: string }) {
+// embedded: the same Ask, inside the sheet the + button opens on any page (one thread, two places to open it).
+// source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting.
+export function AskChat({ prefill, sample, who, embedded, source, onPending }: { prefill: string; sample: boolean; who: string; embedded?: boolean; source?: string; onPending?: (pending: boolean) => void }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState(prefill);
   const [busy, setBusy] = useState(false);
@@ -66,7 +68,7 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
     // The model sees the recent window only (last 24 h, at most 12 turns); older exchanges are in history and
     // reachable through the ask.history tool, so an answer costs the same on day 30 as on day 1.
     const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
-    const reply = await askAction(thread);
+    const reply = await askAction(thread, undefined, source ?? "ask");
     setSpent((s) => s + reply.cost);
     if (reply.kind === "inbox") void parkThreadInInbox(thread);
     const bubble: Bubble = { at: Date.now(), role: "assistant", text: reply.text, reply };
@@ -111,9 +113,11 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
 
   const last = bubbles[bubbles.length - 1];
   const chips = last?.reply?.chips ?? (bubbles.length === 0 ? SUGGESTED : []);
+  const pending = !!last && last.role === "assistant" && ((last.reply?.kind === "tool_confirm" && !last.toolResult) || ((last.reply?.kind === "event_confirm" || last.reply?.kind === "event_move") && !last.eventResult) || (last.reply?.kind === "instruction" && !!last.reply.confirm && !last.confirmed));
+  useEffect(() => { onPending?.(pending); }, [pending, onPending]);
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-140px)]">
+    <div className={embedded ? "flex flex-col" : "flex flex-col min-h-[calc(100vh-140px)]"}>
       <div className="flex items-center justify-end mb-1">
         <h1 className="sr-only">Ask</h1>
         <div className="flex items-center gap-3">
@@ -121,9 +125,9 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
           {bubbles.length > 0 && <button type="button" onClick={newChat} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">New chat</button>}
         </div>
       </div>
-      <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>
+      {!embedded && <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>}
 
-      <div className="flex-1 flex flex-col gap-2">
+      <div className={embedded ? "flex flex-col gap-2 overflow-y-auto max-h-[50vh] pr-1" : "flex-1 flex flex-col gap-2"}>
         <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link> · the last 24 hours are here; everything is kept in history</div>
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Try one of the suggestions below, or ask anything the family&apos;s records can answer: schedules, documents, money, people, vehicles, home, your own health.</div>
@@ -201,8 +205,8 @@ export function AskChat({ prefill, sample, who }: { prefill: string; sample: boo
         </div>
       )}
 
-      <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className="sticky bottom-[88px] flex gap-2 py-2 bg-bg">
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask or tell me something…" aria-label="Ask" className="flex-1 min-h-12 rounded-full border border-line bg-bg px-4 text-sm" />
+      <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className={embedded ? "flex gap-2 py-2 bg-bg" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
+        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder="Ask or tell me something…" aria-label="Ask" className="flex-1 min-h-12 rounded-full border border-line bg-bg px-4 text-sm" />
         <button type="submit" disabled={busy || !input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">Send</button>
       </form>
 

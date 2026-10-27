@@ -7,6 +7,8 @@ import { QuickBar } from "@/components/QuickBar";
 import { TopBar } from "@/components/TopBar";
 import { RecentTracker } from "@/components/RecentPages";
 import { MainFrame } from "@/components/MainFrame";
+import { getDisplayName } from "@/lib/data";
+import { hasAiKey } from "@/lib/ai";
 
 
 export const metadata: Metadata = {
@@ -19,7 +21,9 @@ export const metadata: Metadata = {
 };
 export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // The + button's Ask sheet needs who is asking (the thread is kept per person) and whether a model is set.
+  const who = (await getDisplayName().catch(() => "")) || "You";
   return (
     <html lang="en" className="h-full antialiased">
       <head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=Dancing+Script:wght@700&display=swap" /></head>
@@ -28,7 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <TopBar />
           <PullToRefresh />
           <MainFrame>{children}</MainFrame>
-          <QuickBar />
+          <QuickBar who={who} sample={!hasAiKey()} />
           <RecentTracker />
           <Nav />
         </AppearanceProvider>
