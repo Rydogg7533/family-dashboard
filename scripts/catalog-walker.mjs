@@ -86,11 +86,12 @@ const q = {
   touch: db.prepare("update documents set size = ?, mtime = ?, sha256 = null, read_at = null, read_source = null, pages = 0, error = null, gone_at = null, cloud_at = null where id = ?"),
   back: db.prepare("update documents set gone_at = null where id = ?"),
   gone: db.prepare("update documents set gone_at = ?, cloud_at = null where gone_at is null and id not in (select value from json_each(?))"),
-  unread: db.prepare("select id, path, ext, size from documents where read_at is null and gone_at is null order by mtime desc"),
+  // Documents first (PDF, text, Word), newest first; images after. A policy gets read before a logo render.
+  unread: db.prepare("select id, path, ext, size from documents where read_at is null and gone_at is null order by case when ext in ('.pdf', '.txt', '.md', '.csv', '.eml', '.docx') then 0 else 1 end, mtime desc"),
   setRead: db.prepare("update documents set sha256 = ?, read_at = ?, read_source = ?, pages = ?, confidence = ?, error = ?, doc_date = coalesce(?, doc_date), cloud_at = null where id = ?"),
   delPages: db.prepare("delete from pages where doc_id = ?"),
   insPage: db.prepare("insert into pages (doc_id, n, text, confidence) values (?, ?, ?, ?)"),
-  toCloud: db.prepare("select id, path, name, ext, size, sha256, kind, doc_date, subject, pages, read_at, read_source, confidence, gone_at from documents where cloud_at is null limit 500"),
+  toCloud: db.prepare("select id, path, name, ext, size, sha256, kind, doc_date, subject, pages, read_at, read_source, confidence, gone_at from documents where cloud_at is null limit 150"),
   cloudDone: db.prepare("update documents set cloud_at = ? where id in (select value from json_each(?))"),
   run: db.prepare("insert into runs (mode, started, finished, seen, read, errors, note) values (?, ?, ?, ?, ?, ?, ?)"),
 };
@@ -194,6 +195,7 @@ async function readPending(limit) {
       } catch (e) { db.exec("rollback"); throw e; }
       read++;
       if (read % 25 === 0) console.log(`${new Date().toISOString()} read ${read} (${row.path})`);
+      if (read % 500 === 0) { try { await pushCloud(); } catch { /* next time */ } }
     } catch (e) {
       q.setRead.run(null, Date.now(), "error", 0, null, String(e.message ?? e).slice(0, 200), null, row.id);
       errors++;
@@ -210,7 +212,14 @@ async function pushCloud() {
     const rows = q.toCloud.all();
     if (!rows.length) break;
     const body = rows.map((r) => ({ hub_id: r.id, path: r.path, name: r.name, ext: r.ext, size: r.size, sha256: r.sha256, kind: r.kind, doc_date: r.doc_date, subject: r.subject, pages: r.pages, read_at: r.read_at ? new Date(r.read_at).toISOString() : null, read_source: r.read_source, confidence: r.confidence, gone_at: r.gone_at ? new Date(r.gone_at).toISOString() : null }));
-    const res = await fetch(`${SB_URL}/rest/v1/documents?on_conflict=hub_id`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(body) });
+    // The push is best-effort: a dropped connection is retried once, then left for the next run. The
+    // index on the hub is the truth; the cloud copy of the metadata only ever catches up.
+    let res = null;
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      try { res = await fetch(`${SB_URL}/rest/v1/documents?on_conflict=hub_id`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }); }
+      catch (e) { console.error(`cloud push attempt ${attempt + 1}: ${String(e.cause?.message ?? e.message ?? e).slice(0, 120)}`); await new Promise((r) => setTimeout(r, 2000)); }
+    }
+    if (!res) break;
     if (!res.ok) { console.error(`cloud push → ${res.status} ${(await res.text()).slice(0, 200)}`); break; }
     q.cloudDone.run(Date.now(), JSON.stringify(rows.map((r) => r.id)));
     total += rows.length;
@@ -230,7 +239,8 @@ const t0 = Date.now();
 const cat = catalogue();
 console.log(`${new Date().toISOString()} catalogued ${cat.seen} files: ${cat.added} new, ${cat.changed} changed`);
 const r = await readPending(MODE === "sweep" ? 200 : 0);
-const pushed = await pushCloud();
+let pushed = 0;
+try { pushed = await pushCloud(); } catch (e) { console.error(`cloud push failed: ${String(e.message ?? e).slice(0, 200)}`); }
 q.run.run(MODE, t0, Date.now(), cat.seen, r.read, r.errors, `added ${cat.added}, changed ${cat.changed}, pushed ${pushed}`);
 const left = db.prepare("select count(*) n from documents where read_at is null and gone_at is null").get().n;
 console.log(`${new Date().toISOString()} ${MODE}: read ${r.read}, ${r.errors} errors, ${pushed} pushed to cloud, ${left} still to read, ${Math.round((Date.now() - t0) / 1000)}s`);
