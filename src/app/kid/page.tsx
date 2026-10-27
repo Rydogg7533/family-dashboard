@@ -6,6 +6,8 @@ import { getChildFeatures, getChildRows, getFeatureAges } from "@/lib/data-child
 import { featureState } from "@/lib/child-access";
 import { getDayBlocks, getCalendarEvents, fmtDate, shortTime, weatherGlyph } from "@/lib/data-day";
 import { KidChecklist, MessageParent } from "@/components/c/KidView";
+import { KidReceipts } from "@/components/c/KidReceipts";
+import { listKidReceipts } from "@/app/kid/receipts-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,8 @@ export default async function Kid({ searchParams }: PageProps<"/kid">) {
       </div>
     );
   }
-  const [blocks, events] = await Promise.all([getDayBlocks(), getCalendarEvents(undefined, 7)]);
+  const receiptsOn = on("receipts");
+  const [blocks, events, receipts] = await Promise.all([getDayBlocks(), getCalendarEvents(undefined, 7), receiptsOn && real ? listKidReceipts(picked.uuid) : Promise.resolve([])]);
   const mine = blocks.filter((b) => b.person === child);
   const [todayHh, tz] = await Promise.all([todayIso(), householdTz()]);
   const school = { start: "08:00", title: "School" };
@@ -81,6 +84,8 @@ export default async function Kid({ searchParams }: PageProps<"/kid">) {
       {!real && <div className="mb-5">
         <KidChecklist title="My jobs" items={[{ id: "j1", label: "Feed the dog", done: false, who: "Mom asked · for you" }, { id: "j2", label: "Practice piano, 20 min", done: true, who: "Dad asked · for you" }]} />
       </div>}
+
+      {receiptsOn && real && <KidReceipts rows={receipts} canAdd={viewer.role === "child"} parentView={viewer.role !== "child"} />}
 
       {on("week_calendar") && <section className="bg-soft rounded-xl px-3.5 py-3 text-sm mb-5">
         <div className="font-semibold">This week</div>
