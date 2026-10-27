@@ -100,7 +100,7 @@ export default async function Money() {
         </div>
       </Section>
 
-      <Section title="Accounts" right={<Link href="/money/accounts" className="font-semibold text-accent">Manage ›</Link>}>
+      <Section title="Accounts" right={<Link href="/settings/money/accounts" className="font-semibold text-accent">Add or change in Settings ›</Link>}>
         <div className="flex flex-col gap-2">
           {accounts.filter((a) => !a.retired_at).map((a) => (
             <Link key={a.id} href={`/money/reconcile/${a.id}`} className="card flex justify-between gap-2">

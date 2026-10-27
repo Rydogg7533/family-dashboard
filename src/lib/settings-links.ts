@@ -22,8 +22,9 @@ export const SETTING_GROUPS: SettingGroup[] = [
     { href: "/settings/notifications", label: "Notifications", sub: "Where each kind appears, quiet hours, this device" },
   ] },
   { title: "Money", rows: [
+    { href: "/settings/money/accounts", label: "Accounts and cards", sub: "Bank and credit accounts, each card tied to the account it draws on" },
     { href: "/settings/money", label: "Money rules", sub: "Amazon invoices: when to ask, what to wait for" },
-    { href: "/money", label: "Money set-up", sub: "Accounts, entities, budget, reconciliation" },
+    { href: "/money", label: "Money set-up", sub: "Entities, budget, reconciliation" },
   ] },
   { title: "Schedule and activities", rows: [
     { href: "/places", label: "Places and activities", sub: "Learned places, checklists, learning switches" },

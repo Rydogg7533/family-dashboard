@@ -49,6 +49,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/settings", label: "Settings", group: "settings", icon: "settings" },
   { href: "/settings/notifications", label: "Notifications", group: "settings", icon: "bell" },
   { href: "/settings/filing-rules", label: "Filing rules", group: "settings", icon: "filter" },
+  { href: "/settings/money/accounts", label: "Accounts and cards", group: "settings", icon: "creditCard" },
   { href: "/sources", label: "Sources", group: "settings", icon: "plug" },
   { href: "/settings/modules", label: "My dashboard", group: "settings", icon: "layout" },
   { href: "/settings/preonboard", label: "Pre-onboarding links", group: "settings", icon: "list" },

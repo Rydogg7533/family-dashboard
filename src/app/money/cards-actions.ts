@@ -5,7 +5,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export type PaymentCardInput = { id?: string; account_id: string; form: "physical" | "virtual"; network: string; last4: string; label: string; holder: string; twin_of: string | null };
 
-const paths = () => { revalidatePath("/money"); revalidatePath("/money/accounts"); revalidatePath("/money/receipts"); revalidatePath("/money/receipts-to-finish"); };
+const paths = () => { revalidatePath("/money"); revalidatePath("/money/accounts"); revalidatePath("/settings/money/accounts"); revalidatePath("/money/receipts"); revalidatePath("/money/receipts-to-finish"); };
 
 export async function savePaymentCard(c: PaymentCardInput) {
   const last4 = c.last4.replace(/\D/g, "").slice(-4);
