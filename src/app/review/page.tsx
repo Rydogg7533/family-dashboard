@@ -4,6 +4,8 @@ import { ReviewTask } from "@/components/ReviewTask";
 import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
 import { TriageVerdict } from "@/components/TriageVerdict";
 import { ConfirmWeek } from "@/components/ConfirmWeek";
+import { ProposedRule } from "@/components/ProposedRule";
+import { isOwnerViewer } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +14,8 @@ const when = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month:
 const Head = ({ children }: { children: React.ReactNode }) => <div className="text-[11px] font-bold tracking-wide text-muted mt-2 mb-1.5">{children}</div>;
 
 export default async function ReviewPage() {
-  const r = await getReview();
-  const open = r.stale.length + r.asking.length;
+  const [r, owner] = await Promise.all([getReview(), isOwnerViewer()]);
+  const open = r.stale.length + r.asking.length + r.rules.length;
   return (
     <>
       <H1 right={r.lastConfirmed ? `Last: ${when(r.lastConfirmed.at)}` : undefined}>Weekly review</H1>
@@ -27,6 +29,12 @@ export default async function ReviewPage() {
       {r.asking.length > 0 && (<>
         <Head>STILL ASKING ({r.asking.length})</Head>
         <div className="flex flex-col gap-2 mb-4">{r.asking.map((c) => <Card key={c.id}><div className="font-semibold text-sm mb-1">Is {c.name} a subscription?</div><SubscriptionCandidate c={c} /></Card>)}</div>
+      </>)}
+
+      {r.rules.length > 0 && (<>
+        <Head>RULES TO SWITCH ON ({r.rules.length}{r.activeRules ? ` · ${r.activeRules} on` : ""})</Head>
+        <p className="text-[11px] text-muted mb-1.5 leading-snug">Each one keeps a sender out of your tasks for good. Nothing applies until you switch it on; the mail itself is never deleted.</p>
+        <div className="flex flex-col gap-2 mb-4">{r.rules.map((x) => <ProposedRule key={x.id} rule={x} owner={owner} />)}</div>
       </>)}
 
       {r.triage.length > 0 && (<>

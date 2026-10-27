@@ -11,8 +11,8 @@ import type { Scope, TriageItem, Verdict } from "@/lib/data-review";
 //
 // Saving happens on the first tap (tier 1), so nothing needs two taps to be recorded. A wrong verdict
 // then offers the scope question D98b requires of every answer: this one, or the pattern. The wording
-// is about whether the judgement is wrong every time, NOT about filtering future mail -- no triage
-// script reads a rules table yet, and promising otherwise is the defect D91 was written about.
+// is about whether the judgement is wrong every time. Since D121, "not a task, every time" also PROPOSES
+// a sender rule (when the task carries the sender); it acts only once switched on in the rules section.
 const VERDICTS: { v: Verdict; label: string }[] = [
   { v: "right", label: "Right" },
   { v: "not_a_task", label: "Not a task" },
@@ -29,6 +29,7 @@ export function TriageVerdict({ item }: { item: TriageItem }) {
   const [verdict, setVerdict] = useState<Verdict | null>(item.verdict);
   const [scope, setScope] = useState<Scope>(item.scope ?? "once");
   const [err, setErr] = useState<string | null>(null);
+  const [proposed, setProposed] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -37,6 +38,7 @@ export function TriageVerdict({ item }: { item: TriageItem }) {
     const r = await recordTriageVerdict(item.id, v, s);
     if (!r.ok) { setErr(("error" in r && r.error) || "That did not work."); return; }
     setVerdict(v); setScope(v === "right" ? "once" : s);
+    setProposed(("proposed" in r && r.proposed) || null);
     router.refresh();
   });
 
@@ -86,6 +88,8 @@ export function TriageVerdict({ item }: { item: TriageItem }) {
       {verdict && !err && (
         <div className="text-[11px] font-semibold text-accent" role="status">
           {SAID[verdict]}{verdict !== "right" && scope === "every_time" ? ", every time" : ""}. Tap another to change it.
+          {proposed && <> A rule for {proposed} is waiting above: switch it on to keep that sender out.</>}
+          {verdict === "not_a_task" && scope === "every_time" && !proposed && !item.fromAddress && <> (No sender kept on this task, so no rule could be proposed.)</>}
         </div>
       )}
       {err && <div className="text-red text-xs font-semibold">{err}</div>}

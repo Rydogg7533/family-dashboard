@@ -33,6 +33,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { die, option, openGmail, readMessages, pattern, merchantKey, amountOf, cycleOf } from "./email-lib.mjs";
 import { loadKey, ask, loadCache, saveCache } from "./email-triage-lib.mjs";
+import { loadRules, recordHits } from "./email-rules-lib.mjs";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
@@ -70,6 +71,21 @@ async function main() {
   const profile = await api("/gmail/v1/users/me/profile");
   if (String(profile.emailAddress).toLowerCase() !== account) die(`the saved sign-in belongs to ${profile.emailAddress}, not ${account}`);
   const rows = await readMessages(api, query, MAX, { log: console.log });
+
+  // ---------- the household's own rules (stage 3 of the F1 funnel) ----------
+  // Approved sender/domain rules place mail the free rules could not, before the model sees it. Read once per run;
+  // a rule you never activated on /review does nothing here. Counts are printed, never addresses.
+  const ruleSet = SB_URL && SB_KEY ? await loadRules(rest, { mailbox: account }) : { rules: [], ruleFor: () => null, hits: new Map(), error: "no Supabase keys" };
+  const RULE_ACTION = { ignore: "skip", archive: "archive", money: "money", record: "record", task: "needs-model" };
+  let ruled = 0;
+  for (const r of rows) {
+    if (!["needs-model", "money"].includes(r.action)) continue;
+    const rule = ruleSet.ruleFor(r); if (!rule) continue;
+    r.rule = rule; r.action = RULE_ACTION[rule.action] || r.action; r.reason = `your rule: ${rule.action} ${rule.match_kind} ${rule.match_value}`;
+    if (rule.action === "task") r.forceTask = true;
+    ruled++;
+  }
+  console.log(ruleSet.error ? `Rules: not read (${ruleSet.error}).` : `Rules: ${ruleSet.rules.length} active; ${ruled} messages placed by them (never sent to the model).`);
   let handledReceipts = [];
   if (HANDLED) {
     console.log("\nReading receipts already filed under Dashboard/Handled (to find subscriptions)…");
@@ -98,7 +114,7 @@ async function main() {
       summary = `${n} similar emails from ${g.address} between ${oldest.date} and ${newest.date}. Archive them all, make a rule, or keep this as a task. The newest is linked.`;
     } else { if (g.action === "money") singleReceipts += n; else { single += n; singleRows.push(...g.msgs); } continue; }
     tasks.push({ merge_key: `email:${account}:${g.domain}:${g.pat}`, kind: "decide", tier: 2, origin_kind: "email", origin_ref: gmailUrl(newest.id), title, summary,
-      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id) })), count: n, sub: g.action === "money", rep: g.action === "needs-model" ? newest : null,
+      origins: g.msgs.slice(0, 100).map((m) => ({ kind: "email", account, id: m.id, date: m.date, url: gmailUrl(m.id), from: m.address, name: m.name, domain: m.domain })), count: n, sub: g.action === "money", rep: g.action === "needs-model" ? newest : null,
       cand: g.action === "money" ? { merchant_key: merchantKey(g.name, g.domain), name: who, address: g.address, domain: g.domain, mailbox: account, task_merge_key: `email:${account}:${g.domain}:${g.pat}`, receipt_count: n, first_seen: oldest.date, last_seen: newest.date, amount_hint: g.msgs.map(amountOf).find((x) => x !== null) ?? null, cycle_hint: cycleOf(g.msgs.map((m) => m.date)) } : null });
   }
 
@@ -148,7 +164,7 @@ async function main() {
     const byTopic = new Map(); let noAction = 0, quiet = 0;
     for (const r of singleRows) {
       const d = cache[r.id]; if (!d || d.topic === undefined) continue;
-      if (!wants(d)) { if (d.needs_action) quiet++; else noAction++; continue; }
+      if (!wants(d) && !r.forceTask) { if (d.needs_action) quiet++; else noAction++; continue; }   // a "task" rule keeps it even when the model says nothing needed
       const k = d.topic ? `topic:${d.topic}` : `msg:${r.id}`;
       (byTopic.get(k) || byTopic.set(k, []).get(k)).push({ r, d });
     }
@@ -157,7 +173,7 @@ async function main() {
       const { r, d } = list[0], n = list.length;
       tasks.push({ merge_key: `email:${account}:${k}`, kind: d.kind, tier: 2, origin_kind: "email", origin_ref: gmailUrl(r.id), due_at: dueOf(d.urgency),
         title: short(`${String(d.title || r.subject || "(no subject)")}${n > 1 ? ` (×${n})` : ""}`, 90), summary: short(`${d.why || ""} (${r.name || r.domain}, ${r.date}${n > 1 ? `; ${n} emails about this` : ""})`, 300),
-        origins: list.slice(0, 100).map((x) => ({ kind: "email", account, id: x.r.id, date: x.r.date, url: gmailUrl(x.r.id) })), count: n, sub: false, rep: null });
+        origins: list.slice(0, 100).map((x) => ({ kind: "email", account, id: x.r.id, date: x.r.date, url: gmailUrl(x.r.id), from: x.r.address, name: x.r.name, domain: x.r.domain })), count: n, sub: false, rep: null });
     }
     modelNote = ` Model: ${fresh.length - unreadable} answered, ${unreadable} unreadable, ${noAction} single messages need nothing, ${quiet} lower-urgency left out, ${dropped.length} repeat groups judged "needs nothing" and dropped; ${inTok} tokens in, ${outTok} out, about $${cost.toFixed(4)}.`;
     if (dropped.length) { console.log("\nGroups the model says need nothing (no task made):"); for (const x of dropped) console.log(`   - ${x}`); }
@@ -200,7 +216,8 @@ async function main() {
     const body = [...byKey.values()].map((c) => ({ ...c, amount_hint: c.amount_hint ?? cands.get(c.merchant_key)?.amount_hint ?? null, cycle_hint: c.cycle_hint ?? cands.get(c.merchant_key)?.cycle_hint ?? null, updated_at: new Date().toISOString() }));
     await rest("POST", "subscription_candidates?on_conflict=merchant_key", body, { Prefer: "resolution=merge-duplicates,return=minimal" });
   }
-  const line = `${account}: ${rows.length} emails read, ${created} tasks suggested, ${updated} updated, ${skipped} left (already handled by you), no mailbox changes${TRIAGE ? ", model triage on" : ""}`;
+  const hitRules = await recordHits(rest, ruleSet.hits);
+  const line = `${account}: ${rows.length} emails read, ${ruled} placed by ${hitRules} of your rules, ${created} tasks suggested, ${updated} updated, ${skipped} left (already handled by you), no mailbox changes${TRIAGE ? ", model triage on" : ""}`;
   await rest("POST", "activity_log", { actor: "email-agent", action: "email_run", subject: line, ref: account, undoable: false });
   try { await rest("POST", "system_status?on_conflict=key", { key: "email_agent", state: "ok", summary: line, updated_at: new Date().toISOString() }, { Prefer: "resolution=merge-duplicates" }); } catch (e) { console.log(`  (health line not updated: ${e.message})`); }
 

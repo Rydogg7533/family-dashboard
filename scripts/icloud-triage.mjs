@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { connect, scanInbox, classify, ensureFolder, chunks, readEnv } from "./icloud-file.mjs";
 import { suspicion } from "./phish-lib.mjs";
 import { systemPrompt, loadKey, ask, loadCache, saveCache } from "./email-triage-lib.mjs";
+import { loadRules, recordHits } from "./email-rules-lib.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
@@ -38,6 +39,18 @@ const secrets = join(homedir(), "_secrets_local_only");
 const neverFile = join(secrets, "email-agent", "never-send.txt");
 const neverList = [...(existsSync(neverFile) ? readFileSync(neverFile, "utf8").split("\n") : []), ...(opt("--never") || "").split(",")].map((l) => l.replace(/#.*/, "").trim().toLowerCase()).filter(Boolean);
 export const isNever = (m) => neverList.some((k) => m.address === k || m.domain === k || m.domain.endsWith("." + k));
+// Supabase (service key) — used to read the household's rules before the model, and by --apply to write tasks.
+const env0 = (() => { try { return readEnv(join(secrets, "family-dashboard.env")); } catch { return {}; } })();
+const SB = env0.SUPABASE_URL || env0.NEXT_PUBLIC_SUPABASE_URL, SK = env0.SUPABASE_SERVICE_KEY || env0.SUPABASE_SERVICE_ROLE_KEY;
+const rest = async (method, path, body, extra = {}) => {
+  for (let t = 1; ; t++) {
+    try {
+      const res = await fetch(`${SB}/rest/v1/${path}`, { method, headers: { apikey: SK, Authorization: `Bearer ${SK}`, "Content-Type": "application/json", ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const txt = await res.text(); if (!res.ok) throw Object.assign(new Error(`${method} ${path.split("?")[0]} → ${res.status} ${txt.slice(0, 200)}`), { http: true });
+      return txt ? JSON.parse(txt) : null;
+    } catch (e) { if (e.http || t >= 4) throw e; await new Promise((ok) => setTimeout(ok, 1500 * t)); }
+  }
+};
 
 export const FOLDERS = { suspicious: "Dashboard/Suspicious", waiting: "Dashboard/Waiting", records: "Dashboard/Records", handled: "Dashboard/Handled" };
 const PV = 2;   // prompt version: answers saved under an older prompt are asked again
@@ -86,7 +99,12 @@ async function main() {
     try {
       const rows = await scanInbox(c);
       const cands = rows.filter((r) => r.date <= WIN_NEW_MS && r.date >= WIN_OLD_MS).map((r) => ({ ...r, cls: classify(r, { months: MONTHS, keep: keepSenders }) })).filter((r) => (r.cls.to === null && /needs a person/.test(r.cls.why)) || r.cls.to === "suspicious");
-      const sus = cands.filter((r) => r.cls.to === "suspicious"), never = cands.filter((r) => r.cls.to !== "suspicious" && isNever(r)), eligible = cands.filter((r) => r.cls.to !== "suspicious" && !isNever(r));
+      const sus = cands.filter((r) => r.cls.to === "suspicious"), never = cands.filter((r) => r.cls.to !== "suspicious" && isNever(r));
+      // the household's own rules (approved on /review) place mail before the model; "ignore" leaves it in the inbox untouched
+      const ruleSet = SB && SK ? await loadRules(rest, { mailbox: user }) : { rules: [], ruleFor: () => null, hits: new Map(), error: "no Supabase keys" };
+      const ruled = [];
+      const eligible = cands.filter((r) => r.cls.to !== "suspicious" && !isNever(r)).filter((r) => { const rule = ruleSet.ruleFor(r); if (!rule) return true; ruled.push({ r, rule }); return false; });
+      console.log(ruleSet.error ? `  rules: not read (${ruleSet.error}).` : `  rules: ${ruleSet.rules.length} active; ${ruled.length} messages placed by them (never sent to the model).`);
       const cache = loadCache(`icloud-${user}`);
       const UNCLEAR = /preview|unclear|too short|cut off|only html|css|markup|empty/i;
       const isStale = (d) => !d || d.v !== PV || (!d.retried && UNCLEAR.test(`${d.why || ""} ${d.title || ""}`));   // an answer that said "preview unclear" gets one more try with the better preview
@@ -124,8 +142,10 @@ async function main() {
       // ---- batch review: what the cached answers would do ----
       const cur = (r) => (cache[keyOf(r)]?.v === PV ? cache[keyOf(r)] : null);
       const plan = eligible.map((r) => ({ r, d: cur(r), ...decideFromAnswer(cur(r), { includeWhenever: INCLUDE_WHENEVER, ageDays: (Date.now() - r.date) / 86400_000, taskDays: TASK_DAYS }) }));
+      const RULE_ACT = { ignore: "stay", archive: "handled", money: "records", record: "records", task: "stay" };   // task-rules on iCloud need a model title first; they stay until judged
+      for (const { r, rule } of ruled) plan.push({ r, d: null, act: RULE_ACT[rule.action] || "stay", why: `your rule: ${rule.action} ${rule.match_kind} ${rule.match_value}` });
       const groups = { task: [], records: [], handled: [], stay: [] }; for (const p of plan) groups[p.act].push(p);
-      if (plan.some((p) => p.d)) {
+      if (plan.some((p) => p.d || p.act !== "stay")) {
         console.log("\nBATCH REVIEW (from the saved answers):");
         const show = (label, l, f) => { console.log(`  ${label}: ${l.length}`); for (const p of l.slice(0, 12)) console.log(`      ${f(p)}`); if (l.length > 12) console.log(`      … and ${l.length - 12} more`); };
         show("NEEDS YOU → task + Dashboard/Waiting", groups.task, (p) => `${p.d.urgency === "now" ? "NOW " : "soon"} ${p.r.address.slice(0, 28).padEnd(28)} ${p.why.slice(0, 60)}`);
@@ -145,17 +165,6 @@ async function main() {
       // ---- apply: cached answers only ----
       const todo = [...sus.map((r) => ({ r, act: "suspicious" })), ...plan.filter((p) => p.act !== "stay")].sort((a, b) => b.r.date - a.r.date).slice(0, LIMIT);   // newest first, all kinds mixed
       if (!todo.length) { console.log("\nNothing to apply (no cached answers for this slice? run with --ask first)."); return; }
-      const env = readEnv(join(secrets, "family-dashboard.env"));
-      const SB = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL, SK = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
-      const rest = async (method, path, body, extra = {}) => {
-        for (let t = 1; ; t++) {
-          try {
-            const res = await fetch(`${SB}/rest/v1/${path}`, { method, headers: { apikey: SK, Authorization: `Bearer ${SK}`, "Content-Type": "application/json", ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
-            const txt = await res.text(); if (!res.ok) throw Object.assign(new Error(`${method} ${path.split("?")[0]} → ${res.status} ${txt.slice(0, 200)}`), { http: true });
-            return txt ? JSON.parse(txt) : null;
-          } catch (e) { if (e.http || t >= 4) throw e; await new Promise((ok) => setTimeout(ok, 1500 * t)); }
-        }
-      };
       const tasksWanted = todo.filter((p) => p.act === "task");
       let person = null;
       if (tasksWanted.length) { if (!SB || !SK) { console.error("STOP: no Supabase keys in family-dashboard.env"); process.exit(2); } person = (await rest("GET", `profiles?display_name=eq.Ryan&select=id`))?.[0]?.id; if (!person) { console.error("STOP: no profile named Ryan"); process.exit(2); } }
@@ -170,13 +179,14 @@ async function main() {
           const due = d.urgency === "now" ? new Date().toISOString() : new Date(Date.now() + 3 * 86400_000).toISOString();
           const row = await rest("POST", "tasks", { merge_key: mk, kind: d.kind, tier: 2, origin_kind: "email", origin_ref: null, due_at: due, person,
             title: `${String(d.title || r.subject || "(no subject)").slice(0, 80)}${n > 1 ? ` (×${n})` : ""}`, summary: `${d.why || ""} (from ${r.address} · no links kept from the email, open it in Mail yourself; ${new Date(r.date).toISOString().slice(0, 10)}; moved to Waiting in iCloud Mail)`.slice(0, 300),
-            origins: list.slice(0, 50).map((x) => ({ kind: "email", account: user, messageId: x.r.messageId, date: new Date(x.r.date).toISOString() })) }, { Prefer: "return=representation" });
+            origins: list.slice(0, 50).map((x) => ({ kind: "email", account: user, messageId: x.r.messageId, date: new Date(x.r.date).toISOString(), from: x.r.address, domain: x.r.domain })) }, { Prefer: "return=representation" });
           await rest("POST", "activity_log", { actor: "icloud-triage", action: "task_suggested", subject: String(d.title || r.subject).slice(0, 200), ref: row[0].id, undoable: false });
           made++;
         } else if (ex[0].status === "open") kept++;
         else list.forEach((x) => { x.act = "handled"; });                 // you already closed this one
       }
       console.log(`\nTasks: ${made} created, ${kept} already open.`);
+      if (SB && SK) await recordHits(rest, ruleSet.hits);
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const undoFile = join(undoDir, `icloud-triage-${stamp}.json`);
       const log = { account: user, at: new Date().toISOString(), moves: [] };
