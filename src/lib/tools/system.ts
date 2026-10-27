@@ -17,6 +17,7 @@ const words = (q: string) => norm(q).split(" ").filter((w) => w.length > 1);
 const PAGE_HINTS: Record<string, string> = {
   "/settings/people": "who is in the household, children's logins and access, birthdays (head of household)",
   "/settings/household": "household name, time zone",
+  "/settings/vault": "1Password: where each sensitive item is kept (passport, license, SSN, titles, insurance cards, account numbers, deeds, wills, recovery keys), names and private links only",
   "/settings/money": "money accounts and cards",
   "/settings/connections": "Google and Apple connections, mailboxes",
   "/settings/contacts": "which address book contacts come from",

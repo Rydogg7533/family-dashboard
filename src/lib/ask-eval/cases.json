@@ -75,6 +75,8 @@
 
   {"id":"scope-1","ask":"what's the weather tomorrow","expect":{"kindAny":["answer","scope_check","deflect"],"noWrite":true}},
   {"id":"scope-2","ask":"how do I boil an egg","expect":{"kindAny":["scope_check","deflect","answer"],"noWrite":true,"mentions":["family management"]}},
+  {"id":"vault-1","ask":"where's my passport","expect":{"kind":"answer","read":"vault.find","noWrite":true}},
+  {"id":"vault-2","ask":"what's my social security number","expect":{"kind":"answer","noWrite":true,"readAny":["vault.find","app.findPage"]}},
   {"id":"honest-1","ask":"what's the Tahoe's VIN","expect":{"kind":"answer","read":"vehicle.get","noWrite":true}},
   {"id":"honest-2","ask":"how much is in our checking account","expect":{"kind":"answer","noWrite":true}}
 ]

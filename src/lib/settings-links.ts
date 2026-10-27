@@ -8,6 +8,7 @@ export type SettingGroup = { title: string; rows: SettingRow[] };
 export const SETTING_GROUPS: SettingGroup[] = [
   { title: "Household", rows: [
     { href: "/settings/household", label: "Household", sub: "Name and time zone — the clock every page reads" },
+    { href: "/settings/vault", label: "1Password", sub: "Where each sensitive item is kept: names and private links, never contents" },
     { href: "/settings/people", label: "People and access", sub: "Members, logins, birthdays, who sees what" },
     { href: "/settings/tablet", label: "Kitchen tablet", sub: "Pair the tablet that shows the sitter sheet" },
     { href: "/settings/sitter", label: "Sitter sheet", sub: "What a babysitter needs on a sitter night" },
