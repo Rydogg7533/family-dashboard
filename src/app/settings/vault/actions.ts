@@ -95,7 +95,7 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
     sb.from("vehicles").select("id, short").neq("status", "sold"),
     sb.from("documents").select("subject").like("subject", "Business/%").is("gone_at", null).limit(2000),
     sb.from("household").select("head_id").limit(1).maybeSingle(),
-    sb.from("vault_pointers").select("id, label").is("deleted_at", null),
+    sb.from("vault_pointers").select("id, label, template_key, deleted_at"),
     sb.from("vault_retired_owners").select("owner_key").not("retired_at", "is", null),
     sb.from("accounts").select("id, institution, kind, last4").is("retired_at", null),
     sb.from("devices").select("id, name").in("status", ["in use", "spare", "loaned"]),
@@ -103,7 +103,7 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   ]);
   // The earlier template made one note for many things ("Health insurance cards"); D19 is one row per thing. Those grouped
   // rows retire (never deleted) so the list shows each thing once.
-  const grouped = (existing ?? []).filter((r) => RETIRED_GROUPED_LABELS.includes(labelKey(String(r.label))));
+  const grouped = (existing ?? []).filter((r) => !r.deleted_at && RETIRED_GROUPED_LABELS.includes(labelKey(String(r.label))));
   if (grouped.length) await sb.from("vault_pointers").update({ deleted_at: new Date().toISOString(), note: "Split into one item per thing (D19)" }).in("id", grouped.map((r) => r.id)).then(() => {}, () => {});
   const groupedIds = new Set(grouped.map((r) => r.id));
   // A retired member gets no new items.
@@ -114,35 +114,38 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   // hand-named row is never duplicated by the template's plainer name.
   // "EIN letter — SHVR" (old form) and "SHVR EIN letter" (new) are the same thing.
   const key = (l: string) => { const m = /^(.+?) — (.+)$/.exec(l); return labelKey(m ? `${m[2]} ${m[1]}` : l); };
+  // "Exists" means live OR removed: a row the person took off the list is a decision Generate never undoes (restorable under
+  // Removed). Matched by template key first (survives a rename), then by label for rows made before keys existed.
   const have = new Set((existing ?? []).filter((r) => !groupedIds.has(r.id)).map((r) => key(String(r.label))));
+  const haveKeys = new Set((existing ?? []).map((r) => r.template_key).filter((k): k is string => !!k));
   const year = new Date().getFullYear();
   const head = (household?.head_id as string | null) ?? user.id;
   // Businesses: from filed documents, and from any business row already named "<Name> EIN letter" / "EIN letter — <Name>".
   const named = (bizRows ?? []).map((r) => /^(?:EIN letter|Operating agreement and formation documents) — (.+)$/.exec(String(r.label))?.[1] ?? /^(.+) (?:EIN letter|formation documents)$/.exec(String(r.label))?.[1]).filter((x): x is string => !!x);
   const entities = Array.from(new Set([...(docs ?? []).map((d) => String(d.subject).split("/")[1]), ...named].filter((s) => s && s.trim())));
-  const rows: { person: string | null; group: string; label: string; item_type: string; note: string | null; created_by: string; attached_kind?: string; attached_id?: string }[] = [];
-  const push = (person: string | null, group: string, label: string, type: string, note: string | null, attach?: { kind: string; id: string }) => {
-    if (have.has(key(label))) return;
-    have.add(key(label));
-    rows.push({ person, group, label, item_type: type, note, created_by: user.id, ...(attach ? { attached_kind: attach.kind, attached_id: attach.id } : {}) });
+  const rows: { person: string | null; group: string; label: string; item_type: string; note: string | null; created_by: string; template_key: string; attached_kind?: string; attached_id?: string }[] = [];
+  const push = (person: string | null, group: string, label: string, type: string, note: string | null, tkey: string, attach?: { kind: string; id: string }) => {
+    if (haveKeys.has(tkey) || have.has(key(label))) return;
+    have.add(key(label)); haveKeys.add(tkey);
+    rows.push({ person, group, label, item_type: type, note, created_by: user.id, template_key: tkey, ...(attach ? { attached_kind: attach.kind, attached_id: attach.id } : {}) });
   };
   for (const t of VAULT_TEMPLATE) {
     const base = t.note ?? null;
     // Another adult's personal items are theirs to create (the database refuses them under this login, and
     // this login cannot see them to know whether they exist), so they are made when that adult taps
     // Generate on their own login. Household items are made here for everyone.
-    if (t.for === "adult") { for (const a of adults ?? []) { if (a.id === user.id) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base); } }
+    if (t.for === "adult") { for (const a of adults ?? []) { if (a.id === user.id) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base, `${t.key}:a:${a.id}`); } }
     else if (t.for === "child") for (const k of kids ?? []) {
       const grown = typeof k.birth_year === "number" && year - k.birth_year >= 18;
       const name = String(k.display_name ?? "Child");
-      push(null, t.group, t.label.replace("{name}", name), t.type, grown && t.adultChildNote ? `Shared vault, only if ${name} wants the family to hold a copy (an adult)` : base);
+      push(null, t.group, t.label.replace("{name}", name), t.type, grown && t.adultChildNote ? `Shared vault, only if ${name} wants the family to hold a copy (an adult)` : base, `${t.key}:k:${k.id}`);
     }
-    else if (t.for === "vehicle") for (const v of vehicles ?? []) push(null, t.group, t.label.replace("{name}", String(v.short)), t.type, base, { kind: "vehicle", id: String(v.id) });
-    else if (t.for === "entity") for (const e of entities) push(head, t.group, t.label.replace("{name}", e), t.type, base);
-    else if (t.for === "account") { if (user.id === head) for (const a of accounts ?? []) push(head, t.group, t.label.replace("{name}", `${a.institution} ${a.kind}${a.last4 ? ` ending ${a.last4}` : ""}`), t.type, base, { kind: "account", id: String(a.id) }); }
-    else if (t.for === "device") for (const d of devices ?? []) push(null, t.group, t.label.replace("{name}", String(d.name)), t.type, base, { kind: "device", id: String(d.id) });
-    else if (t.for === "head") push(head, t.group, t.label, t.type, base);
-    else push(null, t.group, t.label, t.type, base);
+    else if (t.for === "vehicle") for (const v of vehicles ?? []) push(null, t.group, t.label.replace("{name}", String(v.short)), t.type, base, `${t.key}:v:${v.id}`, { kind: "vehicle", id: String(v.id) });
+    else if (t.for === "entity") for (const e of entities) push(head, t.group, t.label.replace("{name}", e), t.type, base, `${t.key}:e:${labelKey(e)}`);
+    else if (t.for === "account") { if (user.id === head) for (const a of accounts ?? []) push(head, t.group, t.label.replace("{name}", `${a.institution} ${a.kind}${a.last4 ? ` ending ${a.last4}` : ""}`), t.type, base, `${t.key}:acct:${a.id}`, { kind: "account", id: String(a.id) }); }
+    else if (t.for === "device") for (const d of devices ?? []) push(null, t.group, t.label.replace("{name}", String(d.name)), t.type, base, `${t.key}:d:${d.id}`, { kind: "device", id: String(d.id) });
+    else if (t.for === "head") push(head, t.group, t.label, t.type, base, `${t.key}:head`);
+    else push(null, t.group, t.label, t.type, base, `${t.key}:household`);
   }
   const others = (adults ?? []).filter((a) => a.id !== user.id).map((a) => String(a.display_name ?? "Member"));
   if (rows.length) {
@@ -152,4 +155,15 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   }
   revalidatePath("/settings/vault");
   return { ok: true, added: rows.length, total: have.size, others };
+}
+
+// Back from Removed. A removed row keeps its link and date, so restoring it brings everything back.
+export async function restoreVaultPointer(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data, error } = await sb.from("vault_pointers").update({ deleted_at: null, updated_at: new Date().toISOString() }).eq("id", id).not("deleted_at", "is", null).select("id").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "Not yours to restore." };
+  revalidatePath("/settings/vault");
+  return { ok: true };
 }

@@ -1,14 +1,14 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveVaultPointer, removeVaultPointer, generateVaultChecklist, setVaultOwnerRetired } from "@/app/settings/vault/actions";
+import { saveVaultPointer, removeVaultPointer, restoreVaultPointer, generateVaultChecklist, setVaultOwnerRetired } from "@/app/settings/vault/actions";
 import { ownerKey, VAULT_KINDS, kindById, buildLabel, type VaultPointer, type VaultOwner, type About } from "@/lib/vault";
 
 type Group = { id: string; label: string; blurb: string };
 const field = "w-full min-h-11 rounded-xl border border-line bg-bg px-3 text-sm";
 const TYPES = [["passport", "Passport"], ["driver_license", "Driver license"], ["ssn", "Social Security number"], ["identity", "Identity"], ["document", "Document"], ["bank_account", "Bank account"], ["secure_note", "Secure note"], ["membership", "Membership"], ["software_license", "Software license"], ["other", "Other"]];
 
-export function VaultList({ rows, me, groups, adults, kids, vehicles, devices, accounts, retired, isOwner }: { rows: VaultPointer[]; me: string; groups: Group[]; adults: VaultOwner[]; kids: VaultOwner[]; vehicles: VaultOwner[]; devices: VaultOwner[]; accounts: VaultOwner[]; retired: string[]; isOwner: boolean }) {
+export function VaultList({ rows, removed, me, groups, adults, kids, vehicles, devices, accounts, retired, isOwner }: { rows: VaultPointer[]; removed: VaultPointer[]; me: string; groups: Group[]; adults: VaultOwner[]; kids: VaultOwner[]; vehicles: VaultOwner[]; devices: VaultOwner[]; accounts: VaultOwner[]; retired: string[]; isOwner: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState<Partial<VaultPointer> & { household?: boolean; linkOnly?: boolean } | null>(null);
   // D19: a new pointer is "what kind, about whom or what"; the name, group, type and vault follow. No free naming.
@@ -37,15 +37,16 @@ export function VaultList({ rows, me, groups, adults, kids, vehicles, devices, a
     });
   };
   const remove = (id: string) => start(async () => { const r = await removeVaultPointer(id); if (!r.ok) setMsg(r.error ?? "Could not remove."); else router.refresh(); });
+  const restore = (id: string) => start(async () => { const r = await restoreVaultPointer(id); if (!r.ok) setMsg(r.error ?? "Could not restore."); else router.refresh(); });
 
   const [onlyTodo, setOnlyTodo] = useState(false);
   const [gen, setGen] = useState<string | null>(null);
-  const generate = () => start(async () => {
+  const generate = () => { if (!window.confirm("Add anything new (a new person, vehicle, account, device or business) to the list?\n\nThis never changes or removes a row you have linked, and never brings back a row you removed.")) return; start(async () => {
     const r = await generateVaultChecklist();
     const tail = r.others?.length ? ` ${r.others.join(" and ")}'s own items appear when ${r.others.length === 1 ? "she taps" : "they tap"} Generate on ${r.others.length === 1 ? "her" : "their"} own login.` : "";
     setGen(r.ok ? (r.added ? `Added ${r.added} item${r.added === 1 ? "" : "s"}. ${r.total} on your list.${tail}` : `Nothing new to add: all ${r.total} items you can see are already listed.${tail}`) : (r.error ?? "Could not generate."));
     router.refresh();
-  });
+  }); };
   const linked = rows.filter((r) => r.link).length;
   const shownRows = onlyTodo ? rows.filter((r) => !r.link) : rows;
 
@@ -77,7 +78,7 @@ export function VaultList({ rows, me, groups, adults, kids, vehicles, devices, a
           <button type="button" onClick={() => setOnlyTodo((v) => !v)} className={`min-h-11 px-4 rounded-xl font-semibold text-sm ${onlyTodo ? "bg-accent text-white" : "border border-line"}`}>{onlyTodo ? "Showing to-do" : "Show to-do only"}</button>
         </div>
         {gen && <div className="text-xs text-muted">{gen}</div>}
-        <div className="text-[11px] text-muted">Generate makes one item for each person, vehicle and business in the household, from the master list; tap it again after a new baby, car or business and it adds only what is new.</div>
+        <div className="text-[11px] text-muted">Generate makes one item for each person, vehicle, account, device and business in the household, from the master list. Tap it again after a new baby, car or account and it adds only what is new; it never touches a row you linked or removed.</div>
       </div>
       {msg && !editing && <div className="text-xs text-red">{msg}</div>}
       {!adding && !editing && <button type="button" onClick={() => { setAdding({ about: "me", subjectId: "", kind: "", link: "", expires_on: "", note: "" }); setMsg(null); }} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add something not on the list</button>}
@@ -153,12 +154,26 @@ export function VaultList({ rows, me, groups, adults, kids, vehicles, devices, a
                         {r.link
                           ? <a href={r.link} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>
                           : <button type="button" onClick={() => { setEditing({ ...r, household: r.person === null, linkOnly: true }); setAdding(null); setMsg(null); }} className="shrink-0 min-h-9 px-3 rounded-full border border-accent text-accent text-xs font-semibold">Link it</button>}
-                        <button type="button" onClick={() => remove(r.id)} aria-label="Remove" className="shrink-0 min-h-9 w-9 rounded-full border border-line text-muted text-xs">✕</button>
+                        <button type="button" onClick={() => remove(r.id)} aria-label="Remove (not needed; restorable under Removed)" title="Not needed. It moves to Removed, where it can be restored." className="shrink-0 min-h-9 w-9 rounded-full border border-line text-muted text-xs">✕</button>
                       </div>
                     ))}
                   </div>
                 );
               })}
+      {removed.length > 0 && (
+        <details className="card text-sm">
+          <summary className="font-semibold cursor-pointer">Removed ({removed.length})</summary>
+          <div className="text-[11px] text-muted mt-1">Taken off the list by someone here. Nothing is deleted; a removed row keeps its link and date, and Generate never brings it back on its own.</div>
+          <div className="mt-2 flex flex-col gap-2">
+            {removed.slice(0, 60).map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-2 border-t border-line pt-2">
+                <div className="min-w-0"><div className="font-semibold truncate">{r.label}</div><div className="text-[11px] text-muted truncate">{[groups.find((g) => g.id === r.group)?.label, r.link ? "linked" : "no link", r.note].filter(Boolean).join(" · ")}</div></div>
+                <button type="button" disabled={busy} onClick={() => restore(r.id)} className="shrink-0 min-h-9 px-3 rounded-full border border-line text-xs font-semibold disabled:opacity-50">Restore</button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       {retiredSections.length > 0 && (
         <details className="card text-sm">
           <summary className="font-semibold cursor-pointer">Retired ({retiredSections.length})</summary>
