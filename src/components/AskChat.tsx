@@ -119,18 +119,29 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     if (reply.items?.length) return `${say} The ${reply.items.length === 1 ? "row is" : `${reply.items.length} rows are`} on the screen.`;
     return say;
   }
+  const [voiceSecs, setVoiceSecs] = useState(0);
+  useEffect(() => {
+    if (voice === "idle" || voice === "error") { setVoiceSecs(0); return; }
+    const t = setInterval(() => setVoiceSecs(voiceRef.current?.elapsed() ?? 0), 1000);
+    return () => clearInterval(t);
+  }, [voice]);
+  function voiceEnd(why?: "silence" | "cap" | "away" | "bye") {
+    const s = voiceRef.current; if (!s) return;
+    const secs = s.close(); voiceRef.current = null; setVoice("idle");
+    void logVoiceSession(secs, "realtime", source ? `${source}-voice` : "ask-voice");
+    // D15: the session ends by itself on silence, at the cap, when the app goes away, or on "bye".
+    if (why === "silence") setToast({ text: "Voice ended after 20 seconds of quiet." });
+    else if (why === "cap") setToast({ text: "Voice ended at the 5-minute limit. Tap the mic to start again." });
+  }
   function voiceToggle() {
-    if (voiceRef.current) {
-      const secs = voiceRef.current.close(); voiceRef.current = null; setVoice("idle");
-      void logVoiceSession(secs, "realtime", source ? `${source}-voice` : "ask-voice");
-      return;
-    }
+    if (voiceRef.current) { voiceEnd(); return; }
     const s = new VoiceSession({
       onStatus: setVoice,
       onUser: () => { /* the transcript reaches the thread through ask(); nothing to add here */ },
       onAssistant: () => { /* same: the thread already holds the reply */ },
       onAsk: voiceAsk,
       onError: (m) => setToast({ text: m }),
+      onEnded: voiceEnd,
     });
     voiceRef.current = s;
     void s.connect();
@@ -269,7 +280,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
         {voiceOn && (
           <button type="button" onClick={voiceToggle} aria-label={voice === "idle" || voice === "error" ? "Talk" : "Stop talking"} title={voice === "idle" || voice === "error" ? "Talk to Ask (audio goes to OpenAI during a voice session)" : "End the voice session"}
             className={`min-h-12 min-w-12 rounded-full border font-semibold text-lg ${voice === "idle" || voice === "error" ? "border-line" : voice === "listening" ? "border-green bg-green-bg text-green" : "border-accent bg-accent text-white"}`}>
-            {voice === "idle" || voice === "error" ? "🎙" : "■"}
+            {voice === "idle" || voice === "error" ? "🎙" : <span className="text-xs tabular-nums">■ {Math.floor(voiceSecs / 60)}:{String(voiceSecs % 60).padStart(2, "0")}</span>}
           </button>
         )}
         {busy ? <button type="button" onClick={stop} className="min-h-12 px-5 rounded-full border border-line font-semibold">Stop</button>

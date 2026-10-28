@@ -13,7 +13,13 @@ export type VoiceEvents = {
   onAssistant: (text: string) => void;            // what the voice said (final)
   onAsk: (text: string) => Promise<string>;       // the tool: returns the sentence to speak
   onError: (message: string) => void;
+  onEnded?: (why: "silence" | "cap" | "away" | "bye") => void;   // the session closed itself (D15)
 };
+
+// D15 (Ryan, 2026-10-28 08:53): an open session bills whether anyone talks or not, so it ends on its own.
+export const SILENCE_MS = 20_000;   // no speech either way for this long
+export const CAP_MS = 5 * 60_000;   // never longer than this
+const BYE = /^(bye|goodbye|that'?s all|that'?s it|thanks,? that'?s all|stop|done|end)[.!]?$/i;
 
 export class VoiceSession {
   private pc: RTCPeerConnection | null = null;
@@ -22,7 +28,19 @@ export class VoiceSession {
   private audio: HTMLAudioElement | null = null;
   private startedAt = 0;
   private closed = false;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private capTimer: ReturnType<typeof setTimeout> | null = null;
+  private onAway = () => { if (document.visibilityState === "hidden") this.endSelf("away"); };
   constructor(private ev: VoiceEvents) {}
+
+  private touch() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.endSelf("silence"), SILENCE_MS);
+  }
+  private endSelf(why: "silence" | "cap" | "away" | "bye") {
+    if (this.closed) return;
+    this.ev.onEnded?.(why);
+  }
 
   async connect(voice?: string) {
     this.ev.onStatus("connecting");
@@ -39,7 +57,13 @@ export class VoiceSession {
 
       const dc = pc.createDataChannel("oai-events");
       this.dc = dc;
-      dc.onopen = () => { this.startedAt = Date.now(); this.ev.onStatus("listening"); };
+      dc.onopen = () => {
+        this.startedAt = Date.now(); this.ev.onStatus("listening");
+        this.touch();
+        this.capTimer = setTimeout(() => this.endSelf("cap"), CAP_MS);
+        document.addEventListener("visibilitychange", this.onAway);
+        window.addEventListener("pagehide", this.onAway);
+      };
       dc.onclose = () => { if (!this.closed) this.ev.onStatus("idle"); };
       dc.onmessage = (m) => { try { void this.handle(JSON.parse(m.data)); } catch { /* ignore */ } };
 
@@ -60,12 +84,12 @@ export class VoiceSession {
 
   private async handle(msg: { type: string; transcript?: string; call_id?: string; name?: string; arguments?: string; error?: { message?: string } }) {
     switch (msg.type) {
-      case "input_audio_buffer.speech_started": this.ev.onStatus("listening"); break;
-      case "input_audio_buffer.speech_stopped": this.ev.onStatus("thinking"); break;
-      case "conversation.item.input_audio_transcription.completed": { const t = msg.transcript?.trim(); if (t) this.ev.onUser(t); break; }
-      case "response.output_audio.delta": case "response.audio.delta": this.ev.onStatus("speaking"); break;
+      case "input_audio_buffer.speech_started": this.touch(); this.ev.onStatus("listening"); break;
+      case "input_audio_buffer.speech_stopped": this.touch(); this.ev.onStatus("thinking"); break;
+      case "conversation.item.input_audio_transcription.completed": { const t = msg.transcript?.trim(); if (t) { this.ev.onUser(t); if (BYE.test(t)) { this.send({ type: "response.cancel" }); this.endSelf("bye"); } } break; }
+      case "response.output_audio.delta": case "response.audio.delta": this.touch(); this.ev.onStatus("speaking"); break;
       case "response.output_audio_transcript.done": case "response.audio_transcript.done": { const t = msg.transcript?.trim(); if (t) this.ev.onAssistant(t); break; }
-      case "response.done": this.ev.onStatus("listening"); break;
+      case "response.done": this.touch(); this.ev.onStatus("listening"); break;
       case "response.function_call_arguments.done": {
         if (msg.name !== "ask") break;
         let text = "";
@@ -81,9 +105,16 @@ export class VoiceSession {
     }
   }
 
+  /** Seconds so far, for the timer on the button. */
+  elapsed(): number { return this.startedAt ? Math.round((Date.now() - this.startedAt) / 1000) : 0; }
+
   /** Seconds the call lasted, for the usage line. */
   close(): number {
     this.closed = true;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.capTimer) clearTimeout(this.capTimer);
+    document.removeEventListener("visibilitychange", this.onAway);
+    window.removeEventListener("pagehide", this.onAway);
     const secs = this.startedAt ? Math.round((Date.now() - this.startedAt) / 1000) : 0;
     try { this.dc?.close(); } catch { /* ignore */ }
     try { this.pc?.close(); } catch { /* ignore */ }
