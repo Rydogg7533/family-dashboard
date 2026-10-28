@@ -15,8 +15,9 @@ import { commsTools } from "@/lib/tools/comms";
 import { vaultTools } from "@/lib/tools/vault";
 import { historyTools } from "@/lib/tools/history";
 import { sitterTools } from "@/lib/tools/sitter";
+import { moreTools } from "@/lib/tools/more";
 
 // Everything the app can be asked to do. A new feature adds its tool here and the Ask box has it; nothing
 // else needs changing. Keep the names domain.verb, and keep the descriptions written for a reader who
 // knows nothing about the tables underneath.
-export const TOOLS: Tool[] = [...taskTools, ...deviceTools, ...calendarTools, ...householdTools, ...inboxTools, ...documentTools, ...moneyTools, ...registerTools, ...peopleTools, ...recordTools, ...systemTools, ...commsTools, ...vaultTools, ...historyTools, ...sitterTools];
+export const TOOLS: Tool[] = [...taskTools, ...deviceTools, ...calendarTools, ...householdTools, ...inboxTools, ...documentTools, ...moneyTools, ...registerTools, ...peopleTools, ...recordTools, ...systemTools, ...commsTools, ...vaultTools, ...historyTools, ...sitterTools, ...moreTools];

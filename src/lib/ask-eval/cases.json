@@ -885,5 +885,95 @@
       ],
       "noTool": "calendar.add"
     }
+  },
+  {
+    "id": "more-1",
+    "ask": "what's overdue",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "readAny": [
+        "task.review",
+        "task.find"
+      ]
+    }
+  },
+  {
+    "id": "more-2",
+    "ask": "did AAA pay us back",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "claim.find"
+    }
+  },
+  {
+    "id": "more-3",
+    "ask": "is Melissa free Thursday afternoon",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "calendar.whoFree"
+    }
+  },
+  {
+    "id": "more-4",
+    "ask": "add paper towels",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "shop.add",
+      "args": {
+        "name": "paper towels"
+      }
+    }
+  },
+  {
+    "id": "more-5",
+    "ask": "what's on the shop list",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "shop.find"
+    }
+  },
+  {
+    "id": "more-6",
+    "ask": "when is the Amex statement due",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "money.reconcile"
+    }
+  },
+  {
+    "id": "more-7",
+    "ask": "which cards do we have",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "money.accounts"
+    }
+  },
+  {
+    "id": "more-8",
+    "ask": "add the new TV to things, Samsung, living room",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "thing.add",
+      "args": {
+        "name": "TV"
+      }
+    }
+  },
+  {
+    "id": "more-9",
+    "ask": "unsubscribe from Old Navy",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "calendar.add"
+    }
   }
 ]
