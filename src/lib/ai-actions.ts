@@ -65,6 +65,17 @@ async function recordAsk(thread: Turn[], reply: AskReply, source: string) {
   } catch { /* bookkeeping only; the answer still goes back */ }
 }
 
+// A finished voice session (D14): seconds and model for the usage line. No audio, no transcript.
+export async function logVoiceSession(seconds: number, model: string, source = "ask-voice") {
+  if (!hasSupabaseEnv() || !(seconds > 0)) return;
+  try {
+    const sb = await createClient();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    await sb.from("voice_sessions").insert({ user_id: user.id, actor: user.email ?? "member", model: model.slice(0, 80), seconds: Math.round(seconds), source: source.slice(0, 80) });
+  } catch { /* bookkeeping only */ }
+}
+
 async function askOnce(thread: Turn[], assistantApp?: string): Promise<AskReply> {
   try {
     const key = threadKeyOf(thread.find((t) => t.role === "user")?.text ?? "");

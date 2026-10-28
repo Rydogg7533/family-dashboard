@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { askAction, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
+import { askAction, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply, logVoiceSession } from "@/lib/ai-actions";
 import type { AskItem, AskReply, Turn } from "@/lib/ask-engine";
+import { VoiceSession, type VoiceStatus } from "@/lib/voice-client";
 import { splitAnswer } from "@/lib/ask-shared";
 import { FetchButton } from "@/components/FetchButton";
 
@@ -64,9 +65,10 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   }
 
   // replaceFrom: resend from this user bubble, dropping it and everything after (the originals stay in Ask history on the server).
-  async function send(text: string, replaceFrom?: number) {
+  // Returns the reply so voice (D14) can speak it; a typed send ignores the return.
+  async function send(text: string, replaceFrom?: number, via: "ask" | "voice" = "ask"): Promise<AskReply | null> {
     const q = text.trim();
-    if (!q || busy) return;
+    if (!q || busy) return null;
     setInput(""); setEditing(null);
     const base = replaceFrom != null ? bubbles.slice(0, replaceFrom) : bubbles;
     const next: Bubble[] = [...base, { at: Date.now(), role: "user", text: q }];
@@ -80,8 +82,8 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     const lastB = base[base.length - 1];
     const pend = lastB?.role === "assistant" && lastB.reply && (lastB.reply.kind === "tool_confirm" || lastB.reply.kind === "event_confirm" || lastB.reply.kind === "event_move") && !lastB.toolResult && !lastB.eventResult
       ? { kind: lastB.reply.kind, tool: lastB.reply.tool, draft: lastB.reply.draft, move: lastB.reply.move, feedId: lastB.reply.feedId } : null;
-    const reply = await askAction(thread, undefined, source ?? "ask", pend).catch((e) => ({ kind: "inbox", text: `The model could not be reached (${String(e?.message ?? e).slice(0, 80)}).`, cost: 0, costText: "", model: "none", sample: false } as AskReply));
-    if (my !== gen.current) return;   // stopped, or replaced by a newer request
+    const reply = await askAction(thread, undefined, via === "voice" ? "ask-voice" : (source ?? "ask"), pend).catch((e) => ({ kind: "inbox", text: `The model could not be reached (${String(e?.message ?? e).slice(0, 80)}).`, cost: 0, costText: "", model: "none", sample: false } as AskReply));
+    if (my !== gen.current) return null;   // stopped, or replaced by a newer request
     // The proposal is answered now, whatever the answer was; it must not be runnable twice.
     if (pend) setBubbles((bs) => bs.map((b) => (b === lastB ? { ...b, toolResult: b.reply?.kind === "tool_confirm" ? { ok: true, text: "" } : b.toolResult, eventResult: b.reply?.kind !== "tool_confirm" ? { ok: true, text: "" } : b.eventResult } : b)));
     setSpent((s) => s + reply.cost);
@@ -95,7 +97,45 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     }
     setBubbles([...next, bubble]);
     setBusy(false);
+    return reply;
   }
+
+  // Voice (D14): the voice model's one tool is ask(text); it lands here and goes through send() like typing.
+  // Rows and cards still appear in the thread; the voice says the sentence. A tier-3 write is told to the voice
+  // as "needs the button", and the card is on screen.
+  const voiceRef = useRef<VoiceSession | null>(null);
+  const [voice, setVoice] = useState<VoiceStatus>("idle");
+  const [voiceOn, setVoiceOn] = useState<boolean | null>(null);
+  useEffect(() => { fetch("/api/voice/session", { method: "POST" }).then((r) => setVoiceOn(r.status !== 404)).catch(() => setVoiceOn(false)); }, []);
+  const busyRef = useRef(busy); busyRef.current = busy;
+  const bubblesRef = useRef(bubbles); bubblesRef.current = bubbles;
+  async function voiceAsk(text: string): Promise<string> {
+    // Wait for a typed send in flight rather than overlapping it.
+    for (let i = 0; i < 100 && busyRef.current; i++) await new Promise((r) => setTimeout(r, 100));
+    const reply = await send(text, undefined, "voice");
+    if (!reply) return "I didn't catch that.";
+    const say = reply.text.replace(/\s+/g, " ").trim();
+    if (reply.kind === "tool_confirm" && reply.tool?.tier === 3) return `${say.replace(/ This one needs the button below\.$/, "")} This one needs the button on the screen.`;
+    if (reply.items?.length) return `${say} The ${reply.items.length === 1 ? "row is" : `${reply.items.length} rows are`} on the screen.`;
+    return say;
+  }
+  function voiceToggle() {
+    if (voiceRef.current) {
+      const secs = voiceRef.current.close(); voiceRef.current = null; setVoice("idle");
+      void logVoiceSession(secs, "realtime", source ? `${source}-voice` : "ask-voice");
+      return;
+    }
+    const s = new VoiceSession({
+      onStatus: setVoice,
+      onUser: () => { /* the transcript reaches the thread through ask(); nothing to add here */ },
+      onAssistant: () => { /* same: the thread already holds the reply */ },
+      onAsk: voiceAsk,
+      onError: (m) => setToast({ text: m }),
+    });
+    voiceRef.current = s;
+    void s.connect();
+  }
+  useEffect(() => () => { voiceRef.current?.close(); }, []);
 
   function stop() {
     if (!busy) return;
@@ -225,7 +265,13 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder={editing != null ? "Edit, then Send" : "Ask or tell me something…"} aria-label="Ask" className={`flex-1 min-h-12 rounded-full border bg-bg px-4 text-sm ${editing != null ? "border-accent" : "border-line"}`} />
+        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder={editing != null ? "Edit, then Send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"} aria-label="Ask" className={`flex-1 min-h-12 rounded-full border bg-bg px-4 text-sm ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line"}`} />
+        {voiceOn && (
+          <button type="button" onClick={voiceToggle} aria-label={voice === "idle" || voice === "error" ? "Talk" : "Stop talking"} title={voice === "idle" || voice === "error" ? "Talk to Ask (audio goes to OpenAI during a voice session)" : "End the voice session"}
+            className={`min-h-12 min-w-12 rounded-full border font-semibold text-lg ${voice === "idle" || voice === "error" ? "border-line" : voice === "listening" ? "border-green bg-green-bg text-green" : "border-accent bg-accent text-white"}`}>
+            {voice === "idle" || voice === "error" ? "🎙" : "■"}
+          </button>
+        )}
         {busy ? <button type="button" onClick={stop} className="min-h-12 px-5 rounded-full border border-line font-semibold">Stop</button>
           : <button type="submit" disabled={!input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">{editing != null ? "Resend" : "Send"}</button>}
       </form>
