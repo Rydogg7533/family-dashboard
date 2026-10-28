@@ -42,7 +42,9 @@ export async function extractDraft(thread: Turn[]): Promise<{ draft: EventDraft;
 
 const plusHour = (t: string) => { const [h, m] = t.split(":").map(Number); return `${String(Math.min(h + 1, 23)).padStart(2, "0")}:${String(m).padStart(2, "0")}`; };
 export const remLabel = (m: number) => m === 0 ? "at the time" : m % 10080 === 0 ? `${m / 10080} week${m / 10080 > 1 ? "s" : ""} before` : m % 1440 === 0 ? `${m / 1440} day${m / 1440 > 1 ? "s" : ""} before` : m % 60 === 0 ? `${m / 60} hour${m / 60 > 1 ? "s" : ""} before` : `${m} min before`;
-export const describe = (d: EventDraft) => `${d.title} · ${d.date}${d.allDay ? " (all day)" : ` ${d.start}–${d.end}`}${d.location ? ` · ${d.location}` : ""} · ${d.reminders?.length ? d.reminders.map(remLabel).join(", ") : "no reminder"}${d.guests.length ? ` · guests: ${d.guests.join(", ")}` : ""}`;
+// Shown on the confirm card: people's clock, not the internal 24-hour form (Ryan, 2026-10-27 20:05).
+const fmtDay = (ymd: string) => { const [y, m, d] = ymd.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }); };
+export const describe = (d: EventDraft) => `${d.title} · ${d.date ? fmtDay(d.date) : "no date"}${d.endDate && d.endDate !== d.date ? `–${fmtDay(d.endDate)}` : ""}${d.allDay ? " (all day)" : ` ${d.start ? to12(d.start) : "?"}–${d.end ? to12(d.end) : "?"}`}${d.location ? ` · ${d.location}` : ""} · ${d.reminders?.length ? d.reminders.map(remLabel).join(", ") : "no reminder"}${d.guests.length ? ` · guests: ${d.guests.join(", ")}` : ""}`;
 
 export async function eventTurn(thread: Turn[]): Promise<AskReply> {
   const base = (cost: number, model: string) => ({ cost, costText: `this answer ~${formatCost(cost)}`, model, sample: false });
