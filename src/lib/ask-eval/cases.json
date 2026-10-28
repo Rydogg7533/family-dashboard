@@ -854,5 +854,36 @@
       ],
       "noTool": "calendar.remove"
     }
+  },
+  {
+    "id": "sit-13",
+    "ask": "bring up the sitter sheet details",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "sitter.sheet"
+    }
+  },
+  {
+    "id": "sit-14",
+    "ask": "use the overnight sheet for the sitter",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "sitter.plan"
+    }
+  },
+  {
+    "id": "sit-15",
+    "ask": "put the sitter sheet on the tablet",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "calendar.add"
+    }
   }
 ]

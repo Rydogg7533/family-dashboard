@@ -6,11 +6,16 @@ import { str } from "@/lib/tools/types";
 import { getSitters, getNights } from "@/lib/data-sitter";
 import { createNight, bookNight, openNights, matchSitter, type NightCtx } from "@/lib/sitter-nights";
 import { addSitterFromContact, addSitterNew, searchContactsForSitter, updateSitter } from "@/app/settings/sitter/templates-actions";
-import { fmtWhen } from "@/lib/sitter-shared";
+import { fmtWhen, groupSheet } from "@/lib/sitter-shared";
+import { choiceOptions, compileFor, defaultChoices } from "@/lib/sitter-compile";
+import { getNight } from "@/lib/data-sitter";
+import { confirmNight } from "@/app/sitter/actions";
 import { debriefNight } from "@/app/sitter/actions";
 
 const nc = (c: ToolCtx): NightCtx => ({ sb: c.sb, userId: c.userId, actor: c.email });
 const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
+// "2026-11-03" → "Tuesday, Nov 3": the person never sees a raw date (D5).
+const fmtDay = (ymd: string) => { const [y, m, d] = ymd.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" }); };
 const timeOr = (v: unknown, d: string) => (TIME.test(str(v)) ? str(v) : d);
 const nightRow = (n: { id: string; title: string; status: string; sitter_name: string | null; starts_at: string; ends_at: string; place: string | null }) => ({
   id: n.id, name: n.status === "needed" ? `Sitter needed ${fmtWhen(n.starts_at)}` : `${n.sitter_name ?? "Sitter"} ${fmtWhen(n.starts_at)} to ${fmtWhen(n.ends_at)}`, status: n.status, sitter: n.sitter_name, where: n.place, date: n.starts_at.slice(0, 10), href: `/sitter/review/${n.id}`,
@@ -56,7 +61,7 @@ export const sitterTools: Tool[] = [
       const r = await createNight(nc(c), { date, leaveTime: timeOr(a.leave, "18:00"), backTime: timeOr(a.back, "22:00"), sitterName: sitter, sitterPersonId: m ? m.id : null, place: str(a.place) });
       if (!r.ok) return { ok: false, error: r.error ?? "Could not plan it." };
       const note = m ? "" : ` ${sitter} isn't on your sitter list; say "add ${sitter} as a sitter" if you want them on it.`;
-      return { ok: true, summary: `Planned ${date} with ${m ? m.name : sitter}, usual instructions in. Open the sheet to look or confirm.${note}`, href: `/sitter/review/${r.id}`, data: { id: r.id, approved: !!m } };
+      return { ok: true, summary: `Planned ${fmtDay(date)} with ${m ? m.name : sitter}, usual instructions in.${note}`, href: `/sitter/review/${r.id}`, data: { id: r.id, approved: !!m } };
     },
   },
   {
@@ -67,7 +72,7 @@ export const sitterTools: Tool[] = [
       const date = str(a.date); if (!DATE.test(date)) return { ok: false, error: "Which day?" };
       const r = await createNight(nc(c), { date, leaveTime: timeOr(a.leave, "18:00"), backTime: timeOr(a.back, "22:00"), place: str(a.place), needed: true });
       if (!r.ok) return { ok: false, error: r.error ?? "Could not note it." };
-      return { ok: true, summary: `Noted: sitter needed ${date}. Say who when someone says yes; the sheet can be prepared any time.`, href: `/sitter/review/${r.id}`, data: { id: r.id } };
+      return { ok: true, summary: `Noted: sitter needed ${fmtDay(date)}. Tell me who when someone says yes.`, href: `/sitter/review/${r.id}`, data: { id: r.id } };
     },
   },
   {
@@ -79,7 +84,72 @@ export const sitterTools: Tool[] = [
       if (!night) return { ok: false, error: error ?? "Nothing is waiting for a sitter." };
       const r = await bookNight(nc(c), night.id, str(a.sitter));
       if (!r.ok) return { ok: false, error: r.error ?? "Could not book it." };
-      return { ok: true, summary: `${str(a.sitter)} is booked for ${fmtWhen(night.starts_at)}. The usual instructions are in; confirm the sheet when you leave.`, href: `/sitter/review/${night.id}` };
+      return { ok: true, summary: `${str(a.sitter)} is booked for ${fmtWhen(night.starts_at)}; the usual instructions are in.`, href: `/sitter/review/${night.id}` };
+    },
+  },
+  {
+    name: "sitter.sheet", title: "Read a visit's sheet", kind: "read", tier: 1,
+    description: "What the sitter sheet for an open visit says right now: the house template and each child's template in use, who is home, and every line grouped by section with whether it is on. Use this to answer 'what's on the sheet', 'bring up the details', 'what will the tablet show', or before changing anything on it.",
+    input: { date: { type: "date", describe: "Which visit, if more than one is open" } },
+    async run(a, c) {
+      const { night, error } = await pickNight(c, str(a.date));
+      if (!night) return { ok: false, error: error ?? "No sitter visit is open." };
+      const n = await getNight(night.id); if (!n) return { ok: false, error: "That visit was not found." };
+      const opts = await choiceOptions(); const { from, ...ch } = await defaultChoices(n, opts);
+      const items = n.sheet.length && n.status === "confirmed" ? n.sheet : await compileFor(ch, opts);
+      const groups = groupSheet(items);
+      const gName = opts.general.find((t) => t.id === ch.generalTemplateId)?.name ?? "none";
+      const kids = opts.children.map((k) => ch.childrenHome.includes(k.id) ? `${k.name}: ${k.templates.find((t) => t.id === ch.childTemplates[k.id])?.name ?? "no template"}` : `${k.name} away`).join("; ");
+      const on = items.filter((i) => i.on).length;
+      const text = groups.map((g) => `${g.label}: ${g.items.map((i) => `${i.on ? "" : "[off] "}${i.text}`).join(" | ")}`).join("\n");
+      return { ok: true, summary: `${nightRow(night).name}${n.status === "confirmed" ? " (on the tablet)" : n.status === "needed" ? " (no sitter yet)" : ""}. House template: ${gName}${from === "last" ? " (same as last time)" : ""}. Kids: ${kids || "none set up"}. ${on} line${on === 1 ? "" : "s"} on${items.length - on ? `, ${items.length - on} off (health lines stay off until asked for)` : ""}.${items.length ? "\n" + text : " The sheet is empty: the templates have no lines yet (Settings › Sitter)."}`, href: `/sitter/review/${night.id}`, data: { id: night.id, status: n.status, house: gName, kids, lines: groups.map((g) => ({ section: g.label, lines: g.items.map((i) => ({ text: i.text, on: i.on })) })) } };
+    },
+  },
+  {
+    name: "sitter.choose", title: "Choose the instructions for a visit", kind: "write", tier: 1,
+    description: "Change which templates a visit uses or which children are home: a house template by name ('use the overnight sheet'), a child's template by child and name ('Audrey's weekend one'), or a child away ('Lily's not home'). Names are matched against the templates under Settings › Sitter.",
+    input: { date: { type: "date", describe: "Which visit, if more than one is open" }, house: { type: "string", describe: "A house template name" }, child: { type: "string", describe: "A child's first name, when changing that child's template or presence" }, template: { type: "string", describe: "That child's template name" }, away: { type: "boolean", describe: "true when that child is not home for this visit; false to put them back" } },
+    async run(a, c) {
+      const { night, error } = await pickNight(c, str(a.date));
+      if (!night) return { ok: false, error: error ?? "No sitter visit is open." };
+      const n = await getNight(night.id); if (!n) return { ok: false, error: "That visit was not found." };
+      if (n.status === "confirmed") return { ok: false, error: "That sheet is already on the tablet; untick lines on its page, or add a line with sitter.addLine." };
+      const opts = await choiceOptions(); const d = await defaultChoices(n, opts);
+      const ch = { generalTemplateId: d.generalTemplateId, childTemplates: { ...d.childTemplates }, childrenHome: [...d.childrenHome] };
+      const changed: string[] = [];
+      const house = str(a.house).toLowerCase();
+      if (house) { const t = opts.general.find((x) => x.name.toLowerCase() === house) ?? opts.general.find((x) => x.name.toLowerCase().includes(house)); if (!t) return { ok: false, error: `No house template called ${str(a.house)}. You have: ${opts.general.map((x) => x.name).join(", ")}.` }; ch.generalTemplateId = t.id; changed.push(`house: ${t.name}`); }
+      const kid = str(a.child).toLowerCase();
+      if (kid) {
+        const k = opts.children.find((x) => x.name.toLowerCase().startsWith(kid)); if (!k) return { ok: false, error: `No child called ${str(a.child)}.` };
+        if (typeof a.away === "boolean") { ch.childrenHome = a.away ? ch.childrenHome.filter((x) => x !== k.id) : Array.from(new Set([...ch.childrenHome, k.id])); changed.push(`${k.name} ${a.away ? "away" : "home"}`); }
+        const tn = str(a.template).toLowerCase();
+        if (tn) { const t = k.templates.find((x) => x.name.toLowerCase() === tn) ?? k.templates.find((x) => x.name.toLowerCase().includes(tn)); if (!t) return { ok: false, error: `${k.name} has no template called ${str(a.template)}. ${k.name} has: ${k.templates.map((x) => x.name).join(", ") || "none"}.` }; ch.childTemplates[k.id] = t.id; changed.push(`${k.name}: ${t.name}`); }
+      }
+      if (!changed.length) return { ok: false, error: "Say which template or which child." };
+      const { error: e } = await c.sb.from("sitter_nights").update({ general_template_id: ch.generalTemplateId, child_templates: ch.childTemplates, children_home: ch.childrenHome, instructions_mode: "template", prepared_at: new Date().toISOString() }).eq("id", night.id);
+      if (e) return { ok: false, error: e.message };
+      return { ok: true, summary: `${nightRow(night).name}: ${changed.join(", ")}.`, href: `/sitter/review/${night.id}` };
+    },
+  },
+  {
+    name: "sitter.confirm", title: "Confirm the sheet to the tablet", kind: "write", tier: 2,
+    description: "Confirm a planned visit's sheet as it stands (the chosen templates, every line that is on, tonight's lines) so the kitchen tablet shows it. Health lines are included only when the person asks for them by child ('include Audrey's allergies'). A visit with no sitter yet cannot be confirmed; book the sitter first.",
+    input: { date: { type: "date", describe: "Which visit, if more than one is open" }, healthFor: { type: "string", describe: "Children whose allergy and medicine lines should show, comma-separated first names" } },
+    async run(a, c) {
+      const { night, error } = await pickNight(c, str(a.date), (s) => s !== "needed");
+      if (!night) return { ok: false, error: error ?? "No planned visit to confirm (a visit still looking for a sitter cannot go to the tablet)." };
+      const n = await getNight(night.id); if (!n) return { ok: false, error: "That visit was not found." };
+      const opts = await choiceOptions(); const { from: _from, ...ch } = await defaultChoices(n, opts); void _from;
+      const items = await compileFor(ch, opts);
+      const names = str(a.healthFor).toLowerCase().split(/[,\s]+/).filter(Boolean);
+      const ids = opts.children.filter((k) => names.some((q) => k.name.toLowerCase().startsWith(q))).map((k) => k.id);
+      for (const i of items) if (i.health && ids.some((id) => i.section.startsWith(`c:${id}:`))) i.on = true;
+      if (!items.some((i) => i.on)) return { ok: false, error: "The sheet is empty; write a few lines in the templates first (Settings › Sitter)." };
+      const r = await confirmNight(night.id, items, n.visitOnly ?? "", ch);
+      if (!r.ok) return { ok: false, error: r.error ?? "Could not confirm." };
+      const on = items.filter((i) => i.on).length;
+      return { ok: true, summary: `Confirmed ${nightRow(night).name}: ${on} line${on === 1 ? "" : "s"} on the tablet${ids.length ? ", health lines included for " + opts.children.filter((k) => ids.includes(k.id)).map((k) => k.name).join(" and ") : ""}.`, href: `/sitter/review/${night.id}` };
     },
   },
   {

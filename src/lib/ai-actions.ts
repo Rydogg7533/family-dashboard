@@ -31,7 +31,7 @@ export async function askAction(thread: Turn[], assistantApp?: string, source = 
       else if (NO.test(q)) reply = { kind: "answer", text: "Okay, nothing changed.", ...base };
       else {
         const r = await runTool(pending.tool.name, pending.tool.args).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : "That did not work." }));
-        reply = r.ok ? { kind: "answer", text: `Done. ${r.summary}`, source: r.href ? { label: r.href.startsWith("sms:") ? "Open Messages" : "Open it", href: r.href } : undefined, ...base } : { kind: "answer", text: `That did not work: ${r.error}`, ...base };
+        reply = r.ok ? { kind: "answer", text: `Done. ${r.summary}`, source: r.href ? { label: r.href.startsWith("sms:") ? "Open Messages" : r.href.startsWith("/sitter/") ? "Open the sheet" : r.href.startsWith("/settings/sitter") ? "Open the sitter list" : r.href.startsWith("/tasks") ? "Open the task" : "Open it", href: r.href } : undefined, ...base } : { kind: "answer", text: `That did not work: ${r.error}`, ...base };
       }
     } else if ((pending.kind === "event_confirm" || pending.kind === "event_move") && pending.draft) {
       if (NO.test(q)) { await feedDeclineThread(threadKeyOf(thread.find((t) => t.role === "user")?.text ?? "")).catch(() => {}); reply = { kind: "answer", text: "Okay, I won't add it.", ...base }; }

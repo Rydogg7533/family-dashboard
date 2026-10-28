@@ -210,7 +210,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
               ? <div className="text-xs font-semibold text-amber px-1"><button type="button" onClick={() => retry(i - 1)} className="underline">Retry</button></div>
               : b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
             <div className="text-[11px] text-muted px-1 flex flex-wrap gap-x-2">
-              {b.reply?.source && <a href={b.reply.source.href} className="font-semibold text-accent">Open in {b.reply.source.label.replace(/^Open in /, "")}</a>}
+              {b.reply?.source && <a href={b.reply.source.href} className="font-semibold text-accent">{/^(Open|Show|See)\b/i.test(b.reply.source.label) ? b.reply.source.label : `Open ${b.reply.source.label}`}</a>}
               {b.reply && b.reply.kind !== "deflect" && b.reply.kind !== "scope_check" && (
                 b.flagged
                   ? <span className="text-green font-semibold">Flagged for the maintainer</span>
