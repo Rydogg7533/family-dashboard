@@ -1,3 +1,4 @@
+import { vaultFollowUp } from "@/lib/vault-followup";
 import "server-only";
 import type { Tool } from "@/lib/tools/types";
 import { str } from "@/lib/tools/types";
@@ -40,7 +41,8 @@ export const deviceTools: Tool[] = [
       };
       const { data, error } = await c.sb.from("devices").insert(row).select("id").single();
       if (error) return { ok: false, error: error.message };
-      return { ok: true, summary: `Added ${row.name} to the register`, href: `/devices/${data.id as string}` };
+      const fu = await vaultFollowUp(c.sb, c.userId, { kind: "device", ref: data.id as string, version: "new", title: `Update 1Password: ${row.name}`, summary: `New device. Put the full serial or IMEI, the receipt${row.warranty_end || row.plan_name ? " and the warranty or plan document" : ""} in 1Password, then put the item's name in the device's serial pointer. The dashboard keeps only the last four.`, person: row.person });
+      return { ok: true, summary: `Added ${row.name} to the register${fu.made ? ", and a task is on your list to put the full serial and receipt in 1Password" : ""}`, href: `/devices/${data.id as string}` };
     },
   },
   {

@@ -1,4 +1,5 @@
 "use server";
+import { vaultFollowUp } from "@/lib/vault-followup";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
@@ -28,14 +29,19 @@ export async function saveDevice(d: DeviceInput, id?: string): Promise<{ ok: boo
     added_by: user.email ?? "member", updated_by: user.email ?? "member",
   };
   if (id) {
+    const { data: before } = await sb.from("devices").select("serial_last4, warranty_end, plan_name, plan_end").eq("id", id).maybeSingle();
     const { error } = await sb.from("devices").update({ ...row, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) return { ok: false, error: error.message };
+    // D17: a new serial, warranty or plan has paperwork the vault holds; keep it current.
+    const changed = before && (before.serial_last4 !== row.serial_last4 || before.warranty_end !== row.warranty_end || before.plan_name !== row.plan_name || before.plan_end !== row.plan_end);
+    if (changed) await vaultFollowUp(sb, user.id, { kind: "device", ref: id, version: `${row.serial_last4 ?? ""}|${row.warranty_end ?? ""}|${row.plan_name ?? ""}|${row.plan_end ?? ""}`, title: `Update 1Password: ${name}`, summary: `${name} changed (serial, warranty or plan). Put the new full serial or IMEI, the receipt and the warranty or plan document in 1Password, then put the item's name in the device's serial pointer here.`, person: row.person });
     await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "device_saved", subject: name, ref: id, undoable: false }).then(() => {}, () => {});
     revalidatePath("/devices"); revalidatePath(`/devices/${id}`);
     return { ok: true, id };
   }
   const { data, error } = await sb.from("devices").insert(row).select("id").single();
   if (error) return { ok: false, error: error.message };
+  await vaultFollowUp(sb, user.id, { kind: "device", ref: data.id as string, version: "new", title: `Update 1Password: ${name}`, summary: `New device. Put the full serial or IMEI, the receipt${row.warranty_end || row.plan_name ? " and the warranty or plan document" : ""} in 1Password, then put the item's name in the device's serial pointer here. The dashboard keeps only the last four.`, person: row.person });
   await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "device_added", subject: name, ref: data.id as string, undoable: false }).then(() => {}, () => {});
   revalidatePath("/devices");
   return { ok: true, id: data.id as string };
