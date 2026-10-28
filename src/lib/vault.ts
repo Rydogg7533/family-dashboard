@@ -91,3 +91,12 @@ export const kindById = (id: string) => VAULT_KINDS.find((k) => k.id === id) ?? 
 export const buildLabel = (kind: VaultKind, subject: string | null) => (subject ? `${subject} ${kind.label}` : kind.label[0].toUpperCase() + kind.label.slice(1));
 // Duplicates are matched on this: lower case, straight quotes, "'s" dropped, parentheses dropped, spaces squeezed.
 export const labelKey = (l: string) => l.toLowerCase().replace(/[’']s\b/g, "").replace(/\s*\([^)]*\)/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+// "12/18/2033", "2033-12-18" or "Dec 18, 2033" typed anywhere becomes the date field, so a date never hides in a note.
+export function dateIn(text: string): string | null {
+  const m1 = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(text); if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`;
+  const m2 = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/.exec(text); if (m2) return `${m2[3]}-${m2[1].padStart(2, "0")}-${m2[2].padStart(2, "0")}`;
+  const m3 = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2}),? (\d{4})\b/i.exec(text);
+  if (m3) return `${m3[3]}-${String(["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(m3[1].toLowerCase().slice(0, 3)) + 1).padStart(2, "0")}-${m3[2].padStart(2, "0")}`;
+  return null;
+}

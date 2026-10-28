@@ -1,19 +1,12 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { VAULT_GROUP_IDS, isVaultLink, kindById, buildLabel, labelKey, type About } from "@/lib/vault";
+import { VAULT_GROUP_IDS, isVaultLink, kindById, buildLabel, labelKey, dateIn, type About } from "@/lib/vault";
 
 export type VaultInput = { id?: string; group: string; label: string; item_type?: string; link?: string; expires_on?: string; note?: string; household: boolean;
   // D19: a new pointer is a kind about a subject; the label, group, type and owner follow from those. Edits of old rows may omit them.
   kind?: string; about?: About; subjectId?: string; subjectName?: string };
-// "12/18/2033", "2033-12-18" or "Dec 18, 2033" typed anywhere becomes the date field, so a date never hides in a note.
-export function dateIn(text: string): string | null {
-  const m1 = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(text); if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`;
-  const m2 = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/.exec(text); if (m2) return `${m2[3]}-${m2[1].padStart(2, "0")}-${m2[2].padStart(2, "0")}`;
-  const m3 = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2}),? (\d{4})\b/i.exec(text);
-  if (m3) return `${m3[3]}-${String(["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(m3[1].toLowerCase().slice(0, 3)) + 1).padStart(2, "0")}-${m3[2].padStart(2, "0")}`;
-  return null;
-}
+
 const clean = (s: unknown, n: number) => String(s ?? "").replace(/[\r\n\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
 
 // Saves a pointer. The link is checked to be a 1Password link, so the Open button never goes anywhere else.
