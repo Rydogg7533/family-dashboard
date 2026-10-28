@@ -79,23 +79,33 @@ async function main() {
   const named_person = personName && !DRY ? (await rest("GET", `profiles?display_name=ilike.${encodeURIComponent(personName)}&select=id`))[0]?.id : null;
   if (personName && !DRY && !named_person) { console.error(`no profile named ${personName}`); process.exit(1); }
   const owners = new Map(DRY ? [] : (await rest("GET", "mail_accounts?kind=eq.gmail&select=person,address")).map((r) => [r.address, r.person]));
-  const log = []; let state = "ok";
+  const log = []; let state = "ok"; let failed = 0, synced = 0;
   for (const a of accounts) {
     const person = DRY ? "dry" : named_person || owners.get(a);
     if (!person) { log.push(`${a}: SKIPPED, no owner yet (first run: node scripts/mail-sync.mjs --account ${a} --person <name>)`); continue; }
     if (!DRY && named_person && owners.get(a) && owners.get(a) !== named_person) { state = "error"; log.push(`${a}: STOPPED, this mailbox already belongs to someone else`); continue; }
-    try { await syncAccount(a, person, log); }
-    // Node reports every dropped connection as just "fetch failed" and puts the reason (ECONNRESET, ENOTFOUND,
-    // a timeout, a certificate) in e.cause — the same thing email-lib.mjs already unwraps. Without it the stored
-    // error says nothing: "fetch failed" on one mailbox out of six, for an hour, is unanswerable. Record both.
-    catch (e) {
-      state = "error";
-      const cause = e?.cause?.code || e?.cause?.message || "";
-      const detail = `${e.message}${cause ? ` (${cause})` : ""}`;
+    // A dropped connection (UND_ERR_SOCKET, ECONNRESET, a timeout) is usually gone a few seconds later: one retry
+    // before it is recorded. 2026-10-27: one socket drop on one of four mailboxes painted Today red for a run.
+    let err = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { await syncAccount(a, person, log); err = null; break; }
+      // Node reports every dropped connection as just "fetch failed" and puts the reason (ECONNRESET, ENOTFOUND,
+      // a timeout, a certificate) in e.cause — the same thing email-lib.mjs already unwraps. Without it the stored
+      // error says nothing: "fetch failed" on one mailbox out of six, for an hour, is unanswerable. Record both.
+      catch (e) { err = e; if (attempt === 0) await new Promise((r) => setTimeout(r, 5000)); }
+    }
+    if (err) {
+      failed += 1;
+      const cause = err?.cause?.code || err?.cause?.message || "";
+      const detail = `${err.message}${cause ? ` (${cause})` : ""}`;
       log.push(`${a}: ERROR ${detail}`);
       if (!DRY) await rest("PATCH", `mail_accounts?person=eq.${person}&address=eq.${encodeURIComponent(a)}`, { last_error: detail.slice(0, 300) }, { Prefer: "return=minimal" }).catch(() => {});
-    }
+    } else { synced += 1; }
   }
+  // One mailbox failing while the others synced is a warning (it is retried in five minutes); every mailbox failing is an error.
+  if (failed && state === "ok") state = synced ? "warn" : "error";
+  // Failures first, so the short line on Today names the mailbox rather than the first healthy one.
+  log.sort((x, y) => (y.includes(": ERROR ") ? 1 : 0) - (x.includes(": ERROR ") ? 1 : 0));
   const summary = log.join("; ");
   if (!DRY) await rest("POST", "system_status?on_conflict=key", [{ key: "mail_sync", state, summary: `Mail: ${summary}`, value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});
   console.log(`${new Date().toISOString()} ${DRY ? "(dry) " : ""}${summary}`);

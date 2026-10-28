@@ -122,9 +122,18 @@ export function overall(status: Status[]) {
   const hb = status.find((s) => s.key === "heartbeat");
   const stale = !hb || Date.now() - new Date(hb.updated_at).getTime() > HEARTBEAT_MAX_HOURS * 3600_000;
   if (stale) return { level: "error" as const, text: `No report from the Mac mini in ${HEARTBEAT_MAX_HOURS}+ hours` };
-  if (status.some((s) => s.state === "error")) return { level: "error" as const, text: status.find((s) => s.state === "error")!.summary };
+  // One short line on Today; the whole summary stays on System health (Ryan, 2026-10-27: the mail summary dump).
+  const errs = status.filter((s) => s.state === "error");
+  if (errs.length) return { level: "error" as const, text: errs.length === 1 ? shortStatus(errs[0]) : `${shortStatus(errs[0])} · ${errs.length - 1} more` };
   if (status.some((s) => s.state === "warn")) return { level: "warn" as const, text: `${status.filter((s) => s.state === "warn").length} thing(s) need attention` };
   return { level: "ok" as const, text: "All good" };
+}
+
+// "mail_sync" + "Mail: admin@x: ERROR fetch failed (UND_ERR_SOCKET); admin@y: inbox …" → "Mail: admin@x: fetch failed (UND_ERR_SOCKET)".
+export function shortStatus(s: Status) {
+  const first = (s.summary ?? "").split(";")[0].replace(/\bERROR\s+/i, "").trim();
+  const text = first.length > 110 ? first.slice(0, 107) + "…" : first;
+  return text || s.key.replace(/_/g, " ");
 }
 
 export function ago(iso: string | null) {
