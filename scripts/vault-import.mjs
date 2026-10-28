@@ -78,7 +78,7 @@ function expiryIn(text) {
 // ---------- 1Password CLI ----------
 function op(argv, opts = {}) {
   if (ACCOUNT) argv = [...argv, "--account", ACCOUNT];
-  const r = spawnSync("op", argv, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000, ...opts });
+  const r = spawnSync("op", argv, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"], ...opts });
   if (r.status !== 0) throw new Error(`op ${argv.slice(0, 3).join(" ")}: ${(r.stderr || "").trim().slice(0, 300)}`);
   return r.stdout;
 }
@@ -151,7 +151,8 @@ async function plan() {
           if (isDoc || files.length) {
             const f = files[0];
             const dest = join(tmp, `${it.id}-${(f?.name || "document.pdf").replace(/[^A-Za-z0-9._-]/g, "_")}`);
-            if (isDoc) op(["document", "get", it.id, "--out-file", dest]); else op(["read", `op://${it.vault.name}/${it.id}/${f.name}`, "--out-file", dest]);
+            if (existsSync(dest)) rmSync(dest, { force: true });
+            if (isDoc) op(["document", "get", it.id, "--out-file", dest, "--force"]); else op(["read", `op://${it.vault.name}/${it.id}/${f.name}`, "--out-file", dest, "--force"]);
             fetched++;
             const o = spawnSync(OCR, [dest], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 5 * 60_000 });
             let j = null; try { j = JSON.parse(o.stdout || ""); } catch { /* unreadable */ }
