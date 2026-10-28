@@ -134,7 +134,7 @@ export const moreTools: Tool[] = [
     description: "What is on the shop list and which regular items are due (paper towels, filters). By store when asked.",
     input: { store: { type: "enum", options: ["amazon", "smiths", "costco"], describe: "One store only" } },
     async run(a, c) {
-      let q = c.sb.from("cart_items").select("id, store, name, qty, is_regular, due, price_note").order("added_at", { ascending: false }).limit(60);
+      let q = c.sb.from("cart_items").select("id, store, name, qty, is_regular, due, price_note").is("removed_at", null).order("added_at", { ascending: false }).limit(60);
       const st = str(a.store); if (st) q = q.eq("store", st);
       const { data } = await q; const rows = (data ?? []).filter((r) => !r.is_regular || r.due);
       if (!rows.length) return { ok: true, summary: `Nothing on the shop list${st ? ` for ${st}` : ""}.` };
@@ -148,7 +148,7 @@ export const moreTools: Tool[] = [
     async run(a, c) {
       const name = str(a.name).slice(0, 120); if (!name) return { ok: false, error: "What should go on the list?" };
       const store = ["amazon", "smiths", "costco"].includes(str(a.store)) ? str(a.store) : "amazon";
-      const { data, error } = await c.sb.from("cart_items").insert({ store, name, qty: Math.max(1, Math.min(99, Math.round(num(a.qty) || 1))), note: str(a.note).slice(0, 200) || null, added_by: c.userId }).select("id").single();
+      const { data, error } = await c.sb.from("cart_items").insert({ store, name, qty: Math.max(1, Math.min(99, Math.round(num(a.qty) || 1))), note: str(a.note).slice(0, 200) || null, added_by: c.userId, added_by_name: await actorOf(c) }).select("id").single();
       if (error) return { ok: false, error: error.message };
       await c.sb.from("activity_log").insert({ actor: await actorOf(c), action: "shop_item_added", subject: `${name} (${store})`, ref: data.id, undoable: true }).then(() => {}, () => {});
       return { ok: true, summary: `${name} is on the ${store} list.`, href: "/shop" };

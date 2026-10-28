@@ -1,4 +1,4 @@
-import { getOrders, getPriceWatches, getRegulars, sampleResults, type StoreId } from "@/lib/data-shop";
+import { getAskLines, getOrders, getPriceWatches, getRegulars, sampleResults, type StoreId } from "@/lib/data-shop";
 import { ShopView } from "@/components/c/ShopView";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function Shop({ searchParams }: PageProps<"/shop">) {
   const sp = await searchParams;
   const store = (["amazon", "smiths", "costco"].includes(String(sp.store)) ? String(sp.store) : "amazon") as StoreId;
-  const [regulars, watches, orders] = await Promise.all([getRegulars(), getPriceWatches(), getOrders()]);
+  const [regulars, watches, orders, askLines] = await Promise.all([getRegulars(), getPriceWatches(), getOrders(), getAskLines()]);
   const open = orders.filter((o) => !["received"].includes(o.status)).length;
-  return <ShopView initialStore={store} regulars={regulars} seedResults={store === "amazon" ? sampleResults : []} watches={watches} openOrders={open} />;
+  return <ShopView initialStore={store} regulars={regulars} seedResults={store === "amazon" ? sampleResults : []} watches={watches} openOrders={open} askLines={askLines} />;
 }

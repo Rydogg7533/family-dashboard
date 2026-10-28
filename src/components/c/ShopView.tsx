@@ -1,14 +1,15 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Product, RegularItem, PriceWatch } from "@/lib/data-shop";
+import type { AskLine, Product, RegularItem, PriceWatch } from "@/lib/data-shop";
 import { STORES, type StoreId } from "@/lib/c-shared";
+import { dismissCartItem } from "@/app/shop/actions";
 import { ADAPTERS, addLine, cartCount, loadCart, removeLine, saveCart, setQty, type Cart, type SearchHit } from "@/lib/shopping";
 import { useToast } from "@/components/c/Toast";
 
 const btn = "min-h-9 px-2.5 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
-export function ShopView({ initialStore, regulars, seedResults, watches, openOrders }: { initialStore: StoreId; regulars: RegularItem[]; seedResults: Product[]; watches: PriceWatch[]; openOrders: number }) {
+export function ShopView({ initialStore, regulars, seedResults, watches, openOrders, askLines = [] }: { initialStore: StoreId; regulars: RegularItem[]; seedResults: Product[]; watches: PriceWatch[]; openOrders: number; askLines?: AskLine[] }) {
   const [store, setStore] = useState<StoreId>(initialStore);
   const [cart, setCart] = useState<Cart>({ amazon: [], smiths: [], costco: [] });
   const [loaded, setLoaded] = useState(false);
@@ -32,8 +33,11 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
         saveCart(c); localStorage.setItem("famdash.cart.seeded", "1");
       }
     } catch { /* storage blocked: unseeded, in-memory cart */ }
+    // Items added through Ask (cart_items) join this device's cart, keyed by their row id so they are not doubled.
+    for (const a of askLines) if (!c[a.store].some((l) => l.key === `db:${a.id}`)) c = addLine(c, { key: `db:${a.id}`, store: a.store, name: a.name, qty: a.qty, price_note: "$[PRICE]", note: a.note ?? undefined, added_by: a.addedBy });
+    saveCart(c);
     setCart(c); setLoaded(true);
-  }, []);
+  }, [askLines]);
   const update = (c: Cart) => { setCart(c); saveCart(c); };
 
   const lines = cart[store];
@@ -132,7 +136,7 @@ export function ShopView({ initialStore, regulars, seedResults, watches, openOrd
               <span className="w-6 text-center">×{l.qty}</span>
               <button aria-label="More" className="w-7 h-8 rounded-lg border border-line" onClick={() => update(setQty(cart, store, l.key, l.qty + 1))}>+</button>
               <span className="ml-1.5 text-muted">{l.price_note}</span>
-              <button aria-label={`Remove ${l.name}`} className="w-7 h-8 rounded-lg text-muted hover:bg-soft" onClick={() => { const before = cart; update(removeLine(cart, store, l.key)); show(`Removed ${l.name}`, () => update(before)); }}>×</button>
+              <button aria-label={`Remove ${l.name}`} className="w-7 h-8 rounded-lg text-muted hover:bg-soft" onClick={() => { const before = cart; update(removeLine(cart, store, l.key)); if (l.key.startsWith("db:")) void dismissCartItem(l.key.slice(3)); show(`Removed ${l.name}`, () => update(before)); }}>×</button>
             </span>
           </div>
         ))}

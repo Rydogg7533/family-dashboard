@@ -105,3 +105,12 @@ export async function getCases(): Promise<ShopCase[]> {
 export async function getPriceWatches(): Promise<PriceWatch[]> {
   return sampleWatches; // v1: price watches are sample-only until the daily watcher exists on the Mac mini.
 }
+
+// Items put on the list through Ask (and any other server-side add): merged into the page's cart, keyed db:<id>.
+export type AskLine = { id: string; store: StoreId; name: string; qty: number; note: string | null; addedBy: string };
+export async function getAskLines(): Promise<AskLine[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("cart_items").select("id, store, name, qty, note, added_by_name, added_by").eq("is_regular", false).is("removed_at", null).is("cart_id", null).order("added_at");
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({ id: String(r.id), store: r.store as StoreId, name: String(r.name), qty: Number(r.qty ?? 1), note: (r.note as string) ?? null, addedBy: String(r.added_by_name ?? "Ask") }));
+}
