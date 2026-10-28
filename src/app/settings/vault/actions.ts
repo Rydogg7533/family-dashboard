@@ -108,6 +108,7 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
   const groupedIds = new Set(grouped.map((r) => r.id));
   // A retired member gets no new items.
   const retired = new Set((retiredRows ?? []).map((r) => String(r.owner_key)));
+  const isOwner = (adults0 ?? []).some((a) => a.id === user.id && a.role === "owner");
   const adults = (adults0 ?? []).filter((a) => !retired.has(`a:${a.id}`));
   const kids = (kids0 ?? []).filter((k) => !retired.has(`k:${k.id}`));
   // Match on the label with any parenthetical dropped, so "VINs (Tahoe, Sienna)" counts as "VINs" and a
@@ -134,7 +135,9 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
     // Another adult's personal items are theirs to create (the database refuses them under this login, and
     // this login cannot see them to know whether they exist), so they are made when that adult taps
     // Generate on their own login. Household items are made here for everyone.
-    if (t.for === "adult") { for (const a of adults ?? []) { if (a.id === user.id) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base, `${t.key}:a:${a.id}`); } }
+    // Another adult's system-made rows are visible to every adult and an owner may create them (migration 0086), so one person
+    // can set the house up. A non-owner still makes only their own.
+    if (t.for === "adult") { for (const a of adults ?? []) { if (a.id === user.id || isOwner) push(a.id as string, t.group, t.label.replace("{name}", String(a.display_name ?? "Member")), t.type, base, `${t.key}:a:${a.id}`); } }
     else if (t.for === "child") for (const k of kids ?? []) {
       const grown = typeof k.birth_year === "number" && year - k.birth_year >= 18;
       const name = String(k.display_name ?? "Child");
@@ -147,7 +150,7 @@ export async function generateVaultChecklist(): Promise<{ ok: boolean; added: nu
     else if (t.for === "head") push(head, t.group, t.label, t.type, base, `${t.key}:head`);
     else push(null, t.group, t.label, t.type, base, `${t.key}:household`);
   }
-  const others = (adults ?? []).filter((a) => a.id !== user.id).map((a) => String(a.display_name ?? "Member"));
+  const others = isOwner ? [] : (adults ?? []).filter((a) => a.id !== user.id).map((a) => String(a.display_name ?? "Member"));
   if (rows.length) {
     const { error } = await sb.from("vault_pointers").insert(rows);
     if (error) return { ok: false, added: 0, total: have.size, others, error: error.message };
