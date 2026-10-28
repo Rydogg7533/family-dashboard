@@ -24,7 +24,7 @@ If the person is silent, stay silent. Keep your own words to the minimum: the re
 export async function POST(req: Request) {
   const c = await toolCtx();
   if (!c) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY || process.env.OPEN_AI_KEY;   // either spelling; Ryan set OPEN_AI_KEY in Vercel 2026-10-28
   if (!key) return NextResponse.json({ error: "Voice is not set up on this household's server yet." }, { status: 404 });
 
   let voice = VOICE_DEFAULT;
