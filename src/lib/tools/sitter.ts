@@ -4,6 +4,7 @@ import "server-only";
 import type { Tool, ToolCtx } from "@/lib/tools/types";
 import { str } from "@/lib/tools/types";
 import { getSitters, getNights } from "@/lib/data-sitter";
+import { addDaysIso, hasGoogleCal, listEvents } from "@/lib/google-calendar";
 import { createNight, bookNight, openNights, matchSitter, type NightCtx } from "@/lib/sitter-nights";
 import { addSitterFromContact, addSitterNew, searchContactsForSitter, updateSitter } from "@/app/settings/sitter/templates-actions";
 import { fmtWhen, groupSheet } from "@/lib/sitter-shared";
@@ -29,6 +30,24 @@ async function pickNight(c: ToolCtx, date: string, want?: (s: string) => boolean
   return { night: list[0], error: null };
 }
 
+// What an assistant needs before cancelling a booked sitter: her number, the calendar event for the visit, and what else is on
+// the calendar at those hours (the reason she was booked). Read only; the texting and the calendar removal are separate, confirmed steps.
+type OpenNight = Awaited<ReturnType<typeof openNights>>[number];
+async function visitContext(n: OpenNight) {
+  const person = n.sitter_person_id ? (await getSitters()).find((s) => s.id === n.sitter_person_id) : null;
+  const key = (n.event_key ?? "").split("|"); const own = key.length === 2 ? { calendarId: key[0], id: key[1] } : null;
+  let around: { calendarId: string; id: string; title: string; start: string }[] = [], ownEvent: { calendarId: string; id: string; title: string } | null = null;
+  if (hasGoogleCal()) {
+    try {
+      const day = n.starts_at.slice(0, 10); const evs = await listEvents(addDaysIso(day, -1), addDaysIso(day, 2));
+      const t0 = Date.parse(n.starts_at), t1 = Date.parse(n.ends_at);
+      if (own) { const e = evs.find((x) => x.id === own.id && x.calendarId === own.calendarId); if (e) ownEvent = { calendarId: e.calendarId, id: e.id, title: e.title }; }
+      around = evs.filter((e) => !e.allDay && !(own && e.id === own.id) && Date.parse(e.startIso) < t1 && Date.parse(e.endIso) > t0).slice(0, 5).map((e) => ({ calendarId: e.calendarId, id: e.id, title: e.title, start: e.start ?? "" }));
+    } catch { /* calendar unreachable: the visit still cancels */ }
+  }
+  return { sitterPhone: person?.phone ?? null, booked: !!(n.sitter_name || n.sitter_person_id), calendarEvent: ownEvent, around };
+}
+
 export const sitterTools: Tool[] = [
   {
     name: "sitter.find", title: "Sitter visits and sitters", kind: "read", tier: 1,
@@ -46,7 +65,8 @@ export const sitterTools: Tool[] = [
         return { ok: true, summary: rows.length ? `${rows.length} past visit${rows.length === 1 ? "" : "s"}${q ? ` with ${rows[0].sitterName}` : ""}; the last was ${fmtWhen(rows[0].startsAt)}.` : `No past visits${q ? ` with ${q}` : ""}.`, data: rows.map((n) => ({ id: n.id, name: `${n.sitterName ?? "Sitter"} ${fmtWhen(n.startsAt)}`, sitter: n.sitterName, date: n.startsAt.slice(0, 10), href: `/settings/sitter` })) };
       }
       const list = await openNights(nc(c));
-      return { ok: true, summary: list.length ? list.map((n) => nightRow(n).name + (n.status === "needed" ? " (no sitter yet)" : n.status === "confirmed" ? " (on the tablet)" : "")).join("; ") : "No sitter visit is planned.", data: list.map(nightRow) };
+      const rows = await Promise.all(list.map(async (n, i) => ({ ...nightRow(n), ...(i < 3 ? await visitContext(n) : {}) })));
+      return { ok: true, summary: list.length ? list.map((n) => nightRow(n).name + (n.status === "needed" ? " (no sitter yet)" : n.status === "confirmed" ? " (on the tablet)" : "")).join("; ") : "No sitter visit is planned.", data: rows };
     },
   },
   {
@@ -178,9 +198,11 @@ export const sitterTools: Tool[] = [
     async run(a, c) {
       const { night, error } = await pickNight(c, str(a.date));
       if (!night) return { ok: false, error: error ?? "No sitter visit is open." };
+      const ctx = await visitContext(night);
       const { error: e } = await c.sb.from("sitter_nights").update({ status: "cancelled", visit_only: null }).eq("id", night.id);
       if (e) return { ok: false, error: e.message };
-      return { ok: true, summary: `Cancelled ${nightRow(night).name}.` };
+      const next = [ctx.booked && ctx.sitterPhone ? "offer to text her (message.send)" : "", ctx.calendarEvent ? "ask whether to take the visit off the calendar (calendar.remove)" : "", ctx.around.length ? `ask about ${ctx.around.map((x) => x.title).join(" / ")} (is it cancelled too?)` : ""].filter(Boolean);
+      return { ok: true, summary: `Cancelled ${nightRow(night).name}.${next.length ? " Still to ask: " + next.join("; ") + "." : ""}`, data: { id: night.id, ...ctx } };
     },
   },
   {

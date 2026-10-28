@@ -88,6 +88,6 @@ export async function bookNight(c: NightCtx, id: string, sitterName: string): Pr
 
 // The open nights, nearest first: needed, scheduled, awaiting review, confirmed.
 export async function openNights(c: NightCtx) {
-  const { data } = await c.sb.from("sitter_nights").select("id, title, status, sitter_name, starts_at, leave_at, ends_at, place").in("status", ["needed", "proposed", "scheduled", "awaiting_review", "confirmed"]).gt("ends_at", new Date().toISOString()).order("starts_at").limit(10);
+  const { data } = await c.sb.from("sitter_nights").select("id, title, status, sitter_name, sitter_person_id, event_key, starts_at, leave_at, ends_at, place").in("status", ["needed", "proposed", "scheduled", "awaiting_review", "confirmed"]).gt("ends_at", new Date().toISOString()).order("starts_at").limit(10);
   return data ?? [];
 }
