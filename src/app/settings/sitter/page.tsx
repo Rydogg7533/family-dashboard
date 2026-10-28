@@ -13,6 +13,7 @@ type Tab = (typeof TABS)[number][0];
 
 export default async function SitterSettings({ searchParams }: PageProps<"/settings/sitter">) {
   const sp = await searchParams; const raw = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
+  const addName = (Array.isArray(sp.add) ? sp.add[0] : sp.add)?.toString().slice(0, 80) ?? null;
   const tab: Tab = (TABS.find(([t]) => t === raw)?.[0] ?? "sitters");
   let owner = false, completed = false, kids: { id: string; name: string }[] = [];
   if (hasSupabaseEnv()) {
@@ -27,7 +28,7 @@ export default async function SitterSettings({ searchParams }: PageProps<"/setti
       <H1>Sitter</H1>
       <p className="text-sm text-muted mb-3">Who may sit, what every sitter sees, and the instruction sets you reuse. Each visit starts from these and you change it for that night. <Link href="/settings/tablet" className="font-semibold text-accent">Pair the kitchen tablet</Link></p>
       <div className="flex gap-1 mb-3 overflow-x-auto">{TABS.map(([t, label]) => <Link key={t} href={`/settings/sitter?tab=${t}`} className={`shrink-0 rounded-full px-3 min-h-9 flex items-center text-xs font-bold no-underline ${tab === t ? "bg-accent text-white" : "bg-soft"}`}>{label}</Link>)}</div>
-      {tab === "sitters" && <SitterPeople sitters={await getSitters()} owner={owner} kids={kids} />}
+      {tab === "sitters" && <SitterPeople sitters={await getSitters()} owner={owner} kids={kids} addName={addName} />}
       {tab === "house" && (<>
         <SitterNightList nights={await getNights(["needed", "proposed", "scheduled", "awaiting_review", "confirmed"], 20)} />
         <SitterSheetEditor items={await getTemplate()} states={await getSections()} completed={completed} />

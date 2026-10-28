@@ -7,6 +7,7 @@ import { getSitters, getNights } from "@/lib/data-sitter";
 import { createNight, bookNight, openNights, matchSitter, type NightCtx } from "@/lib/sitter-nights";
 import { addSitterFromContact, addSitterNew, searchContactsForSitter, updateSitter } from "@/app/settings/sitter/templates-actions";
 import { fmtWhen } from "@/lib/sitter-shared";
+import { debriefNight } from "@/app/sitter/actions";
 
 const nc = (c: ToolCtx): NightCtx => ({ sb: c.sb, userId: c.userId, actor: c.email });
 const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
@@ -110,6 +111,21 @@ export const sitterTools: Tool[] = [
       const { error: e } = await c.sb.from("sitter_nights").update({ status: "cancelled", visit_only: null }).eq("id", night.id);
       if (e) return { ok: false, error: e.message };
       return { ok: true, summary: `Cancelled ${nightRow(night).name}.` };
+    },
+  },
+  {
+    name: "sitter.remember", title: "Remember something for next time", kind: "write", tier: 1,
+    description: "After a visit: a line to keep for every future visit (\"remember Audrey needs the hall light on\", \"next time tell the sitter the gate sticks\"). Goes into the house template, or a named child's template, as a normal line. Also records what the sitter was paid if said.",
+    input: { text: { type: "string", describe: "The line, as the sitter should read it next time", required: true }, child: { type: "string", describe: "A child's first name when the line is about one child; omit for the house" }, paid: { type: "string", describe: "What the sitter was paid, as said ($60 Venmo)" } },
+    async run(a, c) {
+      const { data: last } = await c.sb.from("sitter_nights").select("id").eq("status", "ended").order("ends_at", { ascending: false }).limit(1).maybeSingle();
+      if (!last) return { ok: false, error: "No visit has ended yet; add it to a template under Settings › Sitter instead." };
+      let target = "general";
+      const kid = str(a.child).toLowerCase();
+      if (kid) { const { data: kids } = await c.sb.from("children").select("id, display_name").is("archived_at", null); const k = (kids ?? []).find((x) => String(x.display_name).toLowerCase().startsWith(kid)); if (!k) return { ok: false, error: `No child called ${str(a.child)}.` }; target = k.id; }
+      const r = await debriefNight(last.id, { remember: str(a.text), target, payNote: str(a.paid) });
+      if (!r.ok) return { ok: false, error: r.error ?? "Could not save." };
+      return { ok: true, summary: r.note ?? "Saved.", href: "/settings/sitter" };
     },
   },
   {

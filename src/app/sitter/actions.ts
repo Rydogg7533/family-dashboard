@@ -121,3 +121,33 @@ export async function saveNote(id: string, note: string): Promise<Res> {
   await log(w, "sitter_note", "note for the sitter", id); touch(id);
   return { ok: true };
 }
+
+// After the visit (D6 save-back): one line the parent wants kept goes into a template as a normal line; the pay note stays on the
+// visit; both are optional. Done or dismissed, the card leaves Today (debrief_at). Nothing is applied without this tap.
+export async function debriefNight(id: string, i: { remember?: string; target?: string; payNote?: string }): Promise<Res & { note?: string }> {
+  if (!UUID.test(id)) return { ok: false, error: "Unknown night." };
+  const w = await who(); if (!w) return { ok: false, error: "Not signed in or not available in preview." };
+  const { data: n } = await w.sb.from("sitter_nights").select("id, status, sitter_name").eq("id", id).maybeSingle();
+  if (!n || n.status !== "ended") return { ok: false, error: "That visit is not over." };
+  const notes: string[] = [];
+  const text = (i.remember ?? "").trim().slice(0, 400);
+  if (text) {
+    const target = i.target ?? "general";
+    let q = w.sb.from("sitter_templates").select("id, name, child_id").is("archived_at", null).eq("is_default", true);
+    q = target === "general" ? q.eq("kind", "general") : q.eq("kind", "child").eq("child_id", target);
+    const { data: tpl } = await q.maybeSingle();
+    if (!tpl) return { ok: false, error: target === "general" ? "No default house template yet: make one under Settings › Sitter › General." : "That child has no default template yet." };
+    const section = target === "general" ? "house" : "now";
+    const { count } = await w.sb.from("sitter_template_items").select("id", { count: "exact", head: true }).eq("template_id", tpl.id).eq("section", section).is("archived_at", null);
+    const { error } = await w.sb.from("sitter_template_items").insert({ template_id: tpl.id, section, text, default_on: true, sensitivity: "normal", sort: (count ?? 0) + 1, created_by: w.user.id });
+    if (error) return { ok: false, error: error.message };
+    notes.push(`Added to ${tpl.name}: “${text}”.`);
+    await log(w, "sitter_remembered", text, id);
+  }
+  const pay = (i.payNote ?? "").trim().slice(0, 120);
+  const { error } = await w.sb.from("sitter_nights").update({ debrief_at: new Date().toISOString(), ...(pay ? { pay_note: pay } : {}) }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  if (pay) notes.push(`Noted: ${pay}.`);
+  touch(id); revalidatePath("/settings/sitter");
+  return { ok: true, note: notes.join(" ") || "Thanks, nothing saved." };
+}

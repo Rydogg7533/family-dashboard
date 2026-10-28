@@ -172,3 +172,11 @@ export async function getSitter(id: string): Promise<SitterPerson | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   return (await getSitters(true)).find((p) => p.id === id) ?? null;
 }
+
+// Today, after a visit: the last ended night from the past three days that has not been debriefed ("anything to remember?").
+export async function getDebriefNight(): Promise<Night | null> {
+  if (!hasSupabaseEnv()) return null;
+  const sb = await createClient();
+  const { data } = await sb.from("sitter_nights").select("*").eq("status", "ended").is("debrief_at", null).gt("ends_at", new Date(Date.now() - 3 * 864e5).toISOString()).order("ends_at", { ascending: false }).limit(1).maybeSingle();
+  return data ? toNight(data) : null;
+}

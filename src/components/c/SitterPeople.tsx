@@ -11,16 +11,16 @@ const btn = "min-h-10 px-4 rounded-xl border border-line text-sm font-semibold d
 const prim = "min-h-11 px-4 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50";
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Denver" });
 
-export function SitterPeople({ sitters, owner, kids }: { sitters: SitterPerson[]; owner: boolean; kids: { id: string; name: string }[] }) {
+export function SitterPeople({ sitters, owner, kids, addName }: { sitters: SitterPerson[]; owner: boolean; kids: { id: string; name: string }[]; addName?: string | null }) {
   const router = useRouter();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(!!addName);
   const [msg, setMsg] = useState<string | null>(null);
   const approved = sitters.filter((s) => s.approvedAt), suggested = sitters.filter((s) => !s.approvedAt);
   return (
     <div className="flex flex-col gap-3">
       {msg && <div className="rounded-xl bg-green-bg text-green px-4 py-3 text-sm font-semibold">{msg}</div>}
       {!adding && <button onClick={() => { setAdding(true); setMsg(null); }} className={prim + " self-start"}>+ Add a sitter</button>}
-      {adding && <AddSitter owner={owner} kids={kids} onDone={(note) => { setAdding(false); setMsg(note); router.refresh(); }} onCancel={() => setAdding(false)} />}
+      {adding && <AddSitter owner={owner} kids={kids} presetName={addName ?? ""} onDone={(note) => { setAdding(false); setMsg(note); router.refresh(); }} onCancel={() => setAdding(false)} />}
       {suggested.length > 0 && (
         <div className="card flex flex-col gap-2">
           <div className="font-semibold text-sm">Waiting for an owner’s approval</div>
@@ -46,11 +46,12 @@ function Row({ s }: { s: SitterPerson }) {
   );
 }
 
-function AddSitter({ owner, kids, onDone, onCancel }: { owner: boolean; kids: { id: string; name: string }[]; onDone: (note: string) => void; onCancel: () => void }) {
-  const [mode, setMode] = useState<"pick" | "new">("pick");
+function AddSitter({ owner, kids, onDone, onCancel, presetName = "" }: { owner: boolean; kids: { id: string; name: string }[]; onDone: (note: string) => void; onCancel: () => void; presetName?: string }) {
+  const preset = presetName.trim().split(/\s+/);
+  const [mode, setMode] = useState<"pick" | "new">(presetName ? "new" : "pick");
   const [q, setQ] = useState(""); const [list, setList] = useState<{ id: string; name: string; phone: string | null; mine: boolean }[]>([]);
   const [card, setCard] = useState<{ id: string; name: string; phone: string | null } | null>(null);
-  const [first, setFirst] = useState(""); const [last, setLast] = useState(""); const [phone, setPhone] = useState("");
+  const [first, setFirst] = useState(presetName ? preset[0] : ""); const [last, setLast] = useState(presetName ? preset.slice(1).join(" ") : ""); const [phone, setPhone] = useState("");
   const [depth, setDepth] = useState<"ask" | "now" | "later">("ask");
   const [f, setF] = useState<SitterFields>({ relationship: "", ageBand: "", age: null, rateText: "", drives: null, childrenOk: null, availabilityText: "", certifiedText: "", notes: "" });
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
