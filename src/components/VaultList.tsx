@@ -2,15 +2,29 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveVaultPointer, removeVaultPointer, generateVaultChecklist, setVaultOwnerRetired } from "@/app/settings/vault/actions";
-import { ownerKey, type VaultPointer, type VaultOwner } from "@/lib/vault";
+import { ownerKey, VAULT_KINDS, kindById, buildLabel, type VaultPointer, type VaultOwner, type About } from "@/lib/vault";
 
 type Group = { id: string; label: string; blurb: string };
 const field = "w-full min-h-11 rounded-xl border border-line bg-bg px-3 text-sm";
 const TYPES = [["passport", "Passport"], ["driver_license", "Driver license"], ["ssn", "Social Security number"], ["identity", "Identity"], ["document", "Document"], ["bank_account", "Bank account"], ["secure_note", "Secure note"], ["membership", "Membership"], ["software_license", "Software license"], ["other", "Other"]];
 
-export function VaultList({ rows, me, groups, adults, kids, retired, isOwner }: { rows: VaultPointer[]; me: string; groups: Group[]; adults: VaultOwner[]; kids: VaultOwner[]; retired: string[]; isOwner: boolean }) {
+export function VaultList({ rows, me, groups, adults, kids, vehicles, devices, accounts, retired, isOwner }: { rows: VaultPointer[]; me: string; groups: Group[]; adults: VaultOwner[]; kids: VaultOwner[]; vehicles: VaultOwner[]; devices: VaultOwner[]; accounts: VaultOwner[]; retired: string[]; isOwner: boolean }) {
   const router = useRouter();
-  const [editing, setEditing] = useState<Partial<VaultPointer> & { household?: boolean } | null>(null);
+  const [editing, setEditing] = useState<Partial<VaultPointer> & { household?: boolean; linkOnly?: boolean } | null>(null);
+  // D19: a new pointer is "what kind, about whom or what"; the name, group, type and vault follow. No free naming.
+  const [adding, setAdding] = useState<{ about: About; subjectId: string; kind: string; link: string; expires_on: string; note: string } | null>(null);
+  const subjectsFor = (about: About): VaultOwner[] => about === "child" ? kids : about === "vehicle" ? vehicles : about === "device" ? devices : about === "account" ? accounts : [];
+  const subjectName = (a: { about: About; subjectId: string }) => a.about === "me" ? (adults.find((x) => x.id === me)?.name ?? "") : a.about === "household" ? "" : a.about === "entity" ? a.subjectId : (subjectsFor(a.about).find((x) => x.id === a.subjectId)?.name ?? "");
+  const saveNew = () => {
+    if (!adding) return;
+    const kind = kindById(adding.kind); if (!kind) { setMsg("Pick what it is."); return; }
+    if (adding.about !== "me" && adding.about !== "household" && !adding.subjectId) { setMsg("Pick which one."); return; }
+    start(async () => {
+      const r = await saveVaultPointer({ group: kind.group, label: "", kind: kind.id, about: adding.about, subjectId: adding.about === "entity" ? "" : adding.subjectId, subjectName: subjectName(adding), link: adding.link, expires_on: adding.expires_on, note: adding.note, household: adding.about !== "me" });
+      if (!r.ok) { setMsg(r.error ?? "Could not save."); return; }
+      setAdding(null); setMsg(null); router.refresh();
+    });
+  };
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, start] = useTransition();
 
@@ -66,15 +80,41 @@ export function VaultList({ rows, me, groups, adults, kids, retired, isOwner }: 
         <div className="text-[11px] text-muted">Generate makes one item for each person, vehicle and business in the household, from the master list; tap it again after a new baby, car or business and it adds only what is new.</div>
       </div>
       {msg && !editing && <div className="text-xs text-red">{msg}</div>}
-      <button type="button" onClick={() => setEditing({ group: "identity", household: false })} className="min-h-11 rounded-xl bg-accent text-white font-semibold text-sm">Add a pointer</button>
+      {!adding && !editing && <button type="button" onClick={() => { setAdding({ about: "me", subjectId: "", kind: "", link: "", expires_on: "", note: "" }); setMsg(null); }} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add something not on the list</button>}
+      {adding && (() => {
+        const kinds = VAULT_KINDS.filter((k) => k.about.includes(adding.about));
+        const kind = kindById(adding.kind); const subjects = subjectsFor(adding.about);
+        const preview = kind ? buildLabel(kind, adding.about === "household" ? null : (subjectName(adding) || "…")) : "";
+        return (
+          <div className="card flex flex-col gap-2 text-sm">
+            <div className="font-semibold">Add to the list</div>
+            <div className="text-[11px] text-muted">The list already has one row for each person, vehicle, account, device and business. Add here only for something the list could not know about.</div>
+            <label className="text-xs text-muted">About<select className={field} value={adding.about} onChange={(e) => setAdding({ ...adding, about: e.target.value as About, subjectId: "", kind: "" })}>
+              <option value="me">Me</option><option value="household">The household (shared)</option>{kids.length > 0 && <option value="child">A child</option>}{vehicles.length > 0 && <option value="vehicle">A vehicle</option>}{devices.length > 0 && <option value="device">A device</option>}{accounts.length > 0 && <option value="account">An account</option>}<option value="entity">A business</option>
+            </select></label>
+            {adding.about === "entity" && <label className="text-xs text-muted">Business name<input className={field} value={adding.subjectId} onChange={(e) => setAdding({ ...adding, subjectId: e.target.value })} placeholder="Veil Labs" /></label>}
+            {subjects.length > 0 && <label className="text-xs text-muted">Which one<select className={field} value={adding.subjectId} onChange={(e) => setAdding({ ...adding, subjectId: e.target.value })}><option value="">—</option>{subjects.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+            <label className="text-xs text-muted">What it is<select className={field} value={adding.kind} onChange={(e) => setAdding({ ...adding, kind: e.target.value })}><option value="">—</option>{kinds.map((k) => <option key={k.id} value={k.id}>{k.label[0].toUpperCase() + k.label.slice(1)}</option>)}</select></label>
+            {preview && <div className="text-xs">It will be listed as <span className="font-semibold">{preview}</span>{kind ? ` under ${groups.find((g) => g.id === kind.group)?.label ?? kind.group}` : ""}.</div>}
+            <label className="text-xs text-muted">Private link (1Password › item › ⋯ › Copy Private Link)<input className={field} value={adding.link} onChange={(e) => setAdding({ ...adding, link: e.target.value })} placeholder="https://start.1password.com/open/i?…" inputMode="url" /></label>
+            {kind?.expires && <label className="text-xs text-muted">Expires or renews (needed for a {kind.label})<input type="date" className={field} value={adding.expires_on} onChange={(e) => setAdding({ ...adding, expires_on: e.target.value })} /></label>}
+            <label className="text-xs text-muted">Note<input className={field} value={adding.note} onChange={(e) => setAdding({ ...adding, note: e.target.value })} placeholder="Original in the fire safe" /></label>
+            {msg && <div className="text-xs text-red">{msg}</div>}
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={saveNew} className="min-h-11 flex-1 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
+              <button type="button" onClick={() => { setAdding(null); setMsg(null); }} className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm">Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
       {editing && (
         <div className="card flex flex-col gap-2 text-sm">
-          <div className="font-semibold">{editing.id ? "Edit pointer" : "New pointer"}</div>
-          <label className="text-xs text-muted">Name, as it is named in 1Password<input className={field} value={editing.label ?? ""} onChange={(e) => setEditing({ ...editing, label: e.target.value })} placeholder="Ryan passport" /></label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="font-semibold">{editing.linkOnly ? `Link ${editing.label}` : "Edit pointer"}</div>
+          {editing.linkOnly ? <div className="text-[11px] text-muted">In 1Password, open the item named like this (or make it), then ⋯ › Copy Private Link and paste it here.</div> : <label className="text-xs text-muted">Name, as it is named in 1Password<input className={field} value={editing.label ?? ""} onChange={(e) => setEditing({ ...editing, label: e.target.value })} placeholder="Ryan passport" /></label>}
+          {!editing.linkOnly && <div className="grid grid-cols-2 gap-2">
             <label className="text-xs text-muted">Group<select className={field} value={editing.group ?? "other"} onChange={(e) => setEditing({ ...editing, group: e.target.value as VaultPointer["group"] })}>{groups.map((g) => <option key={g.id} value={g.id}>{g.label}</option>)}</select></label>
             <label className="text-xs text-muted">1Password type<select className={field} value={editing.item_type ?? ""} onChange={(e) => setEditing({ ...editing, item_type: e.target.value })}><option value="">—</option>{TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-          </div>
+          </div>}
           <label className="text-xs text-muted">Private link (1Password › item › ⋯ › Copy Private Link)<input className={field} value={editing.link ?? ""} onChange={(e) => setEditing({ ...editing, link: e.target.value })} placeholder="https://start.1password.com/open/i?…" inputMode="url" /></label>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs text-muted">Expires or renews<input type="date" className={field} value={editing.expires_on ?? ""} onChange={(e) => setEditing({ ...editing, expires_on: e.target.value })} /></label>
@@ -112,7 +152,7 @@ export function VaultList({ rows, me, groups, adults, kids, retired, isOwner }: 
                         </button>
                         {r.link
                           ? <a href={r.link} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>
-                          : <span className="shrink-0 text-[11px] text-amber">no link yet</span>}
+                          : <button type="button" onClick={() => { setEditing({ ...r, household: r.person === null, linkOnly: true }); setAdding(null); setMsg(null); }} className="shrink-0 min-h-9 px-3 rounded-full border border-accent text-accent text-xs font-semibold">Link it</button>}
                         <button type="button" onClick={() => remove(r.id)} aria-label="Remove" className="shrink-0 min-h-9 w-9 rounded-full border border-line text-muted text-xs">✕</button>
                       </div>
                     ))}
