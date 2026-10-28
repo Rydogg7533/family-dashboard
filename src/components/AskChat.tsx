@@ -13,7 +13,7 @@ const inWindow = (bs: Bubble[]) => { const cut = Date.now() - WINDOW_MS; return 
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { at?: number; role: "user" | "assistant"; text: string; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
+type Bubble = { at?: number; role: "user" | "assistant"; text: string; stopped?: boolean; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
 
 // embedded: the same Ask, inside the sheet the + button opens on any page (one thread, two places to open it).
 // source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting.
@@ -26,6 +26,10 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   const restored = useRef(false);
+  // Stop / edit-and-rerun (Ryan, 2026-10-27 20:37). A request is a generation; Stop bumps it and the late reply is dropped.
+  // The server call still finishes and is still logged; only the thread ignores it. Nothing is written without a yes.
+  const gen = useRef(0);
+  const [editing, setEditing] = useState<number | null>(null);
 
   // The thread survives leaving the page (F4): it is kept in this browser, per person, until "New chat".
   // Only this device sees it; nothing about the thread goes to the database from here.
@@ -59,21 +63,25 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     else setToast({ text: r.error ?? "Could not file it." });
   }
 
-  async function send(text: string) {
+  // replaceFrom: resend from this user bubble, dropping it and everything after (the originals stay in Ask history on the server).
+  async function send(text: string, replaceFrom?: number) {
     const q = text.trim();
     if (!q || busy) return;
-    setInput("");
-    const next: Bubble[] = [...bubbles, { at: Date.now(), role: "user", text: q }];
+    setInput(""); setEditing(null);
+    const base = replaceFrom != null ? bubbles.slice(0, replaceFrom) : bubbles;
+    const next: Bubble[] = [...base, { at: Date.now(), role: "user", text: q }];
     setBubbles(next);
     setBusy(true);
+    const my = ++gen.current;
     // The model sees the recent window only (last 24 h, at most 12 turns); older exchanges are in history and
     // reachable through the ask.history tool, so an answer costs the same on day 30 as on day 1.
     const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
     // D5: the last proposal (a write or an event) travels with the question so a typed yes can run it.
-    const lastB = bubbles[bubbles.length - 1];
+    const lastB = base[base.length - 1];
     const pend = lastB?.role === "assistant" && lastB.reply && (lastB.reply.kind === "tool_confirm" || lastB.reply.kind === "event_confirm" || lastB.reply.kind === "event_move") && !lastB.toolResult && !lastB.eventResult
       ? { kind: lastB.reply.kind, tool: lastB.reply.tool, draft: lastB.reply.draft, move: lastB.reply.move, feedId: lastB.reply.feedId } : null;
-    const reply = await askAction(thread, undefined, source ?? "ask", pend);
+    const reply = await askAction(thread, undefined, source ?? "ask", pend).catch((e) => ({ kind: "inbox", text: `The model could not be reached (${String(e?.message ?? e).slice(0, 80)}).`, cost: 0, costText: "", model: "none", sample: false } as AskReply));
+    if (my !== gen.current) return;   // stopped, or replaced by a newer request
     // The proposal is answered now, whatever the answer was; it must not be runnable twice.
     if (pend) setBubbles((bs) => bs.map((b) => (b === lastB ? { ...b, toolResult: b.reply?.kind === "tool_confirm" ? { ok: true, text: "" } : b.toolResult, eventResult: b.reply?.kind !== "tool_confirm" ? { ok: true, text: "" } : b.eventResult } : b)));
     setSpent((s) => s + reply.cost);
@@ -87,6 +95,22 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     }
     setBubbles([...next, bubble]);
     setBusy(false);
+  }
+
+  function stop() {
+    if (!busy) return;
+    gen.current += 1;
+    setBusy(false);
+    setBubbles((bs) => bs.map((b, i) => (i === bs.length - 1 && b.role === "user" ? { ...b, stopped: true } : b)));
+  }
+  // Tap your own message: it goes back in the box; sending it replaces that turn and everything after.
+  function edit(i: number) {
+    if (busy) return;
+    setEditing(i); setInput(bubbles[i].text);
+  }
+  function retry(i: number) {
+    const u = bubbles[i]; if (!u || u.role !== "user" || busy) return;
+    void send(u.text, i);
   }
 
   // A write the model chose. It has not run yet; this is where the person agrees to it.
@@ -132,7 +156,11 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
           <div className="card text-sm text-muted">Ask or tell me anything about the family&apos;s records: schedules, documents, money, people, vehicles, home, your own health. For example: {SUGGESTED.map((x) => `“${x}”`).join(", ")}.</div>
         )}
         {bubbles.map((b, i) => b.role === "user" ? (
-          <div key={i} className="self-end max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-accent text-white px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{b.text}</div>
+          <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
+            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-accent text-white"}`}>{b.text}</button>
+            {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
+            {b.stopped && editing !== i && <div className="text-[11px] text-muted px-1">Stopped · <button type="button" onClick={() => retry(i)} className="font-semibold text-accent">retry</button> · <button type="button" onClick={() => edit(i)} className="font-semibold text-accent">edit</button></div>}
+          </div>
         ) : (
           // min-w-0 and overflow-wrap:anywhere on the bubble: a folder path, an order number or a link has no
           // spaces to break at, and without these a flex child grows to fit it and the text runs past the card.
@@ -178,7 +206,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
               </div>
             )}
             {b.reply?.scopeRule && <div className="text-xs text-muted px-1">Scope rule saved: &ldquo;{b.reply.scopeRule}&rdquo; · remove it in Settings › Assistant</div>}
-            {b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
+            {b.reply?.kind === "inbox" && /could not be reached/i.test(b.text)
+              ? <div className="text-xs font-semibold text-amber px-1"><button type="button" onClick={() => retry(i - 1)} className="underline">Retry</button></div>
+              : b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
             <div className="text-[11px] text-muted px-1 flex flex-wrap gap-x-2">
               {b.reply?.source && <a href={b.reply.source.href} className="font-semibold text-accent">Open in {b.reply.source.label.replace(/^Open in /, "")}</a>}
               {b.reply && b.reply.kind !== "deflect" && b.reply.kind !== "scope_check" && (
@@ -190,13 +220,14 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
             </div>
           </div>
         ))}
-        {busy && <div className="self-start card text-sm text-muted">Thinking…</div>}
+        {busy && <div className="self-start card text-sm text-muted flex items-center gap-3"><span>Thinking…</span><button type="button" onClick={stop} className="min-h-9 px-3 rounded-full border border-line text-xs font-semibold text-fg">Stop</button></div>}
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder="Ask or tell me something…" aria-label="Ask" className="flex-1 min-h-12 rounded-full border border-line bg-bg px-4 text-sm" />
-        <button type="submit" disabled={busy || !input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">Send</button>
+      <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
+        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder={editing != null ? "Edit, then Send" : "Ask or tell me something…"} aria-label="Ask" className={`flex-1 min-h-12 rounded-full border bg-bg px-4 text-sm ${editing != null ? "border-accent" : "border-line"}`} />
+        {busy ? <button type="button" onClick={stop} className="min-h-12 px-5 rounded-full border border-line font-semibold">Stop</button>
+          : <button type="submit" disabled={!input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">{editing != null ? "Resend" : "Send"}</button>}
       </form>
 
       {toast && (
