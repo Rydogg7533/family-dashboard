@@ -1,6 +1,7 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import type { Task } from "@/lib/data";
 import { getCandidates, type Candidate } from "@/lib/data-subscriptions";
+import { stillDeciding, type Owned } from "@/lib/owned";
 
 export type Verdict = "right" | "not_a_task" | "wrong_type";
 export type Scope = "once" | "every_time";
@@ -38,6 +39,7 @@ export type ProposedRule = {
 
 export type Review = {
   stale: Task[];                            // open, overdue by more than a week
+  deciding: Owned[];                        // replaced or gone things with no fate yet (D18); asked once a month
   asking: Candidate[];                      // subscription candidates nobody has answered
   rules: ProposedRule[];                    // sender rules proposed and not yet activated or declined
   activeRules: number;                      // how many sender rules are live
@@ -65,10 +67,10 @@ const sampleTriage: TriageItem[] = [
 ];
 
 export async function getReview(): Promise<Review> {
-  if (!hasSupabaseEnv()) return { stale: [], asking: [], rules: sampleRules, activeRules: 0, triage: sampleTriage, triageJudged: 1, split: [], doneThisWeek: 0, lastConfirmed: null };
+  if (!hasSupabaseEnv()) return { stale: [], deciding: [], asking: [], rules: sampleRules, activeRules: 0, triage: sampleTriage, triageJudged: 1, split: [], doneThisWeek: 0, lastConfirmed: null };
   const sb = await createClient();
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const [stale, asking, done, confirmed, triage, rules, active] = await Promise.all([
+  const [stale, asking, done, confirmed, triage, rules, active, deciding] = await Promise.all([
     sb.from("tasks").select("*").eq("status", "open").lt("due_at", weekAgo).order("due_at", { ascending: true }).limit(50),
     getCandidates(),
     sb.from("tasks").select("done_by").eq("status", "done").gte("updated_at", weekAgo),
@@ -76,11 +78,13 @@ export async function getReview(): Promise<Review> {
     getTriage(sb),
     sb.from("email_rules").select("id, match_kind, match_value, action, mailbox, note, origin, created_at").eq("status", "proposed").in("match_kind", ["sender", "domain"]).order("created_at", { ascending: true }).limit(60),
     sb.from("email_rules").select("id", { count: "exact", head: true }).eq("status", "approved").in("match_kind", ["sender", "domain"]),
+    stillDeciding(sb).catch(() => [] as Owned[]),
   ]);
   const by = new Map<string, number>();
   for (const r of done.data ?? []) { const w = String(r.done_by ?? "").trim() || "Unknown"; by.set(w, (by.get(w) ?? 0) + 1); }
   return {
     stale: ((stale.data ?? []) as Task[]),
+    deciding,
     asking: asking.filter((c) => c.status === "asking"),
     rules: ((rules.data ?? []) as ProposedRule[]),
     activeRules: active.count ?? 0,

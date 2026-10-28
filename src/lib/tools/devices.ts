@@ -1,4 +1,5 @@
-import { vaultFollowUp } from "@/lib/vault-followup";
+import { arrivalInput, afterArrival } from "@/lib/tools/owned";
+import { whoIs } from "@/lib/owned";
 import "server-only";
 import type { Tool } from "@/lib/tools/types";
 import { str } from "@/lib/tools/types";
@@ -20,7 +21,7 @@ export const deviceTools: Tool[] = [
   },
   {
     name: "device.add", title: "Add a device", kind: "write", tier: 2,
-    description: "Put a device or belonging in the register. Serial numbers: the last 4 characters only, never the whole one.",
+    description: "Put a device (phone, tablet, laptop, watch, TV, e-bike, appliance) in the register. Serial numbers: the last 4 characters only, never the whole one. Read owned.similar first: if they already own one like it, ask whether this replaces it (then pass replaces, and fate if they said). A gift or hand-me-down is added the same way with source and from.",
     input: {
       name: { type: "string", describe: "What it is called in lists, like Ryan's iPhone", required: true },
       kind: { type: "string", describe: "Phone, Laptop, Watch, TV, E-bike, Appliance…", required: true },
@@ -30,19 +31,23 @@ export const deviceTools: Tool[] = [
       planName: { type: "string", describe: "Protection plan, like AppleCare+", required: false },
       planEnd: { type: "date", describe: "When that plan ends", required: false },
       note: { type: "string", describe: "Anything else said about it", required: false },
+      owner: { type: "string", describe: "Whose it is (a first name); the asker when not said", required: false },
+      ...arrivalInput,
     },
     async run(a, c) {
       const last4 = str(a.serialLast4);
+      const who = str(a.owner) ? await whoIs(c.sb, str(a.owner)) : null;
       if (last4.length > 4) return { ok: false, error: "Serial: the last 4 characters only. The whole one stays in the vault." };
       const row = {
-        name: str(a.name).slice(0, 120), kind: str(a.kind).slice(0, 40), make: str(a.make) || null, person: c.userId, status: "in use",
+        name: str(a.name).slice(0, 120), kind: str(a.kind).slice(0, 40), make: str(a.make) || null, person: who?.profileId ?? (who ? null : c.userId), status: "in use",
         serial_last4: last4 || null, warranty_end: str(a.warrantyEnd) || null, plan_name: str(a.planName) || null,
-        plan_end: str(a.planEnd) || null, note: str(a.note) || null, added_by: c.email, updated_by: c.email,
+        plan_end: str(a.planEnd) || null, note: [who && !who.profileId ? `${who.name}'s` : null, str(a.note) || null].filter(Boolean).join(" · ") || null, added_by: c.email, updated_by: c.email,
+        source: str(a.source) || "bought", from_whom: str(a.from) || null,
       };
       const { data, error } = await c.sb.from("devices").insert(row).select("id").single();
       if (error) return { ok: false, error: error.message };
-      const fu = await vaultFollowUp(c.sb, c.userId, { kind: "device", ref: data.id as string, version: "new", title: `Update 1Password: ${row.name}`, summary: `New device. Put the full serial or IMEI, the receipt${row.warranty_end || row.plan_name ? " and the warranty or plan document" : ""} in 1Password, then put the item's name in the device's serial pointer. The dashboard keeps only the last four.`, person: row.person });
-      return { ok: true, summary: `Added ${row.name} to the register${fu.made ? ", and a task is on your list to put the full serial and receipt in 1Password" : ""}`, href: `/devices/${data.id as string}` };
+      const tail = await afterArrival(c, `device:${data.id as string}`, a);
+      return { ok: true, summary: `Added ${row.name}${who ? ` (${who.name}'s)` : ""}${row.source !== "bought" ? `, ${row.source.replace("_", "-")}${row.from_whom ? ` from ${row.from_whom}` : ""}` : ""}${tail}. A task to put the full serial and receipt in 1Password is on the list.`, href: `/devices/${data.id as string}` };
     },
   },
   {

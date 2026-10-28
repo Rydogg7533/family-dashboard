@@ -1,10 +1,10 @@
 // Things catalog: client-safe types, constants and helpers (no Supabase import).
-export type ThingStatus = "active" | "sold" | "given_away" | "lost" | "discarded";
+export type ThingStatus = "active" | "sold" | "given_away" | "lost" | "discarded" | "undecided" | "gone";
 export type PriceSource = "receipt" | "manual" | "estimated" | "suggested";
 export type OwnerKind = "person" | "child" | "shared";
 
-export const STATUS_LABEL: Record<ThingStatus, string> = { active: "Have it", sold: "Sold", given_away: "Given away", lost: "Lost", discarded: "Thrown out" };
-export const GONE: ThingStatus[] = ["sold", "given_away", "lost", "discarded"];
+export const STATUS_LABEL: Record<ThingStatus, string> = { active: "Have it", sold: "Sold", given_away: "Given away", lost: "Lost", discarded: "Thrown out", undecided: "Replaced, deciding", gone: "Gone, how unknown" };
+export const GONE: ThingStatus[] = ["sold", "given_away", "lost", "discarded", "gone"];
 export const PRICE_SOURCE_LABEL: Record<PriceSource, string> = { receipt: "From a receipt", manual: "Entered by hand", estimated: "Estimated", suggested: "Suggested (not accepted yet)" };
 export const SEASONS: { id: "all" | "summer" | "winter" | "spring_fall"; label: string }[] = [{ id: "all", label: "All year" }, { id: "summer", label: "Summer" }, { id: "winter", label: "Winter" }, { id: "spring_fall", label: "Spring and fall" }];
 

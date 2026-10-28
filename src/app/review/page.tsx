@@ -5,6 +5,7 @@ import { SubscriptionCandidate } from "@/components/SubscriptionCandidate";
 import { TriageVerdict } from "@/components/TriageVerdict";
 import { ConfirmWeek } from "@/components/ConfirmWeek";
 import { ProposedRule } from "@/components/ProposedRule";
+import { StillDeciding } from "@/components/StillDeciding";
 import { isOwnerViewer } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ const Head = ({ children }: { children: React.ReactNode }) => <div className="te
 
 export default async function ReviewPage() {
   const [r, owner] = await Promise.all([getReview(), isOwnerViewer()]);
-  const open = r.stale.length + r.asking.length + r.rules.length;
+  const open = r.stale.length + r.asking.length + r.rules.length + r.deciding.length;
   return (
     <>
       <H1 right={r.lastConfirmed ? `Last: ${when(r.lastConfirmed.at)}` : undefined}>Weekly review</H1>
@@ -24,6 +25,12 @@ export default async function ReviewPage() {
       {r.stale.length > 0 && (<>
         <Head>OVERDUE MORE THAN A WEEK ({r.stale.length})</Head>
         <div className="flex flex-col gap-2 mb-4">{r.stale.map((t) => <ReviewTask key={t.id} id={t.id} title={t.title} daysLate={daysLate(t.due_at!)} />)}</div>
+      </>)}
+
+      {r.deciding.length > 0 && (<>
+        <Head>STILL DECIDING ({r.deciding.length})</Head>
+        <p className="text-[11px] text-muted mb-1.5 leading-snug">Things that were replaced or left the house with no record of how. One tap each; &ldquo;still not sure&rdquo; waits a month.</p>
+        <div className="flex flex-col gap-2 mb-4">{r.deciding.slice(0, 5).map((o) => <StillDeciding key={o.ref} item={o} />)}</div>
       </>)}
 
       {r.asking.length > 0 && (<>

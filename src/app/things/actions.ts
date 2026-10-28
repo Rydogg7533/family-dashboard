@@ -82,7 +82,7 @@ export async function removeThingPhoto(photoId: string, itemId: string): Promise
 }
 
 export async function setThingStatus(id: string, status: ThingStatus, note?: string): Promise<Res> {
-  if (!["active", "sold", "given_away", "lost", "discarded"].includes(status)) return { ok: false, error: "Unknown status." };
+  if (!["active", "sold", "given_away", "lost", "discarded", "undecided", "gone"].includes(status)) return { ok: false, error: "Unknown status." };
   const w = await who(); if (!w) return { ok: false, error: "Not signed in or not available in preview." };
   const { error } = await w.sb.from("items").update({ status, status_at: status === "active" ? null : new Date().toISOString().slice(0, 10), status_note: status === "active" ? null : t(note, 300), updated_by: w.actor, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: error.message };

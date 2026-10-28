@@ -86,3 +86,17 @@ export async function confirmWeek(open: number) {
   revalidatePath("/review"); revalidatePath("/");
   return { ok: true };
 }
+
+// D18 "Still deciding": a replaced or gone thing gets its fate here, with one tap. "Still not sure" only moves the
+// next ask out 30 days. Household hand-downs need a name, so that one goes through Ask instead.
+export async function decideFate(ref: string, fate: "spare" | "sell" | "give" | "trash" | "trade_in" | "lost" | "undecided") {
+  if (!hasSupabaseEnv()) return { ok: true, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { applyFate } = await import("@/lib/owned");
+  const r = await applyFate(sb, ref, fate, undefined, fate === "undecided" ? undefined : "from the weekly review", user.email ?? "member");
+  if (!r.ok) return { ok: false, error: r.error };
+  revalidatePath("/review");
+  return { ok: true };
+}

@@ -1,3 +1,5 @@
+import { arrivalInput, afterArrival } from "@/lib/tools/owned";
+import { whoIs } from "@/lib/owned";
 import "server-only";
 // The capability-map gaps closed (Ryan, 2026-10-27 21:19: "test later, finish building"): the weekly review, claims, accounts and
 // statements, who is free, things, the shop list, mail drafts, unsubscribing. Each wraps a reader or action the page already uses.
@@ -111,12 +113,17 @@ export const moreTools: Tool[] = [
   },
   {
     name: "thing.add", title: "Add a thing to the catalog", kind: "write", tier: 1,
-    description: "Add an item to the household's catalog of things: name, category (furniture, electronics, tools, kitchen, clothing, outdoor, toys, other), owner (a first name or Family), where it is kept, brand, model, the serial's last four, notes. Photos are added on the page.",
-    input: { name: { type: "string", describe: "What it is", required: true }, category: { type: "string", describe: "Category", required: true }, owner: { type: "string", describe: "Whose it is (first name or Family)" }, location: { type: "string", describe: "Where it is kept" }, brand: { type: "string", describe: "Brand" }, model: { type: "string", describe: "Model" }, serialLast4: { type: "string", describe: "Last four of the serial" }, notes: { type: "string", describe: "Anything else" } },
-    async run(a) {
-      const input: ThingInput = { name: str(a.name), category: str(a.category) || "other", owner: str(a.owner) || "Family", location: str(a.location) || undefined, brand: str(a.brand) || undefined, model: str(a.model) || undefined, serialLast4: str(a.serialLast4).slice(-4) || undefined, notes: str(a.notes) || undefined };
+    description: "Add an item to the household's catalog of things: name, category (furniture, electronics, tools, kitchen, clothing, outdoor, toys, other), owner (a first name or Family), where it is kept, brand, model, the serial's last four, notes. Photos are added on the page. Read owned.similar first: if they already own one like it, ask whether this replaces it (then pass replaces, and fate if they said). Gifts and hand-me-downs are added the same way with source and from; no receipt needed. Phones, tablets, laptops and the like go to device.add instead.",
+    input: { name: { type: "string", describe: "What it is", required: true }, category: { type: "string", describe: "Category", required: true }, owner: { type: "string", describe: "Whose it is (first name or Family)" }, location: { type: "string", describe: "Where it is kept" }, brand: { type: "string", describe: "Brand" }, model: { type: "string", describe: "Model" }, serialLast4: { type: "string", describe: "Last four of the serial" }, notes: { type: "string", describe: "Anything else" } , ...arrivalInput },
+    async run(a, c) {
+      const who = str(a.owner) && !/^family$/i.test(str(a.owner)) ? await whoIs(c.sb, str(a.owner)) : null;
+      const input: ThingInput = { name: str(a.name), category: str(a.category) || "other", owner: who ? `${who.kind}:${who.id}` : "shared", location: str(a.location) || undefined, brand: str(a.brand) || undefined, model: str(a.model) || undefined, serialLast4: str(a.serialLast4).slice(-4) || undefined, notes: str(a.notes) || undefined };
       const r = await addThing(input, []);
-      return r.ok ? { ok: true, summary: `Added ${input.name} to Things${input.location ? ` (kept ${input.location})` : ""}. Add a photo on its page when you can.`, href: r.id ? `/things/${r.id}` : "/things" } : { ok: false, error: r.error ?? "Could not add it." };
+      if (!r.ok || !r.id) return { ok: false, error: r.error ?? "Could not add it." };
+      const source = str(a.source) || "bought";
+      if (source !== "bought" || str(a.from)) await c.sb.from("items").update({ source, from_whom: str(a.from) || null }).eq("id", r.id).then(() => {}, () => {});
+      const tail = await afterArrival(c, `item:${r.id}`, a);
+      return { ok: true, summary: `Added ${input.name}${who ? ` (${who.name}'s)` : ""}${source !== "bought" ? `, ${source.replace("_", "-")}${str(a.from) ? ` from ${str(a.from)}` : ""}` : ""}${tail}.`, href: `/things/${r.id}` };
     },
   },
   {

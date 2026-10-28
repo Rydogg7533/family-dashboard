@@ -51,7 +51,7 @@ export default async function Things({ searchParams }: PageProps<"/things">) {
         {peopleOpts.map((p) => <Link key={p.key} href={href({ ...keep, owner: p.key })} className={chip(own === p.key)}>{p.label}</Link>)}
       </div>
       <div className="flex gap-2 overflow-x-auto pb-3">
-        {(["active", "all", "sold", "given_away", "lost", "discarded"] as const).map((s) => <Link key={s} href={href({ ...keep, status: s === "active" ? undefined : s })} className={chip(st === s)}>{s === "all" ? "Everything" : STATUS_LABEL[s]}</Link>)}
+        {(["active", "all", "undecided", "sold", "given_away", "lost", "discarded", "gone"] as const).map((s) => <Link key={s} href={href({ ...keep, status: s === "active" ? undefined : s })} className={chip(st === s)}>{s === "all" ? "Everything" : STATUS_LABEL[s]}</Link>)}
       </div>
       {shown.length === 0 && <Card className="text-sm text-muted">{all.length === 0 ? "Nothing here yet. Tap Add a thing, take a photo, and give it a name. That is all it needs." : "Nothing matches those filters."}</Card>}
       <div className="grid grid-cols-2 gap-2">
