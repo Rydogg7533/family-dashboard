@@ -19,6 +19,8 @@ import { join, resolve, dirname } from "node:path";
 
 const args = process.argv.slice(2);
 const MODE = args.includes("--apply") ? "apply" : args.includes("--status") ? "status" : "plan";
+// --account <shorthand|email|url>: which 1Password account, when the Mac has more than one (the family one, not a business one).
+const ACCOUNT = (() => { const i = args.indexOf("--account"); return i >= 0 ? args[i + 1] : process.env.OP_ACCOUNT || ""; })();
 const HOME = homedir();
 const SECRETS = join(HOME, "_secrets_local_only");
 const CSV = join(SECRETS, "vault-import.csv");
@@ -75,6 +77,7 @@ function expiryIn(text) {
 
 // ---------- 1Password CLI ----------
 function op(argv, opts = {}) {
+  if (ACCOUNT) argv = [...argv, "--account", ACCOUNT];
   const r = spawnSync("op", argv, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000, ...opts });
   if (r.status !== 0) throw new Error(`op ${argv.slice(0, 3).join(" ")}: ${(r.stderr || "").trim().slice(0, 300)}`);
   return r.stdout;
@@ -103,12 +106,17 @@ async function status() {
 
 async function plan() {
   if (!existsSync(OCR)) { console.error(`STOP: ${OCR} is not built. Run: swiftc -O -o scripts/ocr/stewardos-ocr scripts/ocr/stewardos-ocr.swift`); process.exit(1); }
-  const accounts = opJson(["account", "list"]);
+  const accounts = JSON.parse(spawnSync("op", ["account", "list", "--format", "json"], { encoding: "utf8" }).stdout || "[]");
   if (!accounts.length) { console.error("STOP: op is not signed in. Run: op signin"); process.exit(1); }
-  const acct = accounts[0];
-  const host = String(acct.url || "my.1password.com").replace(/^https?:\/\//, "");
+  if (accounts.length > 1 && !ACCOUNT) {
+    console.error("STOP: this Mac has more than one 1Password account. Say which with --account, e.g.\n" + accounts.map((a) => `  node scripts/vault-import.mjs --plan --account ${a.shorthand || a.url}   (${a.email ?? ""} at ${a.url ?? ""})`).join("\n"));
+    process.exit(1);
+  }
   const me = opJson(["whoami"]);
+  const acct = accounts.find((a) => a.account_uuid === me.account_uuid) ?? accounts[0];
+  const host = String(acct.url || me.url || "my.1password.com").replace(/^https?:\/\//, "");
   const accountUuid = me.account_uuid || acct.account_uuid;
+  console.log(`Using 1Password account ${me.email ?? acct.email ?? ""} at ${host}.`);
   const items = opJson(["item", "list"]);
   console.log(`1Password: ${items.length} items across ${new Set(items.map((i) => i.vault?.name)).size} vaults (titles only).`);
   const rows = await sb(`vault_pointers?select=id,label,link,expires_on,template_key,attached_kind,attached_id&deleted_at=is.null&order=label`);
