@@ -170,31 +170,80 @@ async function main() {
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const rowOptions = (sel) => rows.map((r) => `<option value="${r.id}" ${sel.includes(r.id) ? "selected" : ""}>${esc(r.label)}${r.link ? " (already linked)" : ""}</option>`).join("");
   const vaultOptions = (sel) => vaults.map((v) => `<option value="${v.id}" ${v.id === sel ? "selected" : ""}>${esc(v.name)}</option>`).join("");
-  const page = () => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Map scans to 1Password</title>
-<style>body{font:15px -apple-system,system-ui;margin:0;padding:20px;background:#f5f5f7;color:#111}h1{font-size:20px}.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;box-shadow:0 1px 2px #0001}body{max-width:1100px;margin:0 auto}.card.check{outline:2px solid #e0a000}.card.skip{opacity:.5}img{width:150px;max-height:190px;object-fit:contain;border-radius:8px;background:#eee}.pdf{width:150px;height:120px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}label{display:block;font-size:12px;color:#555;margin-top:6px}input,select{width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;font:inherit}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:#eee;margin-right:6px}.tag.warn{background:#fff1c2}.tag.ok{background:#d9f5dd}.pre{font-size:11px;color:#777;margin-top:6px;max-height:40px;overflow:hidden}button{padding:12px 20px;border-radius:999px;border:0;background:#0F4C81;color:#fff;font:inherit;font-weight:600}.res{font-size:13px;margin-top:8px}.res.ok{color:#117733}.res.bad{color:#b00}</style></head><body>
-<h1>Map ${items.length} scans</h1><p style="color:#555">Everything here runs on this Mac. Fix anything that is wrong, untick what should not go, then Apply. Apply creates the 1Password item with the scan attached, and fills the link and date on the list.</p>
-<form id="f">${[...items].sort((a, b) => Number(a.sure) - Number(b.sure)).map((x) => `
-<div class="card ${x.skip ? "skip" : x.sure ? "" : "check"}" id="c${x.i}">
-  <div>${/\.pdf$/i.test(x.file) ? `<div class="pdf">PDF<br>${esc(basename(x.file))}</div>` : `<img src="/file/${x.i}?t=${token}" alt="">`}${(x.files?.length ?? 1) > 1 ? `<div style="font-size:11px;color:#777;margin-top:4px">${x.files.length} files, one item</div>` : ""}</div>
-  <div>
-    <div><label style="display:inline"><input type="checkbox" name="go${x.i}" ${x.skip ? "" : "checked"} style="width:auto"> include</label>
-      <span class="tag ${x.sure ? "ok" : "warn"}">${x.sure ? "looks right" : x.kind ? "check this" : "what is this?"}</span>
-      ${x.alreadyLinked ? `<span class="tag">row already linked</span>` : ""}${x.dup ? `<span class="tag warn">already in 1Password under this name (unticked so no copy is made; tick to make one anyway)</span>` : ""}
-      <span style="font-size:12px;color:#777">${esc(x.name)}</span></div>
-    <div style="font-size:12px;color:#555;margin-top:4px">Read: ${x.kind ? esc(KIND_LABEL[x.kind]) : "unknown kind"}${x.person ? ", " + esc(x.person) : ""}${x.vehicle ? ", " + esc(x.vehicle) : ""}${x.dateFrom ? " · " + esc(x.dateFrom) : ""}</div>
-    <label>Which row(s) on the list — hold ⌘ to pick several when one card covers several people<select name="row${x.i}" multiple size="7">${rowOptions(x.rowIds)}</select></label>
-    <div class="row2"><label>1Password item name<input name="title${x.i}" value="${esc(x.title)}"></label><label>Vault<select name="vault${x.i}">${vaultOptions(x.vaultId)}</select></label></div>
-    <div class="row2"><label>Expires or renews<input type="date" name="date${x.i}" value="${esc(x.date)}"></label><label>Note<input name="note${x.i}" placeholder="Original in the safe"></label></div>
-    <div class="pre">${esc(x.preview)}</div><div class="res" id="r${x.i}"></div>
-  </div></div>`).join("")}
-<p><button type="submit" id="go">Apply</button> <span id="status" style="margin-left:10px;color:#555"></span></p></form>
+  // The mapping screen. Three groups, top to bottom: what needs a decision, what is ready to go, what is already done.
+  // Every field is editable; nothing is written until Apply, which stays in view at the bottom.
+  const groupOf = (x) => (x.alreadyLinked || x.dup) ? "done" : x.sure ? "ready" : "needs";
+  const card = (x) => {
+    const g = groupOf(x);
+    const why = x.alreadyLinked ? "This document is already linked on the list." : x.dup ? "An item with this name is already in 1Password." : !x.kind ? "Could not tell what this is. Pick the row it belongs to, or leave it unticked." : !x.rowIds.length ? "Could not tell whose it is. Pick the row." : "Check the date, then it is ready.";
+    const read = [x.kind ? KIND_LABEL[x.kind] : "unknown kind", x.person, x.vehicle].filter(Boolean).join(" · ");
+    return `
+<section class="card ${g}" id="c${x.i}">
+  <div class="thumb">${/\.pdf$/i.test(x.file) ? `<div class="pdf">PDF</div>` : `<img src="/file/${x.i}?t=${token}" alt="">`}<div class="fname">${esc(x.name)}</div>${(x.files?.length ?? 1) > 1 ? `<div class="fname">${x.files.length} files → one item</div>` : ""}</div>
+  <div class="body">
+    <div class="top"><label class="inc"><input type="checkbox" name="go${x.i}" ${x.skip ? "" : "checked"}> <span>Include</span></label><span class="pill ${g}">${g === "needs" ? "Needs you" : g === "ready" ? "Ready" : "Already done"}</span></div>
+    <div class="read"><b>Read from the scan:</b> ${esc(read)}${x.dateFrom ? ` · <b>date:</b> ${esc(x.dateFrom)}` : ""}</div>
+    <div class="why">${esc(why)}</div>
+    <div class="field"><div class="lbl">Goes to this row on the list <span class="hint">(⌘-click to pick several when one card covers several people)</span></div>
+      <input class="filter" placeholder="Type to find a row…" oninput="filt(this)"><select name="row${x.i}" multiple size="6">${rowOptions(x.rowIds)}</select></div>
+    <div class="grid3">
+      <div class="field"><div class="lbl">Name in 1Password</div><input name="title${x.i}" value="${esc(x.title)}"></div>
+      <div class="field"><div class="lbl">Vault</div><select name="vault${x.i}">${vaultOptions(x.vaultId)}</select></div>
+      <div class="field"><div class="lbl">Expires or renews</div><input type="date" name="date${x.i}" value="${esc(x.date)}"></div>
+    </div>
+    <div class="field"><div class="lbl">Note (optional)</div><input name="note${x.i}" placeholder="Original in the safe"></div>
+    <details class="ocr"><summary>What the scan says</summary><div>${esc(x.preview)}</div></details>
+    <div class="res" id="r${x.i}"></div>
+  </div>
+</section>`;
+  };
+  const page = () => {
+    const needs = items.filter((x) => groupOf(x) === "needs"), ready = items.filter((x) => groupOf(x) === "ready"), done = items.filter((x) => groupOf(x) === "done");
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Map your documents</title>
+<style>
+:root{--accent:#0F4C81;--fg:#111;--muted:#444;--line:#d9d9de;--bg:#f2f3f5}
+*{box-sizing:border-box}body{font:15px/1.4 -apple-system,system-ui,sans-serif;margin:0;background:var(--bg);color:var(--fg)}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:14px 20px;z-index:2}
+header h1{font-size:20px;margin:0 0 4px}header p{margin:0;color:var(--muted);font-size:14px}
+main{max-width:1060px;margin:0 auto;padding:16px 20px 110px}
+h2{font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px}
+.card{background:#fff;border-radius:14px;padding:16px;margin:10px 0;display:grid;grid-template-columns:160px minmax(0,1fr);gap:16px;box-shadow:0 1px 2px #0002;border:2px solid transparent}
+.card.needs{border-color:#e6a700}.card.done{opacity:.6}
+.thumb img{width:160px;max-height:200px;object-fit:contain;border-radius:8px;background:#e9e9ee}.pdf{width:160px;height:120px;border-radius:8px;background:#e9e9ee;display:flex;align-items:center;justify-content:center;font-weight:700;color:#555}
+.fname{font-size:12px;color:var(--muted);margin-top:6px;word-break:break-word}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:6px}.inc{display:flex;align-items:center;gap:8px;font-weight:700}.inc input{width:20px;height:20px;accent-color:var(--accent)}
+.pill{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px}.pill.needs{background:#fff1c2;color:#7a5a00}.pill.ready{background:#d9f5dd;color:#1b5e20}.pill.done{background:#e6e6ea;color:#444}
+.read{font-size:14px;margin:4px 0}.why{font-size:14px;color:var(--muted);margin-bottom:10px}
+.field{margin-top:10px}.lbl{font-size:13px;font-weight:700;margin-bottom:4px}.hint{font-weight:400;color:var(--muted)}
+input,select{width:100%;padding:9px 10px;border:1px solid #b9b9c2;border-radius:8px;font:inherit;color:var(--fg);background:#fff}select[multiple]{padding:4px}
+.filter{margin-bottom:6px}.grid3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+.ocr{margin-top:10px;font-size:13px;color:var(--muted)}.ocr summary{cursor:pointer;font-weight:700}.ocr div{margin-top:4px;max-height:120px;overflow:auto}
+.res{font-size:14px;font-weight:700;margin-top:8px}.res.ok{color:#1b5e20}.res.bad{color:#b00020}
+footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;gap:14px;z-index:2}
+button{padding:12px 22px;border-radius:999px;border:0;background:var(--accent);color:#fff;font:inherit;font-weight:700;font-size:15px}button:disabled{opacity:.5}
+#status{color:var(--muted)}
+@media (max-width:700px){.card{grid-template-columns:1fr}.grid3{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>Map your documents</h1><p>${items.length} scans read on this Mac. Nothing leaves it. Fix anything that is wrong, tick what should go, then Apply: each ticked scan becomes a 1Password item (with the scan attached) and fills its row on the list.</p></header>
+<main><form id="f">
+${needs.length ? `<h2>Needs you (${needs.length})</h2>` + needs.map(card).join("") : ""}
+${ready.length ? `<h2>Ready (${ready.length})</h2>` + ready.map(card).join("") : ""}
+${done.length ? `<h2>Already done (${done.length}) — unticked; tick one only to replace what is there</h2>` + done.map(card).join("") : ""}
+</form></main>
+<footer><button type="button" id="go" onclick="go()">Apply</button><span id="count"></span><span id="status"></span></footer>
 <script>
-document.querySelectorAll('select[multiple]').forEach(sel=>{const o=sel.querySelector('option:checked');if(o)sel.scrollTop=o.offsetTop-sel.clientHeight/2});
-const f=document.getElementById('f');f.onsubmit=async(e)=>{e.preventDefault();const d=new FormData(f);const rows=[];${JSON.stringify(items.map((x) => x.i))}.forEach(i=>{if(!d.get('go'+i))return;rows.push({i,rowIds:d.getAll('row'+i),title:d.get('title'+i),vaultId:d.get('vault'+i),date:d.get('date'+i),note:d.get('note'+i)})});
-if(!rows.length){alert('Nothing ticked.');return}if(!confirm(rows.length+' scans: create the 1Password items and fill the list?'))return;document.getElementById('go').disabled=true;document.getElementById('status').textContent='Working…';
+const f=document.getElementById('f');
+function filt(inp){const q=inp.value.toLowerCase();const sel=inp.nextElementSibling;for(const o of sel.options)o.hidden=q&&!o.text.toLowerCase().includes(q)}
+function count(){const n=[...f.querySelectorAll('input[type=checkbox]:checked')].length;document.getElementById('count').textContent=n+' ticked';document.getElementById('go').textContent='Apply '+n}
+f.addEventListener('change',count);count();
+document.querySelectorAll('select[multiple]').forEach(sel=>{const o=sel.querySelector('option:checked');if(o)sel.scrollTop=Math.max(0,o.offsetTop-sel.clientHeight/2)});
+async function go(){const d=new FormData(f);const rows=[];${JSON.stringify(items.map((x) => x.i))}.forEach(i=>{if(!d.get('go'+i))return;rows.push({i,rowIds:d.getAll('row'+i),title:d.get('title'+i),vaultId:d.get('vault'+i),date:d.get('date'+i),note:d.get('note'+i)})});
+if(!rows.length){alert('Nothing is ticked.');return}if(!confirm(rows.length+' scan'+(rows.length===1?'':'s')+': create the 1Password items and fill the list?'))return;document.getElementById('go').disabled=true;document.getElementById('status').textContent='Working… each row reports as it finishes.';
 const r=await fetch('/apply?t=${token}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(rows)});const out=await r.json();
-for(const o of out){const el=document.getElementById('r'+o.i);el.className='res '+(o.ok?'ok':'bad');el.textContent=o.text}document.getElementById('status').textContent='Done: '+out.filter(o=>o.ok).length+' of '+out.length+' written. You can close this window; the Terminal has the same list.'};
+for(const o of out){const el=document.getElementById('r'+o.i);el.className='res '+(o.ok?'ok':'bad');el.textContent=o.text;el.scrollIntoView({block:'nearest'})}
+document.getElementById('status').textContent='Done: '+out.filter(o=>o.ok).length+' of '+out.length+' written. You can close this window and press Ctrl-C in Terminal.'}
 </script></body></html>`;
+  };
 
   const server = createServer(async (req, res) => {
     const u = new URL(req.url, "http://localhost");
