@@ -202,7 +202,7 @@ for(const o of out){const el=document.getElementById('r'+o.i);el.className='res 
           if (!targets.length) { r.text = "skipped: no row picked"; out.push(r); continue; }
           const row = targets[0];
           const title = String(w.title || row.label).trim().slice(0, 120);
-          const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", basename(x.file), "--format", "json"]));
+          const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", basename(x.file), "--tags", "StewardOS", "--format", "json"]));
           const link = `https://start.1password.com/open/i?a=${me.account_uuid}&v=${created.vault?.id ?? w.vaultId}&i=${created.id}&h=${host}`;
           const patch = { link, updated_at: new Date().toISOString() };
           if (/^\d{4}-\d{2}-\d{2}$/.test(w.date)) patch.expires_on = w.date;
