@@ -120,7 +120,7 @@ async function main() {
   const accounts = JSON.parse(spawnSync("op", ["account", "list", "--format", "json"], { encoding: "utf8" }).stdout || "[]");
   if (accounts.length > 1 && !ACCOUNT) { console.error("STOP: more than one 1Password account on this Mac; add --account <id>:\n" + accounts.map((a) => `  ${a.user_uuid || a.account_uuid}  (${a.email} at ${a.url})`).join("\n")); process.exit(1); }
   const me = opJson(["whoami"]);
-  const host = String(me.url || accounts[0]?.url || "my.1password.com").replace(/^https?:\/\//, "");
+  const host = String(me.url || accounts[0]?.url || "my.1password.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
   const vaults = opJson(["vault", "list"]).map((v) => ({ id: v.id, name: v.name }));
   const sharedVault = vaults.find((v) => /shared|family/i.test(v.name)) ?? vaults[0];
   const privateVault = vaults.find((v) => /private|personal/i.test(v.name)) ?? vaults[0];

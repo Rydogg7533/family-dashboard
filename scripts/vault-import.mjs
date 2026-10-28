@@ -114,7 +114,7 @@ async function plan() {
   }
   const me = opJson(["whoami"]);
   const acct = accounts.find((a) => a.account_uuid === me.account_uuid) ?? accounts[0];
-  const host = String(acct.url || me.url || "my.1password.com").replace(/^https?:\/\//, "");
+  const host = String(acct.url || me.url || "my.1password.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
   const accountUuid = me.account_uuid || acct.account_uuid;
   console.log(`Using 1Password account ${me.email ?? acct.email ?? ""} at ${host}.`);
   const items = opJson(["item", "list"]);
