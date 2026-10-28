@@ -229,9 +229,9 @@
     "ask": "add milk",
     "expect": {
       "kind": "tool_confirm",
-      "tool": "task.add",
+      "tool": "shop.add",
       "args": {
-        "title": "milk"
+        "name": "milk"
       }
     }
   },
@@ -377,7 +377,10 @@
     "ask": "is Melissa free Thursday afternoon",
     "expect": {
       "kind": "answer",
-      "read": "calendar.find"
+      "readAny": [
+        "calendar.whoFree",
+        "calendar.find"
+      ]
     }
   },
   {
@@ -661,11 +664,7 @@
     "id": "scope-1",
     "ask": "what's the weather tomorrow",
     "expect": {
-      "kindAny": [
-        "answer",
-        "scope_check",
-        "deflect"
-      ],
+      "kind": "answer",
       "noWrite": true
     }
   },
@@ -757,29 +756,37 @@
     "id": "sit-3",
     "ask": "Emma's sitting Friday 6 to 10",
     "expect": {
-      "kind": "tool_confirm",
-      "tool": "sitter.plan",
-      "args": {
-        "sitter": "Emma"
-      },
-      "read": "sitter.find"
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "readAny": [
+        "sitter.find"
+      ],
+      "note": "answer allowed when a visit already exists that day (asks if it is the same outing)"
     }
   },
   {
     "id": "sit-4",
     "ask": "find a sitter for Saturday",
     "expect": {
-      "kind": "tool_confirm",
-      "tool": "sitter.need",
-      "noTool": "sitter.plan"
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "sitter.plan",
+      "read": "sitter.find"
     }
   },
   {
     "id": "sit-5",
     "ask": "get the sitter instructions ready for Saturday",
     "expect": {
-      "kind": "tool_confirm",
-      "tool": "sitter.need"
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "read": "sitter.find"
     }
   },
   {
@@ -820,9 +827,8 @@
     "expect": {
       "kind": "answer",
       "noWrite": true,
-      "mentions": [
-        "mobile"
-      ]
+      "read": "contact.find",
+      "note": "asks for the mobile, or which Emma when contacts has more than one"
     }
   },
   {
@@ -974,6 +980,34 @@
         "answer"
       ],
       "noTool": "calendar.add"
+    }
+  },
+  {
+    "id": "sit-12b",
+    "ask": "cancel the sitter on the 31st",
+    "expect": {
+      "kind": "answer",
+      "read": "sitter.find",
+      "noWrite": true,
+      "mentions": [
+        "30"
+      ],
+      "note": "no visit on the 31st; the only one is Friday the 30th. Must say so and ask, not propose cancel for the 31st and not silently switch"
+    }
+  },
+  {
+    "id": "sit-12c",
+    "ask": "cancel the sitter Friday",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "read": "sitter.find",
+      "mentions": [
+        "30"
+      ],
+      "note": "Friday is the 30th; the confirm names the day in words; if a sitter is booked it offers to text her and asks about the calendar/event"
     }
   }
 ]

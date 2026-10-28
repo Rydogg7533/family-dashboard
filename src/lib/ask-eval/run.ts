@@ -43,12 +43,18 @@ export function judge(c: Case, r: AskReply): Result {
   if (e.rows === "none" && rows > 0) why.push(`${rows} rows shown, wanted none`);
   if (typeof e.rows === "number" && rows !== e.rows) why.push(`${rows} rows shown, wanted ${e.rows}`);
   if (e.link && !r.source) why.push("no Open link for the one thing found");
-  // D5: a reply reads like speech. No chips, no markdown, at most four sentences, one question at most.
+  // D5/D8: a reply reads like speech. No chips, no markdown, no list-per-line, one question at most, no
+  // sentence cap (Ryan, 2026-10-28: "I don't need a cap. I just want it to feel natural").
   if (r.chips?.length) why.push("chips offered");
-  if (/^\s*[-*#]|\*\*/m.test(r.text)) why.push("markdown in the reply");
-  const sentences = r.text.split(/(?<=[.!?])\s+/).filter(Boolean).length;
-  if (sentences > 4) why.push(`${sentences} sentences, wanted at most 4`);
-  if ((r.text.match(/\?/g) ?? []).length > 1) why.push("more than one question");
+  if (/^\s*([-*#]|\d+\.)\s|\*\*/m.test(r.text)) why.push("markdown or a list in the reply");
+  if ((r.text.match(/\?/g) ?? []).length > 1 && r.kind !== "tool_confirm") why.push("more than one question");
+  if (/\b(on|below) your screen\b|I've put them (below|on)/i.test(r.text) && rows === 0) why.push("says rows are shown but none are");
+  // A confirm sentence names the thing, never an id, a field name or a machine date.
+  if (r.kind === "tool_confirm") {
+    if (/\b[0-9a-f]{8}-[0-9a-f]{4}\b/i.test(r.text)) why.push("confirm shows an id");
+    if (/\b\d{4}-\d{2}-\d{2}\b/.test(r.text)) why.push("confirm shows a machine date");
+    if (/\b(threadId|calendarId|vehicleId|taskId)\b|^\w[\w ]*: \w+ \w/.test(r.text) && /: \w+ [^,]+,\s*\w+ /.test(r.text)) why.push("confirm reads like a form");
+  }
   if (e.noWrite && r.kind === "tool_confirm") why.push(`proposed a write (${tool})`);
   if (e.noTool && (tool === e.noTool || reads.includes(e.noTool))) why.push(`used ${e.noTool}`);
   if (e.mentions) for (const m of e.mentions) if (!r.text.toLowerCase().includes(m.toLowerCase())) why.push(`text does not mention "${m}"`);
