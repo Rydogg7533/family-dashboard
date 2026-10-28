@@ -41,6 +41,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   const [files, setFiles] = useState<AskFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // The box grows with what is typed, up to a few lines, and shrinks back after sending.
+  useEffect(() => { const t = box.current; if (!t) return; t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, 160)}px`; }, [input]);
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   const restored = useRef(false);
@@ -319,27 +322,43 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
         <div ref={endRef} />
       </div>
 
-      {(files.length > 0 || uploading) && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {files.map((f, i) => (
-            <span key={f.path} className="inline-flex items-center gap-1 rounded-full border border-line px-3 min-h-9 text-xs">📎 <span className="max-w-[140px] truncate">{f.name}</span>
-              <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} className="min-w-9 min-h-9 -mr-2 font-bold text-muted">✕</button></span>
-          ))}
-          {uploading && <span className="text-xs text-muted self-center">Uploading…</span>}
+      {/* One rounded box: the words get the full width on top; plus, mic and send sit underneath (Ryan, 2026-10-28). */}
+      <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "py-2" : "sticky bottom-[88px] py-2 bg-bg"}>
+        <div className={`rounded-3xl border bg-bg px-3 pt-3 pb-2 flex flex-col gap-1 ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line focus-within:border-accent"}`}>
+          {(files.length > 0 || uploading) && (
+            <div className="flex flex-wrap gap-2 pb-1">
+              {files.map((f, i) => (
+                <span key={f.path} className="inline-flex items-center gap-1 rounded-full border border-line px-3 min-h-9 text-xs">📎 <span className="max-w-[140px] truncate">{f.name}</span>
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} className="min-w-9 min-h-9 -mr-2 font-bold text-muted">✕</button></span>
+              ))}
+              {uploading && <span className="text-xs text-muted self-center">Uploading…</span>}
+            </div>
+          )}
+          <textarea ref={box} rows={1} value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
+            placeholder={editing != null ? "Edit, then send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"}
+            aria-label="Ask" className="w-full resize-none bg-transparent px-1 py-1 text-base leading-snug outline-none max-h-40" />
+          <div className="flex items-center gap-2">
+            <input ref={picker} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void attach(e.target.files)} />
+            <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file" title="Take a photo, or pick one from your photos or files" className="min-h-11 min-w-11 rounded-full bg-soft text-fg flex items-center justify-center disabled:opacity-40">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M10 4v12M4 10h12" /></svg>
+            </button>
+            <div className="flex-1" />
+            {voiceOn && (
+              <button type="button" onClick={voiceToggle} aria-label={voice === "idle" || voice === "error" ? "Talk" : "Stop talking"} title={voice === "idle" || voice === "error" ? "Talk to Ask (audio goes to OpenAI during a voice session)" : "End the voice session"}
+                className={`min-h-11 rounded-full flex items-center justify-center ${voice === "idle" || voice === "error" ? "min-w-11 bg-soft text-fg" : voice === "listening" ? "px-4 bg-green-bg text-green font-semibold" : "px-4 bg-accent text-white font-semibold"}`}>
+                {voice === "idle" || voice === "error"
+                  ? <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="7.5" y="2.5" width="5" height="9" rx="2.5" /><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5" /></svg>
+                  : <span className="text-xs tabular-nums">■ {Math.floor(voiceSecs / 60)}:{String(voiceSecs % 60).padStart(2, "0")}</span>}
+              </button>
+            )}
+            {busy
+              ? <button type="button" onClick={stop} aria-label="Stop" className="min-h-11 min-w-11 rounded-full bg-accent text-white flex items-center justify-center"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden><rect x="3" y="3" width="10" height="10" rx="2" /></svg></button>
+              : <button type="submit" disabled={(!input.trim() && !files.length) || uploading} aria-label={editing != null ? "Resend" : "Send"} className="min-h-11 min-w-11 rounded-full bg-accent text-white flex items-center justify-center disabled:opacity-40">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10 16V4M4.5 9.5 10 4l5.5 5.5" /></svg>
+                </button>}
+          </div>
         </div>
-      )}
-      <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder={editing != null ? "Edit, then Send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"} aria-label="Ask" className={`flex-1 min-h-12 rounded-full border bg-bg px-4 text-sm ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line"}`} />
-        <input ref={picker} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void attach(e.target.files)} />
-        <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file" title="Take a photo, or pick one from your photos or files" className="min-h-12 min-w-12 rounded-full border border-line text-lg disabled:opacity-40">📎</button>
-        {voiceOn && (
-          <button type="button" onClick={voiceToggle} aria-label={voice === "idle" || voice === "error" ? "Talk" : "Stop talking"} title={voice === "idle" || voice === "error" ? "Talk to Ask (audio goes to OpenAI during a voice session)" : "End the voice session"}
-            className={`min-h-12 min-w-12 rounded-full border font-semibold text-lg ${voice === "idle" || voice === "error" ? "border-line" : voice === "listening" ? "border-green bg-green-bg text-green" : "border-accent bg-accent text-white"}`}>
-            {voice === "idle" || voice === "error" ? "🎙" : <span className="text-xs tabular-nums">■ {Math.floor(voiceSecs / 60)}:{String(voiceSecs % 60).padStart(2, "0")}</span>}
-          </button>
-        )}
-        {busy ? <button type="button" onClick={stop} className="min-h-12 px-5 rounded-full border border-line font-semibold">Stop</button>
-          : <button type="submit" disabled={(!input.trim() && !files.length) || uploading} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">{editing != null ? "Resend" : "Send"}</button>}
       </form>
 
       {toast && (
