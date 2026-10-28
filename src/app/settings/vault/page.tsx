@@ -25,7 +25,7 @@ export default async function VaultSettings() {
     const { data: { user } } = await sb.auth.getUser();
     me = user?.id ?? "";
     const [{ data }, { data: a }, { data: k }, { data: ret }, { data: prof }, { data: v }, { data: d }, { data: ac }, { data: gone }] = await Promise.all([
-      sb.from("vault_pointers").select("id, person, \"group\", label, item_type, link, expires_on, attached_kind, attached_id, note, updated_at").is("deleted_at", null).order("group").order("label"),
+      sb.from("vault_pointers").select("id, person, \"group\", label, item_type, link, expires_on, attached_kind, attached_id, note, updated_at, template_key").is("deleted_at", null).order("group").order("label"),
       sb.from("profiles").select("id, display_name").neq("role", "child").order("created_at"),
       sb.from("children").select("id, display_name, archived_at").order("birth_year"),
       sb.from("vault_retired_owners").select("owner_key").not("retired_at", "is", null),

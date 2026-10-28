@@ -149,7 +149,7 @@ export function VaultList({ rows, removed, me, groups, adults, kids, vehicles, d
                       <div key={r.id} className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-0">
                         <button type="button" onClick={() => setEditing({ ...r, household: r.person === null })} className="min-w-0 flex-1 text-left">
                           <div className="font-semibold truncate">{r.label}</div>
-                          <div className="text-[11px] text-muted truncate">{[r.item_type?.replace(/_/g, " "), r.expires_on ? `renews ${r.expires_on}` : null, r.note].filter(Boolean).join(" · ")}</div>
+                          <div className="text-[11px] text-muted truncate">{[r.item_type?.replace(/_/g, " "), r.expires_on ? `renews ${r.expires_on}` : null, r.note].filter(Boolean).join(" · ")}{r.link && !r.expires_on && kindById(r.template_key?.split(":")[0] ?? "")?.expires ? <span className="text-amber"> · needs its date</span> : null}</div>
                         </button>
                         {r.link
                           ? <a href={r.link} target="_blank" rel="noopener" className="shrink-0 min-h-9 px-3 rounded-full bg-accent text-white text-xs font-semibold inline-flex items-center">Open</a>

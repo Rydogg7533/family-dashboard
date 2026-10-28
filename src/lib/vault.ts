@@ -20,7 +20,7 @@ export const typeLabel = (t: string | null) => (t ? t.replace(/_/g, " ") : "");
 
 export type VaultPointer = {
   id: string; person: string | null; group: VaultGroup; label: string; item_type: string | null; link: string | null;
-  expires_on: string | null; attached_kind: string | null; attached_id: string | null; note: string | null; updated_at: string;
+  expires_on: string | null; attached_kind: string | null; attached_id: string | null; note: string | null; updated_at: string; template_key?: string | null;
 };
 
 export type VaultOwner = { id: string; name: string };
