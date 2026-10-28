@@ -672,15 +672,9 @@
     "id": "scope-2",
     "ask": "how do I boil an egg",
     "expect": {
-      "kindAny": [
-        "scope_check",
-        "deflect",
-        "answer"
-      ],
+      "kind": "deflect",
       "noWrite": true,
-      "mentions": [
-        "family management"
-      ]
+      "note": "D6: one line plus the Open-in button with the question carried; no scope question"
     }
   },
   {

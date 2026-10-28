@@ -27,7 +27,10 @@ export async function POST(req: Request) {
   const key = process.env.OPENAI_API_KEY || process.env.OPEN_AI_KEY;   // either spelling; Ryan set OPEN_AI_KEY in Vercel 2026-10-28
   if (!key) return NextResponse.json({ error: "Voice is not set up on this household's server yet." }, { status: 404 });
 
-  let voice = VOICE_DEFAULT;
+  // The person's own choices (Settings › Assistant, migration 0081): off hides the mic; a chosen voice wins.
+  const { data: prof } = await c.sb.from("profiles").select("voice_enabled, voice_name").eq("id", c.userId).maybeSingle();
+  if (prof && prof.voice_enabled === false) return NextResponse.json({ error: "Voice is turned off in your Settings › Assistant." }, { status: 404 });
+  let voice = (typeof prof?.voice_name === "string" && /^[a-z]+$/.test(prof.voice_name) ? prof.voice_name : null) ?? VOICE_DEFAULT;
   try { const b = await req.json(); if (typeof b?.voice === "string" && /^[a-z]+$/.test(b.voice)) voice = b.voice; } catch { /* no body */ }
 
   const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {

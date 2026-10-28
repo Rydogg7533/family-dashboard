@@ -48,6 +48,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/health", label: "System health", group: "settings", icon: "activity" },
   { href: "/settings", label: "Settings", group: "settings", icon: "settings" },
   { href: "/settings/notifications", label: "Notifications", group: "settings", icon: "bell" },
+  { href: "/settings/assistant", label: "Assistant", group: "settings", icon: "message" },
   { href: "/settings/filing-rules", label: "Filing rules", group: "settings", icon: "filter" },
   { href: "/settings/money/accounts", label: "Accounts and cards", group: "settings", icon: "creditCard" },
   { href: "/sources", label: "Sources", group: "settings", icon: "plug" },

@@ -37,7 +37,7 @@ const FAMILY_WORDS = /\b(confirmation|reservation|hotel|flight|ticket|claim|warr
 
 export const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promise<AskReply> {
+export async function answerAsk(thread: Turn[], assistantApp = "claude", assistantUrl?: string | null): Promise<AskReply> {
   const last = thread[thread.length - 1];
   const q = (last?.text ?? "").trim();
   const prev = [...thread].reverse().find((t) => t.role === "assistant");
@@ -64,7 +64,7 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
   const cls = await callModel({ job: "classify", feature: "ask-intent", maxTokens: 60, messages: [{ role: "user", content: `Classify this input to a family-management assistant. Reply with one word: question, instruction, clarify_reply, offscope, or event. Use event only when the person wants something on the calendar AND names a day or time (an appointment, meeting, trip, "remind me at 3", "schedule for Friday", "put X on the 14th"). "Remind me to X" or "add X" with no day or time is an instruction (it becomes a task), not an event. Saving a confirmation number, receipt, record, bill or document is an instruction even when it mentions a date: the date belongs to the record, not the calendar. A medication with a dose time ("melatonin at 8"), a recurring bill, or a task with a due date is an instruction too. Event means the person wants an appointment, meeting, trip or timed reminder on the calendar. Anything about a sitter or babysitter (needing one, booking one, who is sitting, sitter instructions, adding a sitter) is an instruction or a question, never an event, even with a day and time. Input: """${q}"""` }], system: SCOPE_SYSTEM_PROMPT });
   const intent = cls.text.trim().toLowerCase();
   if (intent.startsWith("event")) return eventTurn(thread);
-  if (intent.startsWith("offscope")) return { kind: "scope_check", text: "Is this related to the family management system? If so, how?", chips: ["No, never mind"], ...costOf(cls) };
+  if (intent.startsWith("offscope")) return { ...deflect(assistantApp, q, assistantUrl), cost: cls.cost, costText: `this answer ~${formatCost(cls.cost)}`, model: cls.model };
 
   // 3) Sonnet, with the registry attached (D80). It reads with the read tools as often as it needs, and the
   // first tool that would CHANGE something stops the loop and comes back as a card for the person to agree
@@ -180,8 +180,15 @@ function topic(q: string) {
   if (/weather|rain|snow/i.test(q)) return "Weather";
   return "General";
 }
-function deflect(app: string): AskReply {
-  return { kind: "deflect", text: "That's beyond what this system does. For general questions, use your regular assistant app.", source: { label: `Open in ${app}`, href: app === "ChatGPT" ? "https://chatgpt.com" : "https://claude.ai" }, cost: 0, costText: "no model used", model: "none", sample: !hasAiKey() };
+// D6/D7 (2026-10-28): one line and one button that opens the person's own assistant with the question
+// carried over. app is the profile's assistant_app (claude | chatgpt | gemini | other | none) or a display
+// name from older callers; url is the "other" template with {q}. None, or no prefill URL, means Copy.
+export function deflect(app: string, q = "", url?: string | null): AskReply {
+  const a = app.toLowerCase();
+  const enc = encodeURIComponent(q);
+  const href = a === "chatgpt" ? `https://chatgpt.com/?q=${enc}` : a === "claude" ? `https://claude.ai/new?q=${enc}` : a === "gemini" ? "https://gemini.google.com/app" : a === "other" && url ? url.replace("{q}", enc) : null;
+  const label = a === "chatgpt" ? "Open in ChatGPT" : a === "claude" ? "Open in Claude" : a === "gemini" ? "Open in Gemini" : a === "other" && url ? "Open your assistant" : "Copy the question";
+  return { kind: "deflect", text: "That's outside what I do here; it's for your regular assistant.", source: { label, href: href ?? `copy:${q}` }, cost: 0, costText: "no model used", model: "none", sample: !hasAiKey() };
 }
 function structured(q: string, thread: Turn[]): AskReply {
   const l = q.toLowerCase().trim();

@@ -21,6 +21,9 @@ export const SETTING_GROUPS: SettingGroup[] = [
   { title: "Notifications", rows: [
     { href: "/settings/notifications", label: "Notifications", sub: "Where each kind appears, quiet hours, this device" },
   ] },
+  { title: "Assistant", rows: [
+    { href: "/settings/assistant", label: "Assistant", sub: "Voice, your wake word, which app answers questions outside the family" },
+  ] },
   { title: "Money", rows: [
     { href: "/settings/money/accounts", label: "Accounts and cards", sub: "Bank and credit accounts, each card tied to the account it draws on" },
     { href: "/settings/money", label: "Money rules", sub: "Amazon invoices: when to ask, what to wait for" },

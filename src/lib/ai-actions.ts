@@ -83,7 +83,11 @@ async function askOnce(thread: Turn[], assistantApp?: string): Promise<AskReply>
     const last = thread[thread.length - 1]?.text ?? "";
     const pending = prev?.kind === "event_clarify" || prev?.kind === "event_confirm" || prev?.kind === "event_conflict" || prev?.kind === "event_move";
     if (pending && /^(no|n|nope|never ?mind|cancel|forget it)$/i.test(last.trim())) await feedDeclineThread(key);
-    const reply = await answerAsk(thread, assistantApp);
+    let app = assistantApp, url: string | null | undefined;
+    if (!app && hasSupabaseEnv()) {
+      try { const sb = await createClient(); const { data: { user } } = await sb.auth.getUser(); if (user) { const { data: prof } = await sb.from("profiles").select("assistant_app, assistant_url").eq("id", user.id).maybeSingle(); app = prof?.assistant_app ?? undefined; url = prof?.assistant_url; } } catch { /* default app */ }
+    }
+    const reply = await answerAsk(thread, app ?? "claude", url);
     // What the assistant puts in front of the person goes in the feed, so a proposal that is never tapped is still visible.
     if ((reply.kind === "event_confirm" || reply.kind === "event_move") && reply.draft) {
       const d = reply.draft;
