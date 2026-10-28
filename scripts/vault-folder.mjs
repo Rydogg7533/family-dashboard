@@ -128,12 +128,14 @@ async function main() {
   console.log(`Using 1Password account ${me.email} at ${host}; vaults: ${vaults.map((v) => v.name).join(", ")}.`);
 
   // Read the folder.
-  const files = readdirSync(FOLDER).filter((f) => /\.(pdf|jpe?g|png|heic|tiff?)$/i.test(f) && !f.startsWith(".")).map((f) => join(FOLDER, f)).filter((f) => statSync(f).isFile()).sort();
+  // Every photo and PDF in the folder and its subfolders. A subfolder's name is a hint ("Melissa/passport.jpg" is Melissa's).
+  const walk = (dir, depth = 0) => { const out = []; for (const f of readdirSync(dir)) { if (f.startsWith(".")) continue; const p = join(dir, f); const st = statSync(p); if (st.isDirectory() && depth < 4) out.push(...walk(p, depth + 1)); else if (st.isFile() && /\.(pdf|jpe?g|png|heic|tiff?)$/i.test(f)) out.push(p); } return out; };
+  const files = walk(FOLDER).sort();
   if (!files.length) { console.error(`STOP: no photos or PDFs in ${FOLDER}`); process.exit(1); }
   console.log(`Reading ${files.length} file${files.length === 1 ? "" : "s"} in ${FOLDER} (on this Mac)…`);
   const items = [];
   for (const file of files) {
-    const text = ocr(file); const hay = `${basename(file)}\n${text}`;
+    const text = ocr(file); const hay = `${file.slice(FOLDER.length + 1)}\n${text}`;   // the path inside the folder counts as text
     const kind = (KINDS.find(([, re]) => re.test(hay)) ?? [""])[0];
     const person = people.find((p) => new RegExp(`\\b${p.name}\\b`, "i").test(hay)) ?? null;
     const vehicle = vehicles.find((v) => (v.plate && new RegExp(v.plate.replace(/[^A-Z0-9]/gi, ""), "i").test(hay.replace(/[^A-Za-z0-9\n]/g, ""))) || new RegExp(`\\b${v.short}\\b`, "i").test(hay) || (v.model && new RegExp(`\\b${v.model}\\b`, "i").test(hay))) ?? null;
@@ -147,7 +149,7 @@ async function main() {
     const title = row ? row.label : kind ? `${subject ? subject + " " : ""}${KIND_LABEL[kind]}` : basename(file, extname(file));
     const vault = kind && person && person.kind === "a" && PRIVATE_FOR_ADULT.has(kind) ? privateVault : sharedVault;
     const sure = !!(row && (!EXPIRES.has(kind) || (date && date.sure)));
-    items.push({ i: items.length, file, name: basename(file), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowId: row?.id ?? "", title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
+    items.push({ i: items.length, file, name: file.slice(FOLDER.length + 1), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowId: row?.id ?? "", title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
   }
   console.log(`Read ${items.length}: ${items.filter((x) => x.sure).length} mapped with confidence, ${items.filter((x) => !x.sure && x.kind).length} to check, ${items.filter((x) => !x.kind).length} unrecognised.`);
 
@@ -196,7 +198,7 @@ for(const o of out){const el=document.getElementById('r'+o.i);el.className='res 
           if (!w.rowId) { r.text = "skipped: not on the list"; out.push(r); continue; }
           const row = rows.find((q) => q.id === w.rowId); if (!row) throw new Error("row not found");
           const title = String(w.title || row.label).trim().slice(0, 120);
-          const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", x.name, "--format", "json"]));
+          const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", basename(x.file), "--format", "json"]));
           const link = `https://start.1password.com/open/i?a=${me.account_uuid}&v=${created.vault?.id ?? w.vaultId}&i=${created.id}&h=${host}`;
           const patch = { link, updated_at: new Date().toISOString() };
           if (/^\d{4}-\d{2}-\d{2}$/.test(w.date)) patch.expires_on = w.date;
