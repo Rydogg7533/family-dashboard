@@ -3,6 +3,8 @@
 // confirmation card written by Sonnet with only the relevant records; 4) off-scope questions get the
 // one "is this related?" check before deflection. Without an API key the same shape is produced by
 // keyword matching so the page feels real in preview.
+import type { AskFile } from "@/lib/ask-shared";
+import { askFileBlocks } from "@/lib/ask-files";
 import { callModel, callModelTools, formatCost, isStructuredInput, hasAiKey, SCOPE_SYSTEM_PROMPT, type Block, type Message, type ToolTurn } from "@/lib/ai";
 import { TOOLS } from "@/lib/tools/registry";
 import { toolSpec } from "@/lib/tools/types";
@@ -28,7 +30,7 @@ export type AskReply = {
   scopeRule?: string;                                   // learned when the person connects an off-scope question
   cost: number; costText: string; model: string; sample: boolean;
 };
-export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["kind"] };
+export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["kind"]; files?: AskFile[] };
 // A row the person can act on. open delivers the thing itself (a file); href goes to its page in the app.
 export type AskItem = { name: string; detail: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
 
@@ -56,15 +58,15 @@ export async function answerAsk(thread: Turn[], assistantApp = "claude", assista
   if (hasAiKey() && (prev?.kind === "event_clarify" || prev?.kind === "event_confirm" || prev?.kind === "event_conflict" || prev?.kind === "event_move")) return { kind: "answer", text: "Okay, I won't add it.", cost: 0, costText: "no model used", model: "none", sample: false };
 
   // 1) Local, no model: short structured input.
-  if (isStructuredInput(q)) return structured(q, thread);
+  if (!last?.files?.length && isStructuredInput(q)) return structured(q, thread);
 
   if (!hasAiKey()) return sampleRoute(thread, q);
 
   // 2) Haiku decides what kind of input this is (one small call).
   const cls = await callModel({ job: "classify", feature: "ask-intent", maxTokens: 60, messages: [{ role: "user", content: `Classify this input to a family-management assistant. Reply with one word: question, instruction, clarify_reply, offscope, or event. Use event only when the person wants something on the calendar AND names a day or time (an appointment, meeting, trip, "remind me at 3", "schedule for Friday", "put X on the 14th"). "Remind me to X" or "add X" with no day or time is an instruction (it becomes a task), not an event. Saving a confirmation number, receipt, record, bill or document is an instruction even when it mentions a date: the date belongs to the record, not the calendar. A medication with a dose time ("melatonin at 8"), a recurring bill, or a task with a due date is an instruction too. Event means the person wants an appointment, meeting, trip or timed reminder on the calendar. Anything about a sitter or babysitter (needing one, booking one, who is sitting, sitter instructions, adding a sitter) is an instruction or a question, never an event, even with a day and time. Input: """${q}"""` }], system: SCOPE_SYSTEM_PROMPT });
   const intent = cls.text.trim().toLowerCase();
-  if (intent.startsWith("event")) return eventTurn(thread);
-  if (intent.startsWith("offscope")) return { ...deflect(assistantApp, q, assistantUrl), cost: cls.cost, costText: `this answer ~${formatCost(cls.cost)}`, model: cls.model };
+  if (intent.startsWith("event") && !last?.files?.length) return eventTurn(thread);
+  if (intent.startsWith("offscope") && !last?.files?.length) return { ...deflect(assistantApp, q, assistantUrl), cost: cls.cost, costText: `this answer ~${formatCost(cls.cost)}`, model: cls.model };
 
   // 3) Sonnet, with the registry attached (D80). It reads with the read tools as often as it needs, and the
   // first tool that would CHANGE something stops the loop and comes back as a card for the person to agree
@@ -79,6 +81,7 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
 - Before adding anything, search for it first: say so if something close already exists, rather than making a second one.
 - A tool that changes something is not run by you; the person agrees to it by answering yes. When you call a write tool, ALWAYS write text with it: ONE sentence, in the person's words, that names the thing as you read it ("the furnace filter task", "Emma's visit Friday the 30th", "a text to Melissa: 'I'm running late'") and every value you are about to save (what, who, when, how much), ending with "OK?". Never an id, a field name or a date in YYYY-MM-DD; that sentence is all they see before they answer. Do not describe the change in prose without calling the tool, and do not call the tool and then ask again.
 - The records decide, not memory and not the person's say-so. Before changing anything, take the day, name and amount from what you READ this turn, never from an earlier guess. If what the person says disagrees with what the records show ("cancel the 31st" when the only visit is the 30th), do not adopt either silently: say both in one sentence and ask which ("The only sitter visit I have is Friday the 30th, 7 to 8:30; nothing on the 31st. Cancel the 30th?"). When the person corrects you and the records agree with them, say so and go on. A fact only they can know (a phone number, a nickname) is taken as given.
+- A photo or file may come with the question. Read it, say what it is in a sentence, and answer from it together with what you look up. Act on it only through the tools and the usual yes. If it is blurry or unreadable, say so and ask for another; never fill in what you cannot read.
 - If what they asked for has no tool, say plainly that you cannot do it from here and use app.findPage to name the page where they can. Never say you have saved or changed something.
 - Features are added by the maintainer only. When someone asks for a new feature or for the system to work differently, offer to file it with issue.report as an idea; never promise or describe a change as done.
 - People's access, children's settings, money accounts and household configuration are changed on their Settings pages by the head of household, not from here.
@@ -93,6 +96,12 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
 - "Send X to Y": find the document (document.find; it needs a share link), find Y (contact.find; a mobile number; if two people match, ask which one), then call document.send. Do not say it cannot be done before looking. Email is not available yet; texting is.`;
 
   const turns: ToolTurn[] = toMessages(thread) as ToolTurn[];
+  // Files sent with this question go to the model as part of the last user message (not earlier ones, so old pictures are not paid for again).
+  if (last?.files?.length && ctx) {
+    const { blocks, skipped } = await askFileBlocks(last.files, ctx.userId);
+    const lastTurn = turns[turns.length - 1];
+    if (lastTurn?.role === "user" && (blocks.length || skipped)) lastTurn.content = [...blocks, { type: "text", text: `${typeof lastTurn.content === "string" ? lastTurn.content : q}${skipped ? `\n(${skipped} attachment${skipped === 1 ? "" : "s"} could not be read.)` : ""}` }];
+  }
   let spend = cls.cost;
   let saidLast = "";
   // Anything a read tool found that has somewhere to go is carried to the person as a row, not as prose:

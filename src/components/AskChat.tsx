@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { askAction, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply, logVoiceSession } from "@/lib/ai-actions";
 import type { AskItem, AskReply, Turn } from "@/lib/ask-engine";
 import { VoiceSession, type VoiceStatus } from "@/lib/voice-client";
-import { splitAnswer } from "@/lib/ask-shared";
+import { splitAnswer, ASK_FILE_BYTES, ASK_FILE_MAX, ASK_FILE_MIMES, type AskFile } from "@/lib/ask-shared";
+import { createClient } from "@/lib/supabase/client";
 import { FetchButton } from "@/components/FetchButton";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -14,7 +15,20 @@ const inWindow = (bs: Bubble[]) => { const cut = Date.now() - WINDOW_MS; return 
 
 const SUGGESTED = ["What needs me today?", "Where is the Sienna registration?", "Add melatonin for [Child 1] at 8 pm", "Find a 16x25x1 MERV 11 filter", "Save confirmation 8X4K2 for the Moab hotel Nov 3"];
 
-type Bubble = { at?: number; role: "user" | "assistant"; text: string; stopped?: boolean; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
+type Bubble = { at?: number; role: "user" | "assistant"; text: string; files?: AskFile[]; stopped?: boolean; reply?: AskReply; confirmed?: "saved" | "undone" | "changed"; flagged?: boolean; toolResult?: { ok: boolean; text: string; href?: string }; eventResult?: { ok: boolean; text: string; href?: string } };
+
+// Photos are shrunk before they leave the phone (max 2000 px, JPEG 0.85); PDFs go as they are, up to 5 MB.
+async function shrink(file: File): Promise<Blob | null> {
+  if (file.type === "application/pdf") return file.size <= ASK_FILE_BYTES ? file : null;
+  if (!file.type.startsWith("image/")) return null;
+  try {
+    const bmp = await createImageBitmap(file); const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height);
+    const out = await new Promise<Blob | null>((ok) => cv.toBlob(ok, "image/jpeg", 0.85));
+    return out && out.size <= ASK_FILE_BYTES ? out : null;
+  } catch { return file.size <= ASK_FILE_BYTES && ASK_FILE_MIMES.includes(file.type) ? file : null; }
+}
 
 // embedded: the same Ask, inside the sheet the + button opens on any page (one thread, two places to open it).
 // source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting.
@@ -24,6 +38,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const [spent, setSpent] = useState(0);
+  const [files, setFiles] = useState<AskFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   const restored = useRef(false);
@@ -64,20 +81,43 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     else setToast({ text: r.error ?? "Could not file it." });
   }
 
+  // The paperclip: camera, photo library or Files (the phone offers all three). Uploaded at once to the private captures bucket.
+  async function attach(list: FileList | null) {
+    if (!list?.length) return;
+    setUploading(true);
+    try {
+      const sb = createClient(); const { data: { user } } = await sb.auth.getUser();
+      if (!user) { setToast({ text: "Sign in again to attach a file." }); return; }
+      const added: AskFile[] = [];
+      for (const f of Array.from(list)) {
+        if (files.length + added.length >= ASK_FILE_MAX) { setToast({ text: `Up to ${ASK_FILE_MAX} at a time.` }); break; }
+        const blob = await shrink(f);
+        if (!blob) { setToast({ text: `${f.name || "That file"} is too big or not a photo or PDF (5 MB, JPEG/PNG/WebP/GIF/PDF).` }); continue; }
+        const mime = blob.type || f.type; const ext = mime === "application/pdf" ? "pdf" : mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
+        const path = `ask/${user.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await sb.storage.from("captures").upload(path, blob, { contentType: mime });
+        if (error) { setToast({ text: "Could not upload that one." }); continue; }
+        added.push({ path, mime, name: (f.name || `photo.${ext}`).slice(0, 80) });
+      }
+      if (added.length) setFiles((cur) => [...cur, ...added]);
+    } finally { setUploading(false); if (picker.current) picker.current.value = ""; }
+  }
+
   // replaceFrom: resend from this user bubble, dropping it and everything after (the originals stay in Ask history on the server).
   // Returns the reply so voice (D14) can speak it; a typed send ignores the return.
   async function send(text: string, replaceFrom?: number, via: "ask" | "voice" = "ask"): Promise<AskReply | null> {
-    const q = text.trim();
-    if (!q || busy) return null;
-    setInput(""); setEditing(null);
+    const fs = replaceFrom != null ? (bubbles[replaceFrom]?.files ?? []) : files;
+    const q = text.trim() || (fs.length ? "Here is what I am looking at." : "");
+    if (!q || busy || uploading) return null;
+    setInput(""); setEditing(null); if (replaceFrom == null) setFiles([]);
     const base = replaceFrom != null ? bubbles.slice(0, replaceFrom) : bubbles;
-    const next: Bubble[] = [...base, { at: Date.now(), role: "user", text: q }];
+    const next: Bubble[] = [...base, { at: Date.now(), role: "user", text: q, ...(fs.length ? { files: fs } : {}) }];
     setBubbles(next);
     setBusy(true);
     const my = ++gen.current;
     // The model sees the recent window only (last 24 h, at most 12 turns); older exchanges are in history and
     // reachable through the ask.history tool, so an answer costs the same on day 30 as on day 1.
-    const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
+    const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b, i, arr) => ({ role: b.role, text: b.text, kind: b.reply?.kind, ...(i === arr.length - 1 && b.files?.length ? { files: b.files } : {}) }));
     // D5: the last proposal (a write or an event) travels with the question so a typed yes can run it.
     const lastB = base[base.length - 1];
     const pend = lastB?.role === "assistant" && lastB.reply && (lastB.reply.kind === "tool_confirm" || lastB.reply.kind === "event_confirm" || lastB.reply.kind === "event_move") && !lastB.toolResult && !lastB.eventResult
@@ -121,7 +161,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   }
   const [voiceSecs, setVoiceSecs] = useState(0);
   useEffect(() => {
-    if (voice === "idle" || voice === "error") { setVoiceSecs(0); return; }
+    if (voice === "idle" || voice === "error") return;
     const t = setInterval(() => setVoiceSecs(voiceRef.current?.elapsed() ?? 0), 1000);
     return () => clearInterval(t);
   }, [voice]);
@@ -135,6 +175,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   }
   function voiceToggle() {
     if (voiceRef.current) { voiceEnd(); return; }
+    setVoiceSecs(0);
     const s = new VoiceSession({
       onStatus: setVoice,
       onUser: () => { /* the transcript reaches the thread through ask(); nothing to add here */ },
@@ -209,6 +250,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
         {bubbles.map((b, i) => b.role === "user" ? (
           <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
             <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-accent text-white"}`}>{b.text}</button>
+            {b.files?.length ? <div className="text-[11px] text-muted px-1">📎 {b.files.map((f) => f.name).join(", ")}</div> : null}
             {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
             {b.stopped && editing !== i && <div className="text-[11px] text-muted px-1">Stopped · <button type="button" onClick={() => retry(i)} className="font-semibold text-accent">retry</button> · <button type="button" onClick={() => edit(i)} className="font-semibold text-accent">edit</button></div>}
           </div>
@@ -277,8 +319,19 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
         <div ref={endRef} />
       </div>
 
+      {(files.length > 0 || uploading) && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {files.map((f, i) => (
+            <span key={f.path} className="inline-flex items-center gap-1 rounded-full border border-line px-3 min-h-9 text-xs">📎 <span className="max-w-[140px] truncate">{f.name}</span>
+              <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} className="min-w-9 min-h-9 -mr-2 font-bold text-muted">✕</button></span>
+          ))}
+          {uploading && <span className="text-xs text-muted self-center">Uploading…</span>}
+        </div>
+      )}
       <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
         <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder={editing != null ? "Edit, then Send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"} aria-label="Ask" className={`flex-1 min-h-12 rounded-full border bg-bg px-4 text-sm ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line"}`} />
+        <input ref={picker} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void attach(e.target.files)} />
+        <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file" title="Take a photo, or pick one from your photos or files" className="min-h-12 min-w-12 rounded-full border border-line text-lg disabled:opacity-40">📎</button>
         {voiceOn && (
           <button type="button" onClick={voiceToggle} aria-label={voice === "idle" || voice === "error" ? "Talk" : "Stop talking"} title={voice === "idle" || voice === "error" ? "Talk to Ask (audio goes to OpenAI during a voice session)" : "End the voice session"}
             className={`min-h-12 min-w-12 rounded-full border font-semibold text-lg ${voice === "idle" || voice === "error" ? "border-line" : voice === "listening" ? "border-green bg-green-bg text-green" : "border-accent bg-accent text-white"}`}>
@@ -286,7 +339,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
           </button>
         )}
         {busy ? <button type="button" onClick={stop} className="min-h-12 px-5 rounded-full border border-line font-semibold">Stop</button>
-          : <button type="submit" disabled={!input.trim()} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">{editing != null ? "Resend" : "Send"}</button>}
+          : <button type="submit" disabled={(!input.trim() && !files.length) || uploading} className="min-h-12 px-5 rounded-full bg-accent text-white font-semibold disabled:opacity-40">{editing != null ? "Resend" : "Send"}</button>}
       </form>
 
       {toast && (

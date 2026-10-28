@@ -61,6 +61,7 @@ async function recordAsk(thread: Turn[], reply: AskReply, source: string) {
       tools: reply.trace?.length ? reply.trace.map((t) => ({ name: t.name, ok: t.ok, summary: t.summary.slice(0, 160) })) : null,
       proposed: reply.tool ? `${reply.tool.name} ${JSON.stringify(reply.tool.args).slice(0, 400)}` : null,
       cost: reply.cost, model: reply.model,
+      files: [...thread].reverse().find((t) => t.role === "user")?.files ?? null,
     });
   } catch { /* bookkeeping only; the answer still goes back */ }
 }

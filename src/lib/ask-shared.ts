@@ -10,3 +10,10 @@ export function splitAnswer(text: string): { head: string; more: string | null }
   const more = parts.slice(2).join(" ").trim();
   return { head, more: more || null };
 }
+
+// A photo or file sent with a question (D13). Lives in the private 'captures' bucket under ask/<user id>/; only the
+// path travels with the question, and the server reads it.
+export type AskFile = { path: string; mime: string; name: string };
+export const ASK_FILE_MAX = 3;
+export const ASK_FILE_BYTES = 5 * 1024 * 1024;
+export const ASK_FILE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"];
