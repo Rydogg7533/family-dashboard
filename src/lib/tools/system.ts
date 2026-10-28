@@ -24,7 +24,7 @@ const PAGE_HINTS: Record<string, string> = {
   "/settings/location": "location sharing",
   "/settings/privacy": "privacy, telemetry",
   "/settings/reference": "reference numbers and pointers",
-  "/settings/sitter": "sitter sheet contents",
+  "/settings/sitter": "approved sitters, emergency card, sitter instruction templates",
   "/settings/tablet": "kitchen tablet",
   "/settings/notifications": "push notifications, quiet hours, what alerts you get",
   "/settings/appearance": "theme, colours, density, look and feel",

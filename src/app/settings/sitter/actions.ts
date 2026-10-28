@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { SECTIONS } from "@/lib/sitter-shared";
+import { SECTIONS, HOUSEHOLD_SECTIONS } from "@/lib/sitter-shared";
 
 type Res = { ok: boolean; error?: string; note?: string; token?: string; link?: string };
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -86,10 +86,10 @@ export async function finishSitterSheet(): Promise<Res> {
   const w = await who(); if (!w) return { ok: false, error: "Not signed in or not available in preview." };
   const [{ data: secs }, { data: items }] = await Promise.all([w.sb.from("sitter_sheet_sections").select("section, state"), w.sb.from("sitter_sheet_items").select("section").is("archived_at", null)]);
   const st = Object.fromEntries((secs ?? []).map((s) => [s.section, s.state])); const has = new Set((items ?? []).map((i) => i.section));
-  const open = SECTIONS.filter((s) => !(st[s.id] === "done" || st[s.id] === "skipped"));
+  const open = HOUSEHOLD_SECTIONS.filter((s) => !(st[s.id] === "done" || st[s.id] === "skipped"));
   if (open.length) return { ok: false, error: `Not finished yet: ${open.map((s) => s.title).join(", ")}.` };
   if (st.contacts !== "done" || !has.has("contacts")) return { ok: false, error: "Emergency contacts need at least one entry." };
-  const skipped = SECTIONS.filter((s) => st[s.id] === "skipped").length;
+  const skipped = HOUSEHOLD_SECTIONS.filter((s) => st[s.id] === "skipped").length;
   await ensureTask(w);
   const { error } = await w.sb.from("guided_tasks").update({ completed_at: new Date().toISOString(), completed_by: w.actor, outcome: skipped ? "complete_with_gaps" : "complete", gaps: skipped, updated_at: new Date().toISOString() }).eq("key", "sitter_sheet");
   if (error) return { ok: false, error: error.message };

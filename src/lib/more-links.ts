@@ -40,7 +40,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/home-property", label: "Home and property", group: "household", icon: "house" },
   { href: "/devices", label: "Devices and belongings", group: "household", icon: "laptop" },
   { href: "/places", label: "Places and activities", group: "household", icon: "mapPin" },
-  { href: "/settings/sitter", label: "Sitter sheet", group: "household", icon: "users" },
+  { href: "/settings/sitter", label: "Sitter", group: "household", icon: "users" },
   { href: "/settings/tablet", label: "Kitchen tablet", group: "household", icon: "laptop" },
   { href: "/meds", label: "Health and medications", group: "household", icon: "heartPulse" },
   { href: "/emergency", label: "Emergency plan", group: "household", icon: "siren" },

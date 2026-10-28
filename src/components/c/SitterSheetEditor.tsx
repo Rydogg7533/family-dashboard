@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { addSheetItem, updateSheetItem, archiveSheetItem, setSectionState, finishSitterSheet, listThingsForPicker } from "@/app/settings/sitter/actions";
-import { SECTIONS, type TemplateItem } from "@/lib/sitter-shared";
+import { HOUSEHOLD_SECTIONS as SECTIONS, type TemplateItem } from "@/lib/sitter-shared";
 
 type St = Record<string, "todo" | "done" | "skipped">;
 export function SitterSheetEditor({ items, states, completed }: { items: TemplateItem[]; states: St; completed: boolean }) {
