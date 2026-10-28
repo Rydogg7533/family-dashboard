@@ -54,9 +54,9 @@ export function VaultList({ rows, removed, me, groups, adults, kids, vehicles, d
   // shows (unless filtering to to-do) so an empty vault is visible rather than missing.
   const myFirst = [...adults].sort((a, b) => Number(b.id === me) - Number(a.id === me));
   const sections: { key: string; title: string; sub: string }[] = [
-    ...myFirst.map((a) => ({ key: `a:${a.id}`, title: a.id === me ? `${a.name} (you)` : a.name, sub: a.id === me ? "Your private vault" : `${a.name}'s private vault` })),
-    { key: "shared", title: "Shared", sub: "The vault you and your spouse hold together" },
-    ...kids.map((k) => ({ key: `k:${k.id}`, title: k.name, sub: `${k.name}'s vault` })),
+    ...myFirst.map((a) => ({ key: `a:${a.id}`, title: a.id === me ? `${a.name} (you)` : a.name, sub: a.id === me ? "Just me" : `Just ${a.name}` })),
+    { key: "shared", title: "Parents", sub: "The two of you; children never see these" },
+    ...kids.map((k) => ({ key: `k:${k.id}`, title: k.name, sub: `${k.name}'s own documents, held by the parents` })),
   ];
   if (rows.some((r) => ownerKey(r, adults, kids) === "other")) sections.push({ key: "other", title: "Other", sub: "Not matched to a person" });
   const isRetired = (key: string) => retired.includes(key);
@@ -119,7 +119,7 @@ export function VaultList({ rows, removed, me, groups, adults, kids, vehicles, d
           <label className="text-xs text-muted">Private link (1Password › item › ⋯ › Copy Private Link)<input className={field} value={editing.link ?? ""} onChange={(e) => setEditing({ ...editing, link: e.target.value })} placeholder="https://start.1password.com/open/i?…" inputMode="url" /></label>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs text-muted">Expires or renews<input type="date" className={field} value={editing.expires_on ?? ""} onChange={(e) => setEditing({ ...editing, expires_on: e.target.value })} /></label>
-            <label className="text-xs text-muted flex items-end gap-2 pb-3"><input type="checkbox" checked={!!editing.household} onChange={(e) => setEditing({ ...editing, household: e.target.checked })} /> Household item (Shared vault)</label>
+            <label className="text-xs text-muted flex items-end gap-2 pb-3"><input type="checkbox" checked={!!editing.household} onChange={(e) => setEditing({ ...editing, household: e.target.checked })} /> Parents (both of you), not just me</label>
           </div>
           <label className="text-xs text-muted">Note<input className={field} value={editing.note ?? ""} onChange={(e) => setEditing({ ...editing, note: e.target.value })} placeholder="Original in the fire safe" /></label>
           {msg && <div className="text-xs text-red">{msg}</div>}

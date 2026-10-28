@@ -122,8 +122,12 @@ async function main() {
   const me = opJson(["whoami"]);
   const host = String(me.url || accounts[0]?.url || "my.1password.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
   const vaults = opJson(["vault", "list"]).map((v) => ({ id: v.id, name: v.name }));
-  const sharedVault = vaults.find((v) => /shared|family/i.test(v.name)) ?? vaults[0];
-  const privateVault = vaults.find((v) => /private|personal/i.test(v.name)) ?? vaults[0];
+  // Three levels (Ryan, 2026-10-28): Just me, Parents (the two adults), Everyone (the whole family), plus a child's own vault.
+  const privateVault = vaults.find((v) => /^(private|personal)$/i.test(v.name)) ?? vaults[0];
+  const parentsVault = vaults.find((v) => /parents|mom and dad|both of us|^shared$/i.test(v.name) && !/\//.test(v.name)) ?? vaults.find((v) => /shared/i.test(v.name)) ?? vaults[0];
+  const everyoneVault = vaults.find((v) => /^(everyone|family|household|whole family)$/i.test(v.name)) ?? parentsVault;
+  const childVault = (name) => vaults.find((v) => new RegExp(`^${name}\\b`, "i").test(v.name)) ?? parentsVault;
+  const sharedVault = parentsVault; void everyoneVault;
   const existingTitles = new Set(opJson(["item", "list"]).map((i) => norm(i.title)));
   console.log(`Using 1Password account ${me.email} at ${host}; vaults: ${vaults.map((v) => v.name).join(", ")}.`);
 
@@ -155,7 +159,7 @@ async function main() {
     const row = rowIds.length ? rows.find((r) => r.id === rowIds[0]) : null;
     const subject = named.length > 1 ? "Family" : person ? person.name : vehicle ? vehicle.short : "";
     const title = named.length > 1 && kind ? `Family ${KIND_LABEL[kind]}` : row ? row.label : kind ? `${subject ? subject + " " : ""}${KIND_LABEL[kind]}` : basename(file, extname(file));
-    const vault = kind && person && person.kind === "a" && PRIVATE_FOR_ADULT.has(kind) ? privateVault : sharedVault;
+    const vault = kind && person && person.kind === "a" && PRIVATE_FOR_ADULT.has(kind) && named.length <= 1 ? privateVault : kind && person && person.kind === "k" && named.length <= 1 && PERSON_KINDS.has(kind) ? childVault(person.name) : sharedVault;
     const sure = !!(row && (!EXPIRES.has(kind) || (date && date.sure)));
     items.push({ i: items.length, file, files: group, name: group.map((g) => basename(g)).join(" + "), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowIds, title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link || existingTitles.has(norm(title)), preview: text.replace(/\s+/g, " ").slice(0, 220) });
   }
