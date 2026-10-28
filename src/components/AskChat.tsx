@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { askAction, confirmAskEvent, confirmMoveAndAdd, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
+import { askAction, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply } from "@/lib/ai-actions";
 import type { AskItem, AskReply, Turn } from "@/lib/ask-engine";
 import { splitAnswer } from "@/lib/ask-shared";
 import { FetchButton } from "@/components/FetchButton";
@@ -69,7 +69,13 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     // The model sees the recent window only (last 24 h, at most 12 turns); older exchanges are in history and
     // reachable through the ask.history tool, so an answer costs the same on day 30 as on day 1.
     const thread: Turn[] = inWindow(next).slice(-WINDOW_TURNS).map((b) => ({ role: b.role, text: b.text, kind: b.reply?.kind }));
-    const reply = await askAction(thread, undefined, source ?? "ask");
+    // D5: the last proposal (a write or an event) travels with the question so a typed yes can run it.
+    const lastB = bubbles[bubbles.length - 1];
+    const pend = lastB?.role === "assistant" && lastB.reply && (lastB.reply.kind === "tool_confirm" || lastB.reply.kind === "event_confirm" || lastB.reply.kind === "event_move") && !lastB.toolResult && !lastB.eventResult
+      ? { kind: lastB.reply.kind, tool: lastB.reply.tool, draft: lastB.reply.draft, move: lastB.reply.move, feedId: lastB.reply.feedId } : null;
+    const reply = await askAction(thread, undefined, source ?? "ask", pend);
+    // The proposal is answered now, whatever the answer was; it must not be runnable twice.
+    if (pend) setBubbles((bs) => bs.map((b) => (b === lastB ? { ...b, toolResult: b.reply?.kind === "tool_confirm" ? { ok: true, text: "" } : b.toolResult, eventResult: b.reply?.kind !== "tool_confirm" ? { ok: true, text: "" } : b.eventResult } : b)));
     setSpent((s) => s + reply.cost);
     if (reply.kind === "inbox") void parkThreadInInbox(thread);
     const bubble: Bubble = { at: Date.now(), role: "assistant", text: reply.text, reply };
@@ -102,18 +108,10 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
     setToast({ text: `Saved to ${b.reply.confirm.target}. Logged with your words as the source.` });
   }
 
-  async function addEvent(i: number) {
-    const d = bubbles[i]?.reply?.draft;
-    if (!d || busy) return;
-    setBusy(true);
-    const mv = bubbles[i].reply?.move;
-    const r = await (mv ? confirmMoveAndAdd(mv, d, bubbles[i].reply?.feedId) : confirmAskEvent(d, bubbles[i].reply?.feedId)).catch((e) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) }));
-    setBubbles((bs) => bs.map((x, j) => (j === i ? { ...x, eventResult: r.ok ? { ok: true, text: r.summary, href: r.href } : { ok: false, text: r.error } } : x)));
-    setBusy(false);
-  }
+
 
   const last = bubbles[bubbles.length - 1];
-  const chips = last?.reply?.chips ?? (bubbles.length === 0 ? SUGGESTED : []);
+  // D5 (2026-10-27): no chips. The thread is a conversation; the person answers in words.
   const pending = !!last && last.role === "assistant" && ((last.reply?.kind === "tool_confirm" && !last.toolResult) || ((last.reply?.kind === "event_confirm" || last.reply?.kind === "event_move") && !last.eventResult) || (last.reply?.kind === "instruction" && !!last.reply.confirm && !last.confirmed));
   useEffect(() => { onPending?.(pending); }, [pending, onPending]);
 
@@ -122,7 +120,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
       <div className="flex items-center justify-end mb-1">
         <h1 className="sr-only">Ask</h1>
         <div className="flex items-center gap-3">
-          <div className="text-xs text-muted">{sample ? "sample mode · no API key" : `~$${spent.toFixed(3)} this session`}</div>
+          {sample && <div className="text-xs text-muted">sample mode · no API key</div>}
           {bubbles.length > 0 && <button type="button" onClick={newChat} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">New chat</button>}
         </div>
       </div>
@@ -131,7 +129,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
       <div className={embedded ? "flex flex-col gap-2 overflow-y-auto overscroll-contain min-h-0 flex-1 pr-1" : "flex-1 flex flex-col gap-2"}>
         <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link> · the last 24 hours are here; everything is kept in history</div>
         {bubbles.length === 0 && (
-          <div className="card text-sm text-muted">Try one of the suggestions below, or ask anything the family&apos;s records can answer: schedules, documents, money, people, vehicles, home, your own health.</div>
+          <div className="card text-sm text-muted">Ask or tell me anything about the family&apos;s records: schedules, documents, money, people, vehicles, home, your own health. For example: {SUGGESTED.map((x) => `“${x}”`).join(", ")}.</div>
         )}
         {bubbles.map((b, i) => b.role === "user" ? (
           <div key={i} className="self-end max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-accent text-white px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{b.text}</div>
@@ -140,9 +138,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
           // spaces to break at, and without these a flex child grows to fit it and the text runs past the card.
           <div key={i} className="self-start w-full max-w-[92%] min-w-0 flex flex-col gap-1.5">
             <AnswerText text={b.text} muted={b.reply?.kind === "deflect"} />
-            {b.reply?.kind === "tool_confirm" && b.reply.tool && (
+            {b.reply?.kind === "tool_confirm" && b.reply.tool && b.reply.tool.tier === 3 && (
               b.toolResult
-                ? <ResultLine ok={b.toolResult.ok} text={b.toolResult.text} href={b.toolResult.href} />
+                ? (b.toolResult.text ? <ResultLine ok={b.toolResult.ok} text={b.toolResult.text} href={b.toolResult.href} /> : null)
                 : (
                   <div className={`card flex flex-col gap-2 ${b.reply.tool.tier === 3 ? "border-amber" : ""}`}>
                     <div className="text-sm font-semibold">{b.reply.tool.title}</div>
@@ -160,13 +158,10 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
                 )
             )}
             {b.reply?.kind === "instruction" && b.reply.confirm && <ConfirmCard b={b} who={who} onConfirm={() => confirm(i)} onChange={() => setInput(b.reply!.confirm!.summary)} />}
-            {(b.reply?.kind === "event_confirm" || b.reply?.kind === "event_move") && b.reply.draft && (i === bubbles.length - 1 || b.eventResult) && (
-              b.eventResult?.ok
+            {(b.reply?.kind === "event_confirm" || b.reply?.kind === "event_move") && b.eventResult && b.eventResult.text && (
+              b.eventResult.ok
                 ? <div className="card text-sm border-accent"><div className="text-[11px] font-bold tracking-wide text-accent">SAVED TO GOOGLE CALENDAR</div><div>{b.eventResult.text}</div><Link href={b.eventResult.href!} className="text-xs font-semibold text-accent">Open the event</Link></div>
-                : <div className="flex flex-col gap-1">
-                    {b.eventResult && !b.eventResult.ok && <div className="text-xs text-red px-1">{b.eventResult.text}</div>}
-                    <button disabled={busy} onClick={() => addEvent(i)} className="min-h-11 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-50">{b.reply.kind === "event_move" ? `Move “${b.reply.move!.title}”, then add mine` : "Add to Google Calendar"}</button>
-                  </div>
+                : <div className="text-xs text-red px-1">{b.eventResult.text}</div>
             )}
             {b.reply?.items && b.reply.items.length > 0 && (
               <div className="card flex flex-col text-sm p-0 overflow-hidden">
@@ -191,19 +186,13 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
                   ? <span className="text-green font-semibold">Flagged for the maintainer</span>
                   : <button type="button" onClick={() => flag(i)} className="font-semibold text-muted underline-offset-2 hover:underline">Wrong answer?</button>
               )}
-              {b.reply && <MetaInfo text={`${who} asked · from Ask · ${b.reply.costText}${b.reply.model && b.reply.model !== "none" ? ` · ${b.reply.model.replace("claude-", "").replace("-5-5", "")}` : ""}${b.reply.sample ? " · sample" : ""}`} />}
+              {b.reply?.sample && <MetaInfo text="sample" />}
             </div>
           </div>
         ))}
         {busy && <div className="self-start card text-sm text-muted">Thinking…</div>}
         <div ref={endRef} />
       </div>
-
-      {chips.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto py-2 -mx-5 px-5 [scrollbar-width:none]">
-          {chips.map((c) => <button key={c} onClick={() => send(c)} className="shrink-0 min-h-10 px-3 rounded-full bg-soft text-sm font-semibold whitespace-nowrap">{c}</button>)}
-        </div>
-      )}
 
       <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className={embedded ? "flex gap-2 py-2" : "sticky bottom-[88px] flex gap-2 py-2 bg-bg"}>
         <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded} placeholder="Ask or tell me something…" aria-label="Ask" className="flex-1 min-h-12 rounded-full border border-line bg-bg px-4 text-sm" />

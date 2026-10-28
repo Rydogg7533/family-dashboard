@@ -51,7 +51,7 @@ export async function eventTurn(thread: Turn[]): Promise<AskReply> {
   if (!hasGoogleCal()) return { kind: "answer", text: "Google Calendar isn't connected to the app yet, so I can't add events.", ...base(0, "none") };
   // The conflict chips carry their meaning in code, so they are read here and never shown to the model as new wishes.
   const last = thread[thread.length - 1]?.text ?? "";
-  const keep = /^Keep this time anyway$/i.test(last);
+  const keep = /^(keep (this time anyway|it|both|the time|mine)|both|keep)[.!]?$/i.test(last.trim());
   const mv = /^Move .+ to \d{1,2}:\d{2} [ap]m$/i.test(last);
   const use = last.match(/^Use (\d{1,2}:\d{2} [ap]m)–(\d{1,2}:\d{2} [ap]m)$/i);
   const { draft: d, cost, model } = await extractDraft(keep || mv || use ? thread.slice(0, -1) : thread);
@@ -88,10 +88,9 @@ export async function eventTurn(thread: Turn[]): Promise<AskReply> {
               text: `I'll move “${hit.c.ev.title}” from ${to12(hit.c.ev.start!)} to ${to12(ns)}–${to12(ne)}, then add:\n${describe(d)}\n\nNothing changes until you tap the button.`, ...base(cost, model) };
           }
         }
-        return { kind: "event_conflict", draft: d, text: `That overlaps ${list}.${slots.length ? ` Same length, free that day: ${slots.map((x) => `${to12(fromMin(x.s))}–${to12(fromMin(x.e))}`).join(", ")}.` : " Nothing else is free that day between 8 am and 6 pm."}${stuck.length ? ` ${stuck.join("; ")}.` : ""}\n\nPick a new time for yours, move the other event, or keep both.`, chips, ...base(cost, model) };
+        return { kind: "event_conflict", draft: d, text: `That overlaps ${list}.${slots.length ? ` Same length, free that day: ${slots.map((x) => `${to12(fromMin(x.s))}–${to12(fromMin(x.e))}`).join(", ")}.` : " Nothing else is free that day between 8 am and 6 pm."}${stuck.length ? ` ${stuck.join("; ")}.` : ""}\nSay a new time for yours, or say keep both.`, chips, ...base(cost, model) };
       }
     } catch { note = " I couldn't check your calendar for conflicts just now."; }
   }
-  const missingWhere = !d.location ? " No location set." : "";
-  return { kind: "event_confirm", text: `Here is what I'll add to Google Calendar:\n${describe(d)}${missingWhere}${keep ? "\nYou chose to keep this time although it overlaps." : ""}${note}\n\nTap Add, or tell me what to change (for example “at the library”, “add a reminder 1 day before”, “make it 3 pm”).`, draft: d, ...base(cost, model) };
+  return { kind: "event_confirm", text: `I'll add ${describe(d)}.${keep ? " You chose to keep this time although it overlaps." : ""}${note} OK?`, draft: d, ...base(cost, model) };
 }

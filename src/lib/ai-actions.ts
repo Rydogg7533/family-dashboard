@@ -13,7 +13,35 @@ export async function callModelAction(args: { job: Job; messages: Message[]; sys
   return callModel(args);
 }
 
-export async function askAction(thread: Turn[], assistantApp?: string, source = "ask"): Promise<AskReply> {
+// D5 (2026-10-27): Ask is a conversation. A write the model chose, or an event waiting to be added, is agreed
+// to with a typed yes; "no" drops it; anything else is a correction and goes back to the model. Only tier 3
+// (money leaving, anything sent outside the household, removing a contact, access) keeps its button.
+export type Pending = { kind: AskReply["kind"]; tool?: AskReply["tool"]; draft?: EventDraft; move?: AskReply["move"]; feedId?: string | null };
+const YES = /^(y|yes|yeah|yep|yup|ok|okay|sure|do it|go ahead|go for it|please|confirm|confirmed|add it|save it|send it|yes please|ok do it)[.!]?$/i;
+const NO = /^(n|no|nope|nah|never ?mind|cancel|forget it|don'?t|stop|not now)[.!]?$/i;
+export async function askAction(thread: Turn[], assistantApp?: string, source = "ask", pending?: Pending | null): Promise<AskReply> {
+  const q = ([...thread].reverse().find((t) => t.role === "user")?.text ?? "").trim();
+  const prev = [...thread].reverse().find((t) => t.role === "assistant");
+  const base = { cost: 0, costText: "no model used", model: "none", sample: false } as const;
+  const waiting = pending && prev && pending.kind === prev.kind;
+  if (waiting && (YES.test(q) || NO.test(q))) {
+    let reply: AskReply | null = null;
+    if (pending.kind === "tool_confirm" && pending.tool) {
+      if (pending.tool.tier === 3) reply = { kind: "answer", text: NO.test(q) ? "Okay, nothing changed." : "That one needs the button: tap Confirm this change above, so a stray yes can never do it.", ...base };
+      else if (NO.test(q)) reply = { kind: "answer", text: "Okay, nothing changed.", ...base };
+      else {
+        const r = await runTool(pending.tool.name, pending.tool.args).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : "That did not work." }));
+        reply = r.ok ? { kind: "answer", text: `Done. ${r.summary}`, source: r.href ? { label: r.href.startsWith("sms:") ? "Open Messages" : "Open it", href: r.href } : undefined, ...base } : { kind: "answer", text: `That did not work: ${r.error}`, ...base };
+      }
+    } else if ((pending.kind === "event_confirm" || pending.kind === "event_move") && pending.draft) {
+      if (NO.test(q)) { await feedDeclineThread(threadKeyOf(thread.find((t) => t.role === "user")?.text ?? "")).catch(() => {}); reply = { kind: "answer", text: "Okay, I won't add it.", ...base }; }
+      else {
+        const r = await (pending.move ? confirmMoveAndAdd(pending.move, pending.draft, pending.feedId) : confirmAskEvent(pending.draft, pending.feedId)).catch((e) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) }));
+        reply = r.ok ? { kind: "answer", text: `Added to Google Calendar: ${r.summary}`, source: { label: "Open the event", href: r.href }, ...base } : { kind: "answer", text: `Could not add it: ${r.error}`, ...base };
+      }
+    }
+    if (reply) { await recordAsk(thread, reply, source); return reply; }
+  }
   const reply = await askOnce(thread, assistantApp);
   await recordAsk(thread, reply, source);
   return reply;

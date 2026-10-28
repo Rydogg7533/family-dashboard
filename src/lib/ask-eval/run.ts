@@ -16,6 +16,7 @@ export type Expect = {
   rows?: number | "some" | "none";                   // items shown to the person
   noWrite?: boolean; noTool?: string;                // must not have proposed a write / this tool
   mentions?: string[];                               // words the text must contain
+  link?: boolean;                                    // D5: one thing found arrives as one Open link, not a row
 };
 export type Case = { id: string; ask: string; expect: Expect };
 export type Result = { id: string; ask: string; pass: boolean; why: string[]; kind: string; tool: string | null; reads: string[]; rows: number; text: string; cost: number };
@@ -41,6 +42,13 @@ export function judge(c: Case, r: AskReply): Result {
   if (e.rows === "some" && rows === 0) why.push("no rows shown");
   if (e.rows === "none" && rows > 0) why.push(`${rows} rows shown, wanted none`);
   if (typeof e.rows === "number" && rows !== e.rows) why.push(`${rows} rows shown, wanted ${e.rows}`);
+  if (e.link && !r.source) why.push("no Open link for the one thing found");
+  // D5: a reply reads like speech. No chips, no markdown, at most four sentences, one question at most.
+  if (r.chips?.length) why.push("chips offered");
+  if (/^\s*[-*#]|\*\*/m.test(r.text)) why.push("markdown in the reply");
+  const sentences = r.text.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+  if (sentences > 4) why.push(`${sentences} sentences, wanted at most 4`);
+  if ((r.text.match(/\?/g) ?? []).length > 1) why.push("more than one question");
   if (e.noWrite && r.kind === "tool_confirm") why.push(`proposed a write (${tool})`);
   if (e.noTool && (tool === e.noTool || reads.includes(e.noTool))) why.push(`used ${e.noTool}`);
   if (e.mentions) for (const m of e.mentions) if (!r.text.toLowerCase().includes(m.toLowerCase())) why.push(`text does not mention "${m}"`);

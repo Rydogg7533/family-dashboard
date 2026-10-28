@@ -77,12 +77,13 @@ export async function answerAsk(thread: Turn[], assistantApp = "Claude"): Promis
 You have tools for the things this household's app can do. Today is ${ctx?.today ?? "unknown"} in ${ctx?.tz ?? "the household's time zone"}.
 - Look things up with the read tools before answering. Never guess a number, a date or a name you have not read.
 - Before adding anything, search for it first: say so if something close already exists, rather than making a second one.
-- A tool that changes something is not run by you; the person sees what you chose and agrees to it. Say in one line what you are about to do.
-- Once you have what a write needs, call the write tool: the confirm card is the question. Do not describe the change and ask "shall I?" in prose; that makes the person agree twice.
+- A tool that changes something is not run by you; the person agrees to it by answering yes. When you call a write tool, your text is ONE sentence that states every value you are about to save (what, who, when, how much) and ends with "OK?"; that sentence is all they see before they answer. Do not describe the change in prose without calling the tool, and do not call the tool and then ask again.
 - If what they asked for has no tool, say plainly that you cannot do it from here and use app.findPage to name the page where they can. Never say you have saved or changed something.
 - Features are added by the maintainer only. When someone asks for a new feature or for the system to work differently, offer to file it with issue.report as an idea; never promise or describe a change as done.
 - People's access, children's settings, money accounts and household configuration are changed on their Settings pages by the head of household, not from here.
-- One or two sentences, plain text (no markdown, no bold, no "Source:" line). The rows under your answer already carry each thing's name, date, folder and its Open or Fetch button, so never repeat a path, say where a file is filed, or explain that it can be fetched or opened; say what you found and what they can do next ("Found it. Say who to text it to."). Names, dates and links, never the contents of documents.
+- This is a conversation, read as if spoken aloud: one to three sentences, plain text (no markdown, bold, bullets, headers or "Source:" lines). Answer first. Then at most ONE question, and only when you cannot finish without the answer. Never offer a second thing ("I can also add a task", "want me to…") and never list what you could do; the person will ask if they want more.
+- The person does not see what you looked up unless they asked for a list, so your sentence must name the thing itself: "The AAA receipt from Oct 11 is $242.88", not "I found a receipt". Never repeat a path, say where a file is filed, or explain that it can be opened; names, dates and amounts, never the contents of documents.
+- Dates and times in people's words: "Thursday the 29th", "6 pm", never 2026-10-29 or 18:00.
 - Give the person exactly what they asked for, not everything that matched. "The latest", "the most recent", "the" one thing means one: narrow the search (limit 1, a date range, more words) until one comes back. If several could be meant and the words do not settle it (which vehicle, which year, which of two vendors), ask one short question instead of listing them all; a list is for "what do we have".
 - The person sees the rows from your LAST search only, so finish with the search that returns just what they meant.
 - Only the last 24 hours of the conversation are in front of you. When the person refers to something from before that ("the one we found Friday", "what I asked last week"), read ask.history rather than guessing.
@@ -112,12 +113,15 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     spend += r.cost;
     saidLast = r.text || saidLast;
     const base2 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: r.model, sample: r.sample };
-    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base2 };
+    if (!r.calls.length) return { kind: "answer", text: r.text.trim() || "I could not work that one out.", ...rowsFor(q, items), trace, ...base2 };
 
     const write = r.calls.find((cl) => toolByName(cl.name)?.kind === "write");
     if (write) {
       const t = toolByName(write.name)!;
-      return { kind: "tool_confirm", text: r.text.trim() || `${t.title}. Confirm?`, tool: { name: t.name, title: t.title, args: write.input, tier: t.tier }, items: items.length ? items.slice(0, 12) : undefined, trace, ...base2 };
+      let text = r.text.trim() || `${t.title}: ${Object.entries(write.input).filter(([, v]) => v !== "" && v != null).map(([k, v]) => `${k} ${String(v)}`).join(", ")}.`;
+      if (t.tier === 3) text = text.replace(/\s*OK\?$/i, "") + " This one needs the button below.";
+      else if (!/\?\s*$/.test(text)) text += " OK?";
+      return { kind: "tool_confirm", text, tool: { name: t.name, title: t.title, args: write.input, tier: t.tier }, trace, ...base2 };
     }
 
     turns.push({ role: "assistant", content: r.blocks });
@@ -141,7 +145,16 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
   const wrap = await callModelTools({ job: "chat", feature: "ask", messages: turns, system, tools: specs, maxTokens: 400 });
   spend += wrap.cost;
   const base3 = { cost: spend, costText: `this answer ~${formatCost(spend)}`, model: wrap.model, sample: wrap.sample };
-  return { kind: "answer", text: (wrap.text || saidLast).trim() || "I could not find that.", items: items.length ? items.slice(0, 12) : undefined, trace, ...base3 };
+  return { kind: "answer", text: (wrap.text || saidLast).trim() || "I could not find that.", ...rowsFor(q, items), trace, ...base3 };
+}
+
+// D5: rows only when the person asked for a list; one thing found becomes one "Open" link; otherwise the sentence carries it.
+const LIST_WORDS = /\b(list|show (me )?(them|all|everything)|what do we have|which ones|all (the|of)|what'?s on (my|the)|every|how many|what did we (buy|get|order)|pull up|receipts|invoices|bills|statements|orders|charges|tasks|events|subscriptions)\b/i;
+function rowsFor(q: string, items: AskItem[]): Pick<AskReply, "items" | "source"> {
+  if (!items.length) return {};
+  if (LIST_WORDS.test(q)) return { items: items.slice(0, 12) };
+  if (items.length === 1) return { source: { label: items[0].name, href: items[0].open ?? items[0].href } };
+  return {};
 }
 
 // ---- helpers ----
@@ -171,7 +184,7 @@ function structured(q: string, thread: Turn[]): AskReply {
   // saving nothing, and did the same for done / snooze / undo.
   if (/^(y|yes|ok)$/.test(l))
     return { ...base, kind: "answer", text: waiting
-      ? "It is waiting on you \u2014 tap Do it on the card above and I will make the change."
+      ? "Say yes to the question above and I will make the change, or tell me what to change."
       : "Nothing is waiting on an answer right now." };
 
   if (/^(n|no)$/.test(l))
