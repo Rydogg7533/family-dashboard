@@ -137,26 +137,29 @@ async function main() {
   for (const file of files) {
     const text = ocr(file); const hay = `${file.slice(FOLDER.length + 1)}\n${text}`;   // the path inside the folder counts as text
     const kind = (KINDS.find(([, re]) => re.test(hay)) ?? [""])[0];
-    const person = people.find((p) => new RegExp(`\\b${p.name}\\b`, "i").test(hay)) ?? null;
+    const named = people.filter((p) => new RegExp(`\\b${p.name}\\b`, "i").test(hay));
+    const person = named[0] ?? null;
     const vehicle = vehicles.find((v) => (v.plate && new RegExp(v.plate.replace(/[^A-Z0-9]/gi, ""), "i").test(hay.replace(/[^A-Za-z0-9\n]/g, ""))) || new RegExp(`\\b${v.short}\\b`, "i").test(hay) || (v.model && new RegExp(`\\b${v.model}\\b`, "i").test(hay))) ?? null;
     const date = kind && EXPIRES.has(kind) ? expiryIn(text) : null;
     // The row this scan belongs to: by template key when the subject is known, else by the kind alone.
-    let row = null;
-    if (kind && PERSON_KINDS.has(kind) && person) row = rows.find((r) => r.template_key === `${kind}:${person.kind}:${person.id}`) ?? null;
-    else if (kind && VEHICLE_KINDS.has(kind) && vehicle) row = rows.find((r) => r.template_key === `${kind}:v:${vehicle.id}`) ?? null;
-    else if (kind) row = rows.find((r) => r.template_key === `${kind}:household` || r.template_key === `${kind}:head`) ?? null;
-    const subject = person ? person.name : vehicle ? vehicle.short : "";
-    const title = row ? row.label : kind ? `${subject ? subject + " " : ""}${KIND_LABEL[kind]}` : basename(file, extname(file));
+    // One card can cover several people (a family health card): every named person's row gets the same item and link.
+    let rowIds = [];
+    if (kind && PERSON_KINDS.has(kind) && named.length) rowIds = named.map((p) => rows.find((r) => r.template_key === `${kind}:${p.kind}:${p.id}`)?.id).filter(Boolean);
+    else if (kind && VEHICLE_KINDS.has(kind) && vehicle) rowIds = [rows.find((r) => r.template_key === `${kind}:v:${vehicle.id}`)?.id].filter(Boolean);
+    else if (kind) rowIds = [rows.find((r) => r.template_key === `${kind}:household` || r.template_key === `${kind}:head`)?.id].filter(Boolean);
+    const row = rowIds.length ? rows.find((r) => r.id === rowIds[0]) : null;
+    const subject = named.length > 1 ? "Family" : person ? person.name : vehicle ? vehicle.short : "";
+    const title = named.length > 1 && kind ? `Family ${KIND_LABEL[kind]}` : row ? row.label : kind ? `${subject ? subject + " " : ""}${KIND_LABEL[kind]}` : basename(file, extname(file));
     const vault = kind && person && person.kind === "a" && PRIVATE_FOR_ADULT.has(kind) ? privateVault : sharedVault;
     const sure = !!(row && (!EXPIRES.has(kind) || (date && date.sure)));
-    items.push({ i: items.length, file, name: file.slice(FOLDER.length + 1), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowId: row?.id ?? "", title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
+    items.push({ i: items.length, file, name: file.slice(FOLDER.length + 1), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowIds, title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
   }
   console.log(`Read ${items.length}: ${items.filter((x) => x.sure).length} mapped with confidence, ${items.filter((x) => !x.sure && x.kind).length} to check, ${items.filter((x) => !x.kind).length} unrecognised.`);
 
   // ---------- the mapping screen ----------
   const token = randomBytes(12).toString("hex");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const rowOptions = (sel) => `<option value="">— not on the list (skip)</option>` + rows.map((r) => `<option value="${r.id}" ${r.id === sel ? "selected" : ""}>${esc(r.label)}${r.link ? " (already linked)" : ""}</option>`).join("");
+  const rowOptions = (sel) => rows.map((r) => `<option value="${r.id}" ${sel.includes(r.id) ? "selected" : ""}>${esc(r.label)}${r.link ? " (already linked)" : ""}</option>`).join("");
   const vaultOptions = (sel) => vaults.map((v) => `<option value="${v.id}" ${v.id === sel ? "selected" : ""}>${esc(v.name)}</option>`).join("");
   const page = () => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Map scans to 1Password</title>
 <style>body{font:15px -apple-system,system-ui;margin:0;padding:20px;background:#f5f5f7;color:#111}h1{font-size:20px}.card{background:#fff;border-radius:14px;padding:14px;margin:12px 0;display:grid;grid-template-columns:150px 1fr;gap:14px;box-shadow:0 1px 2px #0001}.card.check{outline:2px solid #e0a000}.card.skip{opacity:.5}img{width:150px;max-height:190px;object-fit:contain;border-radius:8px;background:#eee}.pdf{width:150px;height:120px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}label{display:block;font-size:12px;color:#555;margin-top:6px}input,select{width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;font:inherit}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:#eee;margin-right:6px}.tag.warn{background:#fff1c2}.tag.ok{background:#d9f5dd}.pre{font-size:11px;color:#777;margin-top:6px;max-height:40px;overflow:hidden}button{padding:12px 20px;border-radius:999px;border:0;background:#0F4C81;color:#fff;font:inherit;font-weight:600}.res{font-size:13px;margin-top:8px}.res.ok{color:#117733}.res.bad{color:#b00}</style></head><body>
@@ -170,14 +173,14 @@ async function main() {
       ${x.alreadyLinked ? `<span class="tag">row already linked</span>` : ""}${x.dup ? `<span class="tag warn">an item with this name already exists in 1Password</span>` : ""}
       <span style="font-size:12px;color:#777">${esc(x.name)}</span></div>
     <div style="font-size:12px;color:#555;margin-top:4px">Read: ${x.kind ? esc(KIND_LABEL[x.kind]) : "unknown kind"}${x.person ? ", " + esc(x.person) : ""}${x.vehicle ? ", " + esc(x.vehicle) : ""}${x.dateFrom ? " · " + esc(x.dateFrom) : ""}</div>
-    <label>Which row on the list<select name="row${x.i}">${rowOptions(x.rowId)}</select></label>
+    <label>Which row(s) on the list — hold ⌘ to pick several when one card covers several people<select name="row${x.i}" multiple size="4">${rowOptions(x.rowIds)}</select></label>
     <div class="row2"><label>1Password item name<input name="title${x.i}" value="${esc(x.title)}"></label><label>Vault<select name="vault${x.i}">${vaultOptions(x.vaultId)}</select></label></div>
     <div class="row2"><label>Expires or renews<input type="date" name="date${x.i}" value="${esc(x.date)}"></label><label>Note<input name="note${x.i}" placeholder="Original in the safe"></label></div>
     <div class="pre">${esc(x.preview)}</div><div class="res" id="r${x.i}"></div>
   </div></div>`).join("")}
 <p><button type="submit" id="go">Apply</button> <span id="status" style="margin-left:10px;color:#555"></span></p></form>
 <script>
-const f=document.getElementById('f');f.onsubmit=async(e)=>{e.preventDefault();const d=new FormData(f);const rows=[];${JSON.stringify(items.map((x) => x.i))}.forEach(i=>{if(!d.get('go'+i))return;rows.push({i,rowId:d.get('row'+i),title:d.get('title'+i),vaultId:d.get('vault'+i),date:d.get('date'+i),note:d.get('note'+i)})});
+const f=document.getElementById('f');f.onsubmit=async(e)=>{e.preventDefault();const d=new FormData(f);const rows=[];${JSON.stringify(items.map((x) => x.i))}.forEach(i=>{if(!d.get('go'+i))return;rows.push({i,rowIds:d.getAll('row'+i),title:d.get('title'+i),vaultId:d.get('vault'+i),date:d.get('date'+i),note:d.get('note'+i)})});
 if(!rows.length){alert('Nothing ticked.');return}if(!confirm(rows.length+' scans: create the 1Password items and fill the list?'))return;document.getElementById('go').disabled=true;document.getElementById('status').textContent='Working…';
 const r=await fetch('/apply?t=${token}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(rows)});const out=await r.json();
 for(const o of out){const el=document.getElementById('r'+o.i);el.className='res '+(o.ok?'ok':'bad');el.textContent=o.text}document.getElementById('status').textContent='Done: '+out.filter(o=>o.ok).length+' of '+out.length+' written. You can close this window; the Terminal has the same list.'};
@@ -195,23 +198,25 @@ for(const o of out){const el=document.getElementById('r'+o.i);el.className='res 
       for (const w of wanted) {
         const x = items[w.i]; const r = { i: w.i, ok: false, text: "" };
         try {
-          if (!w.rowId) { r.text = "skipped: not on the list"; out.push(r); continue; }
-          const row = rows.find((q) => q.id === w.rowId); if (!row) throw new Error("row not found");
+          const targets = (w.rowIds || []).map((id) => rows.find((q) => q.id === id)).filter(Boolean);
+          if (!targets.length) { r.text = "skipped: no row picked"; out.push(r); continue; }
+          const row = targets[0];
           const title = String(w.title || row.label).trim().slice(0, 120);
           const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", basename(x.file), "--format", "json"]));
           const link = `https://start.1password.com/open/i?a=${me.account_uuid}&v=${created.vault?.id ?? w.vaultId}&i=${created.id}&h=${host}`;
           const patch = { link, updated_at: new Date().toISOString() };
           if (/^\d{4}-\d{2}-\d{2}$/.test(w.date)) patch.expires_on = w.date;
           if (w.note) patch.note = String(w.note).slice(0, 300);
-          const [after] = await sb(`vault_pointers?id=eq.${row.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-          if (!after?.link) throw new Error("the app row did not take the link");
+          const afters = [];
+          for (const t of targets) { const [a] = await sb(`vault_pointers?id=eq.${t.id}`, { method: "PATCH", body: JSON.stringify(patch) }); if (!a?.link) throw new Error(`the app row "${t.label}" did not take the link`); afters.push(a); }
+          const after = afters[0];
           let extra = "";
           const kind = String(after.template_key ?? "").split(":")[0];
           if (after.attached_kind === "vehicle" && patch.expires_on && (kind === "registration" || kind === "auto_card")) {
             const v = vehicles.find((q) => q.id === after.attached_id);
             if (v) { const cur = (await sb(`vehicles?id=eq.${v.id}&select=details`))[0]?.details ?? {}; const field = kind === "registration" ? "regExpiry" : "insuranceRenewal"; const [vv] = await sb(`vehicles?id=eq.${v.id}`, { method: "PATCH", body: JSON.stringify({ details: { ...cur, [field]: patch.expires_on }, updated_at: new Date().toISOString() }) }); if (vv?.details?.[field]) extra = `; ${v.short} ${field === "regExpiry" ? "registration expires" : "insurance renews"} ${vv.details[field]}`; }
           }
-          r.ok = true; r.text = `1Password item "${title}" created in ${vaults.find((q) => q.id === w.vaultId)?.name ?? "vault"} with the scan; list row "${after.label}" linked${after.expires_on ? `, date ${after.expires_on}` : ""}${extra}.`;
+          r.ok = true; r.text = `1Password item "${title}" created in ${vaults.find((q) => q.id === w.vaultId)?.name ?? "vault"} with the scan; ${afters.length === 1 ? `list row "${after.label}" linked` : `${afters.length} list rows linked (${afters.map((a) => a.label).join(", ")})`}${after.expires_on ? `, date ${after.expires_on}` : ""}${extra}.`;
         } catch (e) { r.text = `not done: ${String(e.message).slice(0, 200)}`; }
         out.push(r); console.log(`${r.ok ? "OK " : "NOT"} ${x.name}: ${r.text}`);
       }
