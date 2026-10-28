@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SECTIONS, fmtClock } from "@/lib/sitter-shared";
+import { groupSheet, fmtClock } from "@/lib/sitter-shared";
 import type { TabletState } from "@/lib/sitter-tablet";
 
 // Kitchen tablet display. Large type, read-only, no navigation. Refreshes every 30 seconds so a note or a confirmation appears within half a minute,
@@ -24,7 +24,7 @@ export function TabletView({ state, sample = false }: { state: TabletState; samp
       </div>
     );
   }
-  const bySec = SECTIONS.map((s) => ({ ...s, items: state.items.filter((i) => i.section === s.id) })).filter((s) => s.items.length);
+  const bySec = groupSheet(state.items).map((g) => ({ id: g.section, title: g.label, items: g.items as typeof state.items }));
   return (
     <div className={`${base} p-8`} style={font}>
       <div className="flex justify-between items-start gap-6 mb-6">

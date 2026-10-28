@@ -732,5 +732,127 @@
         "link": "https://stewardos-co.vercel.app/overview"
       }
     }
+  },
+  {
+    "id": "sit-1",
+    "ask": "I need a babysitter for Thursday",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "noTool": "sitter.plan",
+      "mentions": [
+        "Thursday"
+      ]
+    }
+  },
+  {
+    "id": "sit-2",
+    "ask": "I need a sitter",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true
+    }
+  },
+  {
+    "id": "sit-3",
+    "ask": "Emma's sitting Friday 6 to 10",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "sitter.plan",
+      "args": {
+        "sitter": "Emma"
+      },
+      "read": "sitter.find"
+    }
+  },
+  {
+    "id": "sit-4",
+    "ask": "find a sitter for Saturday",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "sitter.need",
+      "noTool": "sitter.plan"
+    }
+  },
+  {
+    "id": "sit-5",
+    "ask": "get the sitter instructions ready for Saturday",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "sitter.need"
+    }
+  },
+  {
+    "id": "sit-6",
+    "ask": "tell the sitter bedtime is 9",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "sitter.plan"
+    }
+  },
+  {
+    "id": "sit-7",
+    "ask": "don't book anything, is there a sitter Friday?",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "sitter.find"
+    }
+  },
+  {
+    "id": "sit-8",
+    "ask": "who are our sitters",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "read": "sitter.find",
+      "readArgs": {
+        "what": "sitters"
+      }
+    }
+  },
+  {
+    "id": "sit-9",
+    "ask": "add Emma as a sitter",
+    "expect": {
+      "kind": "answer",
+      "noWrite": true,
+      "mentions": [
+        "mobile"
+      ]
+    }
+  },
+  {
+    "id": "sit-10",
+    "ask": "add Emma Johnson as a sitter, 801-555-0147, Melissa's niece, 17, drives, $15/hr",
+    "expect": {
+      "kind": "tool_confirm",
+      "tool": "sitter.person",
+      "args": {
+        "name": "Emma Johnson",
+        "phone": "801-555-0147"
+      }
+    }
+  },
+  {
+    "id": "sit-11",
+    "ask": "sitter pay to budget",
+    "expect": {
+      "noTool": "sitter.plan"
+    }
+  },
+  {
+    "id": "sit-12",
+    "ask": "cancel the sitter Friday",
+    "expect": {
+      "kindAny": [
+        "tool_confirm",
+        "answer"
+      ],
+      "noTool": "calendar.remove"
+    }
   }
 ]

@@ -60,15 +60,29 @@ export const missingFields = (p: Pick<SitterPerson, "relationship" | "ageBand" |
 export const sectionTitle = (id: string) => SECTIONS.find((s) => s.id === id)?.title ?? id;
 
 export type TemplateItem = { id: string; section: SectionId; text: string; thingItemId: string | null; thingName: string | null; photo: string | null; defaultOn: boolean };
-export type SheetItem = { id: string; section: SectionId; text: string; photo: string | null; on: boolean };
+// section is a household section id, "g:<section>" for a general-template line, or "c:<childId>:<section>" for a child's line.
+// label is the heading the person and the tablet see; items keep the order the compiler gave them.
+export type SheetItem = { id: string; section: string; text: string; photo: string | null; on: boolean; label?: string; health?: boolean };
+export const sheetLabel = (i: Pick<SheetItem, "section" | "label">) => i.label ?? sectionTitle(i.section);
+// Group a sheet by section, keeping first-seen order.
+export function groupSheet(items: SheetItem[]) {
+  const out: { section: string; label: string; health: boolean; items: SheetItem[] }[] = [];
+  for (const i of items) {
+    let g = out.find((x) => x.section === i.section);
+    if (!g) { g = { section: i.section, label: sheetLabel(i), health: !!i.health || i.section === "health" || /:health$/.test(i.section), items: [] }; out.push(g); }
+    g.items.push(i);
+  }
+  return out;
+}
 export type NightStatus = "needed" | "proposed" | "scheduled" | "awaiting_review" | "confirmed" | "ended" | "declined" | "cancelled";
 export type Night = {
   id: string; eventKey: string | null; title: string; place: string | null; sitterName: string | null; startsAt: string; leaveAt: string; endsAt: string;
   source: "marked" | "detected" | "told"; status: NightStatus; promptTo: string | null; confirmedAt: string | null; sheet: SheetItem[]; note: string | null; visitOnly: string | null;
+  sitterPersonId: string | null; generalTemplateId: string | null; childTemplates: Record<string, string>; childrenHome: string[] | null; lines: string[]; instructionsMode: "template" | "custom" | "blank" | null; preparedAt: string | null;
 };
 
 // Health items are never on by default, whatever the template says: the parent turns them on for a visit.
-export const startsOn = (section: SectionId, defaultOn: boolean) => section !== "health" && defaultOn;
+export const startsOn = (section: string, defaultOn: boolean) => section !== "health" && !/:health$/.test(section) && defaultOn;
 
 export const fmtWhen = (iso: string) => new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });
 export const fmtClock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });

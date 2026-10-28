@@ -12,7 +12,7 @@ import { TaskRow } from "@/components/TaskRow";
 import SetupCard from "@/components/c/SetupCard";
 import GuidedCard from "@/components/c/GuidedCard";
 import { SitterToday } from "@/components/c/SitterToday";
-import { getNights, getSitterSheetNudge } from "@/lib/data-sitter";
+import { getNights, getSitterSheetNudge, getSitters } from "@/lib/data-sitter";
 import { detectSitterNights } from "@/lib/sitter-detect";
 import { getCatalogNudge } from "@/lib/data-catalog";
 import { getMyConnections } from "@/lib/data-connections";
@@ -48,10 +48,12 @@ export default async function Today() {
   const sitterNudge = nextStep || catalog?.show ? null : await getSitterSheetNudge();
   // Sitter nights: the app looks for evening events with no kids on them (and asks), and surfaces a night that is due for review.
   let sitterReview = null as Awaited<ReturnType<typeof getNights>>[number] | null, sitterProposal = null as typeof sitterReview;
+  let sitterUpcoming: Awaited<ReturnType<typeof getNights>> = [], sitterList: { id: string; name: string }[] = [];
   if (me && hasSupabaseEnv()) {
     await detectSitterNights(me);
-    const [due, asks] = await Promise.all([getNights(["awaiting_review"], 1), getNights(["proposed"], 1)]);
+    const [due, asks, up, people] = await Promise.all([getNights(["awaiting_review"], 1), getNights(["proposed"], 1), getNights(["needed", "scheduled", "confirmed"], 5), getSitters()]);
     sitterReview = due[0] ?? null; sitterProposal = asks[0] ?? null;
+    sitterUpcoming = up.filter((n) => new Date(n.endsAt) > new Date()); sitterList = people.filter((p) => p.approvedAt).map((p) => ({ id: p.id, name: p.name }));
   }
   const connDone = setup.conns.filter((c) => c.state === "connected" || c.state === "off").length;
   const o = overall(status);
@@ -70,7 +72,7 @@ export default async function Today() {
       {catalog?.show && <GuidedCard step="catalog" title={catalog.started ? "Keep cataloging what you own" : "Next: catalog what you own"} progress={catalog.started && catalog.total > 0 ? `${catalog.done} of ${catalog.total} areas done` : undefined}
         body={catalog.started ? (catalog.next ? `Next area: ${catalog.next}. A few minutes at a time is fine; it keeps your place.` : "Every area is marked done. Run the final check to finish.") : "Pick the rooms, then photograph things one room at a time. It takes a few minutes per room, over as many days as you like, and it keeps your place."} href="/things/catalog" startLabel={catalog.started ? "Continue" : "Start"} />}
       {sitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${sitterNudge.done} of ${sitterNudge.total} sections done`} body={`What a babysitter needs, written once.${sitterNudge.next ? ` Next: ${sitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter?tab=house" startLabel="Continue" />}
-      <SitterToday review={sitterReview} proposal={sitterProposal} tz={tz} />
+      <SitterToday review={sitterReview} proposal={sitterProposal} tz={tz} upcoming={sitterUpcoming} sitters={sitterList} />
       {handed > 0 && <Link href="/inbox" className="block mb-4"><div className="card border-accent text-sm font-semibold">{handedBy ? `${handedBy} handed you` : "Handed to you:"} {handed} item{handed === 1 ? "" : "s"} in the Inbox. <span className="text-accent">Open</span></div></Link>}
       <section className="mb-5">
         <div className="flex items-baseline justify-between mb-2">

@@ -7,6 +7,9 @@ export const toNight = (r: Row): Night => ({
   id: r.id as string, eventKey: (r.event_key as string) ?? null, title: r.title as string, place: (r.place as string) ?? null, sitterName: (r.sitter_name as string) ?? null,
   startsAt: r.starts_at as string, leaveAt: r.leave_at as string, endsAt: r.ends_at as string, source: r.source as Night["source"], status: r.status as NightStatus,
   promptTo: (r.prompt_to as string) ?? null, confirmedAt: (r.confirmed_at as string) ?? null, sheet: ((r.sheet as SheetItem[]) ?? []), note: (r.note as string) ?? null, visitOnly: (r.visit_only as string) ?? null,
+  sitterPersonId: (r.sitter_person_id as string) ?? null, generalTemplateId: (r.general_template_id as string) ?? null, childTemplates: ((r.child_templates as Record<string, string>) ?? {}), childrenHome: (r.children_home as string[]) ?? null,
+  lines: Array.isArray((r.draft as { lines?: unknown })?.lines) ? ((r.draft as { lines: unknown[] }).lines.filter((x): x is string => typeof x === "string")) : [],
+  instructionsMode: (r.instructions_mode as Night["instructionsMode"]) ?? null, preparedAt: (r.prepared_at as string) ?? null,
 });
 
 // The reusable template: active items with a photo id when linked to a catalog item.
