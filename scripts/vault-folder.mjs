@@ -61,7 +61,7 @@ const KINDS = [
   ["auto_policy", /DECLARATIONS? PAGE|POLICY DECLARATIONS|AUTO POLICY/i],
   ["home_insurance", /HOMEOWNERS?|DWELLING COVERAGE/i],
   ["dental_card", /\bDENTAL\b|\bVISION\b.*\b(PLAN|MEMBER)\b/i],
-  ["health_card", /MEMBER (ID|NUMBER)|GROUP (NO|NUMBER|#)|RX ?BIN|HEALTH PLAN|COPAY|DEDUCTIBLE/i],
+  ["health_card", /HEALTH INSURANCE|MEDICAL (CARD|PLAN|INSURANCE)|MEMBER (ID|NUMBER|#)|GROUP (NO|NUMBER|#)|RX ?BIN|HEALTH PLAN|COPAY|DEDUCTIBLE|SELECT ?HEALTH|BLUE CROSS|UNITED ?HEALTH|AETNA|CIGNA|HUMANA/i],
   ["vaccines", /IMMUNIZATION|VACCIN/i],
   ["life_insurance", /LIFE INSURANCE|TERM LIFE/i],
   ["ein", /EMPLOYER IDENTIFICATION NUMBER|\bEIN\b/i],
@@ -133,9 +133,14 @@ async function main() {
   const files = walk(FOLDER).sort();
   if (!files.length) { console.error(`STOP: no photos or PDFs in ${FOLDER}`); process.exit(1); }
   console.log(`Reading ${files.length} file${files.length === 1 ? "" : "s"} in ${FOLDER} (on this Mac)…`);
+  // Front and back of one card (or page 1 / page 2) are one document: files whose names differ only by (Front)/(Back),
+  // front/back, or a trailing 1/2 are grouped, OCR'd together, and become ONE 1Password item with every file attached.
+  const groupKey = (f) => f.slice(FOLDER.length + 1).replace(/\.[^.]+$/, "").replace(/\s*[(\[]?\s*(front|back|side ?[ab12]|page ?\d|p\d|\d)\s*[)\]]?\s*$/i, "").trim().toLowerCase();
+  const groups = new Map(); for (const f of files) { const k = groupKey(f); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(f); }
   const items = [];
-  for (const file of files) {
-    const text = ocr(file); const hay = `${file.slice(FOLDER.length + 1)}\n${text}`;   // the path inside the folder counts as text
+  for (const group of groups.values()) {
+    const file = group[0];
+    const text = group.map((g) => ocr(g)).join("\n"); const hay = `${group.map((g) => g.slice(FOLDER.length + 1)).join("\n")}\n${text}`;   // the path inside the folder counts as text
     const kind = (KINDS.find(([, re]) => re.test(hay)) ?? [""])[0];
     const named = people.filter((p) => new RegExp(`\\b${p.name}\\b`, "i").test(hay));
     const person = named[0] ?? null;
@@ -152,7 +157,7 @@ async function main() {
     const title = named.length > 1 && kind ? `Family ${KIND_LABEL[kind]}` : row ? row.label : kind ? `${subject ? subject + " " : ""}${KIND_LABEL[kind]}` : basename(file, extname(file));
     const vault = kind && person && person.kind === "a" && PRIVATE_FOR_ADULT.has(kind) ? privateVault : sharedVault;
     const sure = !!(row && (!EXPIRES.has(kind) || (date && date.sure)));
-    items.push({ i: items.length, file, name: file.slice(FOLDER.length + 1), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowIds, title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
+    items.push({ i: items.length, file, files: group, name: group.map((g) => basename(g)).join(" + "), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowIds, title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link, preview: text.replace(/\s+/g, " ").slice(0, 220) });
   }
   console.log(`Read ${items.length}: ${items.filter((x) => x.sure).length} mapped with confidence, ${items.filter((x) => !x.sure && x.kind).length} to check, ${items.filter((x) => !x.kind).length} unrecognised.`);
 
@@ -166,7 +171,7 @@ async function main() {
 <h1>Map ${items.length} scans</h1><p style="color:#555">Everything here runs on this Mac. Fix anything that is wrong, untick what should not go, then Apply. Apply creates the 1Password item with the scan attached, and fills the link and date on the list.</p>
 <form id="f">${[...items].sort((a, b) => Number(a.sure) - Number(b.sure)).map((x) => `
 <div class="card ${x.skip ? "skip" : x.sure ? "" : "check"}" id="c${x.i}">
-  ${/\.pdf$/i.test(x.name) ? `<div class="pdf">PDF<br>${esc(x.name)}</div>` : `<img src="/file/${x.i}?t=${token}" alt="">`}
+  ${/\.pdf$/i.test(x.file) ? `<div class="pdf">PDF<br>${esc(x.name)}</div>` : `<img src="/file/${x.i}?t=${token}" alt="">`}${(x.files?.length ?? 1) > 1 ? `<div style="font-size:11px;color:#777;margin-top:4px">${x.files.length} files, one item</div>` : ""}
   <div>
     <div><label style="display:inline"><input type="checkbox" name="go${x.i}" ${x.skip ? "" : "checked"} style="width:auto"> include</label>
       <span class="tag ${x.sure ? "ok" : "warn"}">${x.sure ? "looks right" : x.kind ? "check this" : "what is this?"}</span>
@@ -191,7 +196,7 @@ for(const o of out){const el=document.getElementById('r'+o.i);el.className='res 
     if (u.searchParams.get("t") !== token) { res.writeHead(403); res.end("no"); return; }
     if (u.pathname === "/") { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(page()); return; }
     const mf = /^\/file\/(\d+)$/.exec(u.pathname);
-    if (mf) { const x = items[+mf[1]]; if (!x) { res.writeHead(404); res.end(); return; } res.writeHead(200, { "content-type": /\.png$/i.test(x.name) ? "image/png" : /\.heic$/i.test(x.name) ? "image/heic" : "image/jpeg" }); res.end(readFileSync(x.file)); return; }
+    if (mf) { const x = items[+mf[1]]; if (!x) { res.writeHead(404); res.end(); return; } res.writeHead(200, { "content-type": /\.png$/i.test(x.file) ? "image/png" : /\.heic$/i.test(x.file) ? "image/heic" : "image/jpeg" }); res.end(readFileSync(x.file)); return; }
     if (u.pathname === "/apply" && req.method === "POST") {
       let body = ""; for await (const c of req) body += c;
       const wanted = JSON.parse(body); const out = [];
@@ -203,6 +208,7 @@ for(const o of out){const el=document.getElementById('r'+o.i);el.className='res 
           const row = targets[0];
           const title = String(w.title || row.label).trim().slice(0, 120);
           const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vaultId, "--file-name", basename(x.file), "--tags", "StewardOS", "--format", "json"]));
+          for (const extraFile of (x.files ?? []).slice(1)) { try { op(["item", "edit", created.id, "--vault", w.vaultId, `Attachments.${basename(extraFile).replace(/[^A-Za-z0-9]+/g, "_")}[file]=${extraFile}`]); } catch (e) { console.log(`  (could not attach ${basename(extraFile)}: ${String(e.message).slice(0, 120)})`); } }
           const link = `https://start.1password.com/open/i?a=${me.account_uuid}&v=${created.vault?.id ?? w.vaultId}&i=${created.id}&h=${host}`;
           const patch = { link, updated_at: new Date().toISOString() };
           if (/^\d{4}-\d{2}-\d{2}$/.test(w.date)) patch.expires_on = w.date;
