@@ -131,20 +131,23 @@ export async function callModelTools({ job, messages, system, tools, maxTokens =
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system: system ?? SCOPE_SYSTEM_PROMPT, messages, tools }),
+    // The system prompt and the ~80 tool definitions are identical on every round and every question, so they are cached:
+    // reads cost a tenth of the normal input price, the first write 1.25x. Same answers, a fraction of the bill.
+    body: JSON.stringify({ model, max_tokens: maxTokens, system: [{ type: "text", text: system ?? SCOPE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }], messages, tools: tools.map((t, i) => (i === tools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t)) }),
   });
   if (!res.ok) {
     const err = await res.text().catch(() => "");
     throw new Error(`Messages API ${res.status}: ${err.slice(0, 200)}`);
   }
-  const data = (await res.json()) as { content: Block[]; usage: { input_tokens: number; output_tokens: number } };
+  const data = (await res.json()) as { content: Block[]; usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
+  const cw = data.usage.cache_creation_input_tokens ?? 0, cr = data.usage.cache_read_input_tokens ?? 0;
   const blocks = data.content ?? [];
   const text = blocks.filter((c) => c.type === "text").map((c) => String(c.text ?? "")).join("");
   const calls: ToolCall[] = blocks.filter((c) => c.type === "tool_use").map((c) => ({ id: String(c.id), name: String(c.name), input: (c.input ?? {}) as Record<string, unknown> }));
   const r: ModelResult = {
     text, model, job,
-    inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
-    cost: estimateCost(model, data.usage.input_tokens, data.usage.output_tokens),
+    inputTokens: data.usage.input_tokens + cw + cr, outputTokens: data.usage.output_tokens,
+    cost: estimateCost(model, data.usage.input_tokens + cw * 1.25 + cr * 0.1, data.usage.output_tokens),
     sample: false, latencyMs: Date.now() - t0,
   };
   await recordUsage(r, feature, {});
