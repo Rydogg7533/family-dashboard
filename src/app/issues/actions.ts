@@ -10,6 +10,7 @@ export type IssueInput = {
   user_agent?: string | null;
   viewport?: string | null;
   screenshots?: string[];
+  previews?: { mime: string; b64: string }[];   // downscaled copies, kept in the row (migration 0089)
 };
 
 function appVersion() {
@@ -37,6 +38,7 @@ export async function reportIssue(input: IssueInput): Promise<{ ok: boolean; id?
     user_agent: input.user_agent?.slice(0, 300) ?? null,
     viewport: input.viewport ?? null,
     screenshots: (input.screenshots ?? []).filter((x) => typeof x === "string" && x.startsWith(`${user.id}/`)).slice(0, 3),
+    previews: (input.previews ?? []).filter((p) => p && p.mime === "image/jpeg" && typeof p.b64 === "string" && p.b64.length < 220000).slice(0, 3),
   }).select("id").single();
   if (error) return { ok: false, error: error.message };
   await sb.from("activity_log").insert({ actor: profile?.display_name ?? "member", action: "issue_reported", subject: text.slice(0, 80), ref: data.id, undoable: false }).then(() => {}, () => {});

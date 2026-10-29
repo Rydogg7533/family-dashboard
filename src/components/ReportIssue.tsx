@@ -41,9 +41,23 @@ export function ReportIssueSheet({ open, onClose, onSent }: { open: boolean; onC
     if (pick.current) pick.current.value = "";
   }
 
+  // A small JPEG copy of each screenshot travels inside the report row, so the maintainer can look at it from the database
+  // (the build session cannot open the storage bucket). Long edge 1000 px, quality 0.72: about 60–150 KB each.
+  async function preview(file: File): Promise<{ mime: string; b64: string } | null> {
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+      const url = c.toDataURL("image/jpeg", 0.72);
+      const b64 = url.slice(url.indexOf(",") + 1);
+      return b64.length < 220000 ? { mime: "image/jpeg", b64 } : { mime: "image/jpeg", b64: c.toDataURL("image/jpeg", 0.5).split(",")[1] };
+    } catch { return null; }
+  }
   async function send() {
     setBusy(true); setErr(null);
     const paths: string[] = [];
+    const previews = (await Promise.all(shots.map((s) => preview(s.file)))).filter((p): p is { mime: string; b64: string } => !!p);
     if (shots.length) {
       try {
         const sb = createBrowserSb();
@@ -57,7 +71,7 @@ export function ReportIssueSheet({ open, onClose, onSent }: { open: boolean; onC
       } catch (e) { setBusy(false); setErr(`A screenshot did not upload (${e instanceof Error ? e.message : "unknown error"}). Nothing was sent; try again or remove it.`); return; }
     }
     const r = await reportIssue({
-      screenshots: paths,
+      screenshots: paths, previews,
       text, severity: sev, page: path, item_kind: item.kind, item_id: item.id,
       user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
       viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : null,
