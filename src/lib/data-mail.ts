@@ -82,3 +82,46 @@ export async function getMailMessage(id: string): Promise<MailFull | null> {
     return { id: r.id, account: a?.address ?? "", folder: r.folder, from_name: r.from_name, from_addr: r.from_addr, to_addrs: r.to_addrs ?? [], cc_addrs: r.cc_addrs ?? [], subject: r.subject, snippet: r.snippet, body_text: r.body_text, sent_at: r.sent_at, unread: r.unread, has_files: (r.attachments ?? []).length > 0, attachments: r.attachments ?? [], web_url: r.web_url, rfc_message_id: r.rfc_message_id };
   } catch { return null; }
 }
+
+// Newsletters (decisions 2026-10-28 D14–D19): inbox messages whose sender is on the person's mailing lists
+// (email_subscriptions), grouped by sender. Senders archived in the dashboard are left out here; the Inbox tab and
+// Gmail are untouched. Reads the same copied rows as the Inbox; nothing else is fetched or stored.
+export type NewsletterSender = {
+  sub_id: string; name: string; address: string; status: string; archived: boolean; category: string | null;
+  count: number; unread: number; latest: MailRow | null;
+};
+export async function getNewsletters(): Promise<{ senders: NewsletterSender[]; rows: MailRow[] }> {
+  if (!hasSupabaseEnv()) {
+    const rows = (await getMail("inbox")).filter((r) => r.from_addr === "no-reply@orem.gov");
+    return { senders: [{ sub_id: "00000000-0000-4000-8000-000000000001", name: "Orem Library", address: "no-reply@orem.gov", status: "active", archived: false, category: "news", count: rows.length, unread: rows.filter((r) => r.unread).length, latest: rows[0] ?? null }], rows };
+  }
+  try {
+    const sb = await createClient();
+    const { data: subs } = await sb.from("email_subscriptions").select("id,sender_name,address,status,archived_at,category").is("deleted_at", null).not("address", "is", null);
+    const byAddr = new Map((subs ?? []).map((s) => [String(s.address).toLowerCase(), s]));
+    if (!byAddr.size) return { senders: [], rows: [] };
+    const all = await getMail("inbox");
+    const rows = all.filter((r) => r.from_addr && byAddr.has(r.from_addr.toLowerCase()));
+    const groups = new Map<string, NewsletterSender>();
+    for (const r of rows) {
+      const s = byAddr.get(r.from_addr!.toLowerCase())!;
+      const g = groups.get(s.id) ?? { sub_id: s.id, name: s.sender_name || r.from_name || s.address, address: s.address, status: s.status, archived: !!s.archived_at, category: s.category, count: 0, unread: 0, latest: null };
+      g.count++; if (r.unread) g.unread++; if (!g.latest) g.latest = r;
+      groups.set(s.id, g);
+    }
+    const senders = [...groups.values()].sort((a, b) => (b.latest?.sent_at ?? "").localeCompare(a.latest?.sent_at ?? ""));
+    return { senders, rows };
+  } catch { return { senders: [], rows: [] }; }
+}
+
+// For the open-message view: is this sender one of the person's mailing lists? Returns the subscription row the
+// Archive / Unsubscribe buttons act on (D19), or null for ordinary mail.
+export async function getSubscriptionForAddress(addr: string | null): Promise<{ id: string; name: string; status: string; archived: boolean; auth_ok: boolean | null; trusted: boolean } | null> {
+  if (!addr) return null;
+  if (!hasSupabaseEnv()) return addr === "no-reply@orem.gov" ? { id: "00000000-0000-4000-8000-000000000001", name: "Orem Library", status: "active", archived: false, auth_ok: true, trusted: false } : null;
+  try {
+    const sb = await createClient();
+    const { data } = await sb.from("email_subscriptions").select("id,sender_name,address,status,archived_at,auth_ok,trusted_at").is("deleted_at", null).ilike("address", addr).limit(1).maybeSingle();
+    return data ? { id: data.id, name: data.sender_name || data.address, status: data.status, archived: !!data.archived_at, auth_ok: data.auth_ok, trusted: !!data.trusted_at } : null;
+  } catch { return null; }
+}

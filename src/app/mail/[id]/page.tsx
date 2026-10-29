@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMailMessage } from "@/lib/data-mail";
+import { getMailMessage, getSubscriptionForAddress } from "@/lib/data-mail";
+import { getUnsubscribeAgentReady } from "@/lib/data-email-subs";
+import { NewsletterActions } from "@/components/NewsletterActions";
 
 export const dynamic = "force-dynamic";
 const who = (p: { name: string; addr: string }) => (p.name ? `${p.name} <${p.addr}>` : p.addr);
@@ -10,10 +12,11 @@ export default async function MailMessage({ params }: PageProps<"/mail/[id]">) {
   const { id } = await params;
   const m = await getMailMessage(id);
   if (!m) notFound();
-  const back = m.folder === "draft" ? "/mail?box=drafts" : "/mail";
+  const [sub, ready] = await Promise.all([m.folder === "inbox" ? getSubscriptionForAddress(m.from_addr) : Promise.resolve(null), getUnsubscribeAgentReady()]);
+  const back = m.folder === "draft" ? "/mail?box=drafts" : sub ? `/mail?box=newsletters&from=${encodeURIComponent(m.from_addr ?? "")}` : "/mail";
   return (
     <>
-      <Link href={back} className="text-xs font-semibold text-accent">‹ {m.folder === "draft" ? "Drafts" : "Inbox"}</Link>
+      <Link href={back} className="text-xs font-semibold text-accent">‹ {m.folder === "draft" ? "Drafts" : sub ? "Newsletter" : "Inbox"}</Link>
       <h1 className="text-xl font-bold mt-2 break-words">{m.subject || "(no subject)"}</h1>
       <div className="text-sm mt-2 flex flex-col gap-0.5 break-words">
         <div><span className="text-muted">From </span>{m.from_addr ? who({ name: m.from_name ?? "", addr: m.from_addr }) : "Unknown"}</div>
@@ -21,7 +24,7 @@ export default async function MailMessage({ params }: PageProps<"/mail/[id]">) {
         {m.cc_addrs.length > 0 && <div><span className="text-muted">Cc </span>{m.cc_addrs.map(who).join(", ")}</div>}
         <div className="text-xs text-muted">{m.sent_at ? new Date(m.sent_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : ""} · {m.account}</div>
       </div>
-      <div className="border-t border-line my-3" />
+      {sub ? <NewsletterActions sub={sub} ready={ready} /> : <div className="border-t border-line my-3" />}
       <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{m.body_text?.trim() || m.snippet || "(no text)"}</div>
       {m.attachments.length > 0 && (
         <div className="mt-4 text-sm"><div className="text-xs font-bold text-muted uppercase tracking-wide mb-1">Attachments</div>
