@@ -188,7 +188,10 @@ async function suggestFor(fresh, msgRows) {
 // ---- media: Messages keeps attachments under ~/Library/Messages/Attachments; chat.db holds the path. Each one is copied
 // once (keyed by message guid + index) into message-media/<person>/<guid>/<n>.<ext>. Images are resized to 1600 px JPEG
 // (HEIC does not show in most browsers); video and GIF go as they are, up to MEDIA_MAX bytes. ----
-const MEDIA_MAX = 50 * 1024 * 1024;
+// Storage budget: the free Supabase tier holds 1 GB and 30 days of family video blew past it on the first pass
+// (2026-10-29: 688 MB, 566 of it video). Defaults keep a household well under; raise both in the env file on Pro.
+const MEDIA_MAX = parseInt(env.MIRROR_MEDIA_MAX_MB || "15", 10) * 1024 * 1024;
+const MEDIA_DAYS = parseInt(env.MIRROR_MEDIA_DAYS || "14", 10);
 const MEDIA_DIR = join(TMP, "media"); mkdirSync(MEDIA_DIR, { recursive: true, mode: 0o700 });
 const copied = new Set(); // "<guid>/<n>" already in the bucket this run (and re-checked on restart via the message row)
 function mediaKind(mime, name) {
@@ -213,7 +216,11 @@ async function putMedia(guid, n, att) {
     body = readFileSync(out); rmSync(out, { force: true }); mime = "image/jpeg"; ext = "jpg";
   } else { body = readFileSync(src); ext = kind === "gif" ? "gif" : (src.toLowerCase().split(".").pop() || "mov"); if (!mime) mime = kind === "gif" ? "image/gif" : "video/quicktime"; }
   const path = `${PERSON}/${encodeURIComponent(guid)}/${n}.${ext}`;
-  const u = await fetch(`${URL_}/storage/v1/object/message-media/${path}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": mime, "x-upsert": "true" }, body });
+  let u;
+  for (let i = 0; ; i++) { // a large upload can drop mid-transfer ("fetch failed"); three tries, then the line says "open in Messages"
+    try { u = await fetch(`${URL_}/storage/v1/object/message-media/${path}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": mime, "x-upsert": "true" }, body }); break; }
+    catch (e) { if (i >= 2) throw e; await new Promise((ok) => setTimeout(ok, 2000 * (i + 1))); }
+  }
   if (!u.ok) throw new Error(`media upload → ${u.status} ${(await u.text()).slice(0, 160)}`);
   let w = null, h = null;
   if (kind === "photo") { const d = spawnSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", src], { encoding: "utf8" }).stdout || ""; const mw = d.match(/pixelWidth: (\d+)/), mh = d.match(/pixelHeight: (\d+)/); if (mw && mh) { const s = Math.min(1, 1600 / Math.max(+mw[1], +mh[1])); w = Math.round(+mw[1] * s); h = Math.round(+mh[1] * s); } }
@@ -302,7 +309,7 @@ async function main() {
       if (attachment && !DRY) {
         const known = mediaKnown.get(m.guid);
         if (known?.path || known?.skipped) attachment = known;
-        else if (m.files) {
+        else if (m.files && Date.parse(toIso(m.date)) > Date.now() - MEDIA_DAYS * 86400e3) {
           const first = m.files.split("\n")[0]; const mimes = (m.mimes || "").split(",");
           try { const media = await putMedia(m.guid, 0, { filename: first, mime_type: mimes[0] }); if (media) { attachment = media; mediaKnown.set(m.guid, media); mediaCount++; } }
           catch (e) { console.error(`${now()} media ${m.guid}: ${String(e.message).slice(0, 120)}`); }
@@ -342,7 +349,14 @@ async function main() {
   for (const tid of staleThreads) await pruneMedia(await rest("GET", `messages?person=eq.${PERSON}&thread_id=eq.${encodeURIComponent(tid)}&attachment->>path=not.is.null&select=id,attachment`).catch(() => []));
   await rest("DELETE", `messages_threads?person=eq.${PERSON}&updated_at=lt.${encodeURIComponent(passStart)}`, undefined, { Prefer: "return=minimal" });
   const cutoff = new Date(Date.now() - DAYS * 86400e3).toISOString();
-  await pruneMedia(await rest("GET", `messages?person=eq.${PERSON}&attachment->>path=not.is.null&at=lt.${cutoff}&select=id,attachment`).catch(() => []));
+  const mediaCutoff = new Date(Date.now() - MEDIA_DAYS * 86400e3).toISOString();
+  // copies past the media window, or bigger than the current cap, leave the bucket; the line keeps its text and says "open in Messages"
+  const expired = await rest("GET", `messages?person=eq.${PERSON}&attachment->>path=not.is.null&or=(at.lt.${mediaCutoff},attachment->>bytes.gt.${MEDIA_MAX})&select=id,attachment`).catch(() => []);
+  if (expired.length) {
+    await pruneMedia(expired);
+    for (const r of expired) await rest("PATCH", `messages?id=eq.${encodeURIComponent(r.id)}`, { attachment: { kind: r.attachment.kind, label: r.attachment.kind, skipped: "window" } }, { Prefer: "return=minimal" }).catch(() => {});
+    console.log(`${now()} ${expired.length} media copies released`);
+  }
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
 
   // judge the new lines (after the upserts, so a chip always points at a line the app can show)
