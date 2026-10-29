@@ -87,11 +87,15 @@ export default async function Health() {
       ) : (
         <>
           {issues.filter((i) => i.status !== "fixed").length === 0 && <Card className="text-sm text-muted">No open reports.</Card>}
-          <div className="flex flex-col gap-2">
-            {issues.filter((i) => i.status !== "fixed").map(renderIssue)}
-          </div>
+          {issues.some((i) => i.status !== "fixed") && (
+            <Fold id="issues-open" title="Open" tone={issues.some((i) => i.status === "needs_info" || i.severity === "blocks") ? "red" : "amber"} defaultOpen summary={`${issues.filter((i) => i.status !== "fixed").length}`}>
+              <div className="flex flex-col gap-2">
+                {issues.filter((i) => i.status !== "fixed").map(renderIssue)}
+              </div>
+            </Fold>
+          )}
           {issues.some((i) => i.status === "fixed") && (
-            <Fold id="issues-fixed" title="Fixed" summary={`${issues.filter((i) => i.status === "fixed").length}`}>
+            <Fold id="issues-fixed" title="Fixed" tone="green" summary={`${issues.filter((i) => i.status === "fixed").length} fixed`}>
               <div className="flex flex-col gap-2">
                 {issues.filter((i) => i.status === "fixed").map(renderIssue)}
               </div>
