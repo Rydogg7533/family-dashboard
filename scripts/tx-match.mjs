@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-// Missing-receipt matcher. Run by hand on the Mac mini (a scheduled run comes later). No model, no dependencies: Node 20+.
+// Missing-receipt matcher. Runs hourly on the Mac mini under launchd (scripts/com.ryan.tx-match.plist, --apply) and by hand for
+// a dry run. No model, no dependencies: Node 20+.
+// Why hourly (Ryan, 2026-10-29): a receipt gets its card from the charge it is linked to, and the filing agent only copies a receipt
+// once the card is firm. Run by hand, that link never happened -- 69 of 70 receipts sat "expecting a charge" and 67 never reached
+// the disk. The link is what places a receipt in its card-and-month folder; nothing downstream works without it.
 //
 //   node scripts/tx-match.mjs                        # DRY RUN (default): counts and a per-month table, writes nothing
 //   node scripts/tx-match.mjs --apply                # writes the links and notes, then verifies in the database
@@ -151,7 +155,15 @@ async function main() {
   console.log(`\nWRITTEN: ${linked} linked (${skippedLink} skipped because the receipt or charge was already linked), ${noted} notes added or updated, ${cleared} of our notes cleared.`);
   console.log(`CARDS: ${carded} receipts got their card from the charge (${cardSkipped} skipped: the charge's account has no name or last four).`);
   console.log(`VERIFIED in the database: ${tx2.length} charges linked to receipts, ${rc2.length} receipts linked to charges; ${bad} one-sided or inconsistent links; ${dupLinks} receipts claimed by more than one charge.`);
+  const summary = `Matcher: ${linked} linked, ${carded} cards set, ${noted} notes; ${need.length - matches.length} charges still without a receipt; ${tx2.length} linked in all`;
+  await status(bad || dupLinks ? "error" : "ok", bad || dupLinks ? `${summary}; ${bad} inconsistent links, ${dupLinks} double-claimed` : summary);
   if (bad || dupLinks) { console.log("NOT VERIFIED. Paste this output back to Claude."); process.exit(1); }
   console.log("All verified. Nothing was deleted.");
 }
-main().catch((e) => { console.error(`FAILED: ${e.message}`); process.exit(1); });
+
+// One row in system_status, so System health shows when the matcher last ran and what it did (same shape as the filing agent).
+async function status(state, summary) {
+  if (!APPLY) return;
+  await rest("POST", "system_status?on_conflict=key", [{ key: "sync_match", state, summary: summary.slice(0, 300), value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});
+}
+main().catch(async (e) => { console.error(`FAILED: ${e.message}`); await status("error", `Matcher failed: ${e.message}`); process.exit(1); });
