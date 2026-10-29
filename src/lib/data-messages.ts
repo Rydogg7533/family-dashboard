@@ -105,3 +105,12 @@ export async function getSuggestions(threadId: string): Promise<Suggestion[]> {
   const { data } = await sb.from("message_suggestions").select("id,message_id,kind,title,payload,reason").eq("thread_id", threadId).eq("status", "shown").order("created_at", { ascending: false }).limit(50);
   return (data ?? []).filter((r) => r.kind !== "none" && r.title) as Suggestion[];
 }
+
+export async function getPinned(): Promise<string[]> {
+  if (!hasSupabaseEnv()) return ["family"];
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return [];
+  const { data } = await sb.from("profiles").select("pinned_threads").eq("id", user.id).maybeSingle();
+  return (data?.pinned_threads as string[] | null) ?? [];
+}

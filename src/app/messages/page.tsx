@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getThreads, getConfirmations, clock } from "@/lib/data-messages";
+import { getThreads, getConfirmations, getPinned, clock } from "@/lib/data-messages";
 import { getSyncStatus } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
 import { ThreadAvatar } from "@/components/c/Avatar";
@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 // F16: a window on the person's own Messages threads (family only, last 30 days), mirrored by their own Mac.
 // F17: the Assistant thread, with Y/N confirmations that can be answered here or by text.
 export default async function Messages() {
-  const [threads, confirmations, sync, viewer, people] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"]), getViewer(), getPeople()]);
+  const [threads, confirmations, sync, viewer, people, pinnedIds] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"]), getViewer(), getPeople(), getPinned()]);
+  const pinned = pinnedIds.map((id) => threads.find((t) => t.id === id)).filter((t): t is NonNullable<typeof t> => !!t);
+  const rest = threads.filter((t) => !pinnedIds.includes(t.id));
+  const othersOf = (t: (typeof threads)[number]) => t.kind === "assistant" ? ["Assistant"] : t.members.filter((m) => m !== viewer.name);
   const otherParent = people.find((p) => p.role === "parent" && p.id !== viewer.id)?.name ?? null;
   const waiting = confirmations.filter((c) => c.status === "waiting");
   const mirror = sync[0];
@@ -34,10 +37,26 @@ export default async function Messages() {
           <div className="text-muted text-xs">Your family threads appear here once the Messages mirror runs on the Mac mini. Typing here then sends through Messages as you, so it shows on your phone and everyone else&apos;s like any other text. Until then, use the Messages app.</div>
         </Card>
       )}
+      {/* Pinned, like the Messages app: big avatars in a row, name under, unread count on the disc. */}
+      {pinned.length > 0 && (
+        <ul className="flex flex-wrap gap-x-3 gap-y-4 mb-5 px-1">
+          {pinned.map((t) => (
+            <li key={t.id} className="w-[76px]">
+              <Link href={`/messages/${t.id}`} className="flex flex-col items-center gap-1.5">
+                <span className="relative">
+                  <ThreadAvatar members={othersOf(t)} photos={t.avatars} size={64} />
+                  {t.unread > 0 && <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 rounded-full bg-accent text-white text-[11px] leading-5 text-center font-bold ring-2 ring-bg">{t.unread}</span>}
+                </span>
+                <span className={`text-[12px] leading-tight text-center line-clamp-2 ${t.unread > 0 ? "font-bold" : "font-semibold text-fg/90"}`}>{t.name}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
       {/* Like the Messages app: a plain list, avatar left, bold name and grey preview, time right, hairline between rows. */}
       <ul className="mb-4 -mx-1">
-        {threads.map((t) => {
-          const others = t.kind === "assistant" ? ["Assistant"] : t.members.filter((m) => m !== viewer.name);
+        {rest.map((t) => {
+          const others = othersOf(t);
           return (
             <li key={t.id}>
               <Link href={`/messages/${t.id}`} className="flex items-center gap-3 px-1 py-2.5 min-h-[68px] border-b border-line/60 hover:bg-soft/60 active:bg-soft">

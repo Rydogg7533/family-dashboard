@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMessages, getThread, getSuggestions, clock } from "@/lib/data-messages";
+import { getMessages, getThread, getSuggestions, getPinned, clock } from "@/lib/data-messages";
+import { PinButton } from "@/components/c/PinButton";
 import { getSyncStatus } from "@/lib/data-day";
 import { ThreadView } from "@/components/c/MessagesView";
 import { SeenMarker } from "@/components/c/SeenMarker";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ThreadPage({ params }: PageProps<"/messages/[thread]">) {
   const { thread: id } = await params;
-  const [thread, messages, sync, suggestions, viewer] = await Promise.all([getThread(id), getMessages(id), getSyncStatus(["messages"]), getSuggestions(id), getViewer()]);
+  const [thread, messages, sync, suggestions, viewer, pinnedIds] = await Promise.all([getThread(id), getMessages(id), getSyncStatus(["messages"]), getSuggestions(id), getViewer(), getPinned()]);
   if (!thread) notFound();
   const mirror = sync[0];
   return (
@@ -23,7 +24,10 @@ export default async function ThreadPage({ params }: PageProps<"/messages/[threa
           <ThreadAvatar members={thread.kind === "assistant" ? ["Assistant"] : thread.members.filter((m) => m !== viewer.name)} photos={thread.avatars} size={40} />
           <h1 className="text-sm font-bold truncate max-w-[60vw] mt-1">{thread.name}</h1>
         </div>
-        <span className={`text-[11px] font-semibold shrink-0 min-w-9 text-right ${mirror?.state === "ok" ? "text-green" : "text-amber"}`}>{mirror?.state === "ok" ? "● live" : "● paused"}</span>
+        <span className="flex items-center gap-1 shrink-0">
+          <span className={`text-[11px] font-semibold ${mirror?.state === "ok" ? "text-green" : "text-amber"}`}>{mirror?.state === "ok" ? "● live" : "● paused"}</span>
+          <PinButton threadId={id} pinned={pinnedIds.includes(id)} />
+        </span>
       </div>
       <ThreadView thread={thread} messages={messages} mirrorOk={mirror?.state === "ok"} suggestions={suggestions} />
       <SeenMarker threadId={id} />

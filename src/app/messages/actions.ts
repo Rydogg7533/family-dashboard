@@ -65,3 +65,18 @@ export async function ignoreSuggestion(id: string) {
   const { error } = await sb.rpc("suggestion_outcome", { sid: id, outcome: "ignored" });
   return error ? { ok: false, error: error.message } : { ok: true };
 }
+
+// Pin or unpin a conversation for the signed-in person (profiles.pinned_threads, in pin order).
+export async function togglePin(threadId: string) {
+  if (!hasSupabaseEnv()) return { ok: true, pinned: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { data: prof } = await sb.from("profiles").select("pinned_threads").eq("id", user.id).maybeSingle();
+  const cur = (prof?.pinned_threads as string[] | null) ?? [];
+  const next = cur.includes(threadId) ? cur.filter((x) => x !== threadId) : [...cur, threadId].slice(-6); // six is where the row stops fitting
+  const { error } = await sb.from("profiles").update({ pinned_threads: next }).eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/messages"); revalidatePath(`/messages/${threadId}`);
+  return { ok: true, pinned: next.includes(threadId) };
+}
