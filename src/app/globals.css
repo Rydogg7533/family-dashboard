@@ -53,7 +53,11 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
 /* The Ask sheet sits on --soft, so a card there had no edge (issue a3602864, 2026-10-28): a "filled" card is --soft too,
    and --line against --soft is barely a step. Inside the sheet a card keeps the page background, a border mixed toward
    --muted so the edge is actually visible in both themes, and a soft drop shadow to lift it off the sheet. */
-.ask-sheet .card { background: var(--bg); border: 1px solid color-mix(in srgb, var(--line) 55%, var(--muted) 45%); box-shadow: 0 1px 4px rgb(0 0 0 / 0.18); }
+/* The Ask sheet uses the page background, not --soft (issue 23bed958, 2026-10-28). On --soft a "filled" card -- the
+   default style -- was the sheet's own colour, and no .ask-sheet rule could fix it: the card-style rules are
+   :root[data-card-style="..."] .card and outrank a descendant rule. On --bg every card style reads here exactly as it
+   does on the Ask tab, which is the arrangement that already worked. The sheet still reads as a sheet: accent top
+   border, rounded top, deep shadow, dimmed backdrop. */
 /* The picture or placeholder panel inside a card. Never --soft: on the Ask sheet that is the sheet's own colour, so the
    top half of a delivery card melted into the background. One step off the card, with a divider under it. */
 .card-media { background: color-mix(in srgb, var(--fg) 7%, var(--bg)); border-bottom: 1px solid var(--line); }
