@@ -102,16 +102,22 @@ async function* moneyMail() {
     const ids = []; let page = "";
     do { const r = await api(`/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=500${page ? `&pageToken=${page}` : ""}`); for (const m of r.messages || []) ids.push(m.id); page = r.nextPageToken || ""; } while (page);
     console.log(`${ids.length} messages (everything but spam, trash, sent and drafts), ${WIN_TXT}`);
+    // Several messages in flight at once (Ryan, 2026-10-29: one at a time was ~115 a minute, three and a half hours for
+    // Melissa's mailbox, and the apply run would have cost the same again). Gmail allows far more than this; the helper
+    // already backs off on 429. Order is kept, so the output reads the same as before.
+    const WORKERS = 6;
     let n = 0;
-    for (const id of ids) {
+    for (let i = 0; i < ids.length; i += WORKERS) {
+      const batch = await Promise.all(ids.slice(i, i + WORKERS).map((id) => api(`/gmail/v1/users/me/messages/${id}?format=full`).then((full) => ({ id, full }))));
+      for (const { id, full } of batch) {
       if (++n % 200 === 0) process.stdout.write(`\r  checked ${n}/${ids.length}`);
-      const full = await api(`/gmail/v1/users/me/messages/${id}?format=full`);
       const e = parse(full); const d = decide(e); if (d.action !== "money") continue;
       const files = [];
       const walk = (p) => { if (!p) return; if (p.filename && p.body?.attachmentId && READABLE[(p.mimeType || "").toLowerCase()]) files.push({ name: p.filename, mime: p.mimeType.toLowerCase(), size: p.body.size || 0, get: async () => Buffer.from((await api(`/gmail/v1/users/me/messages/${id}/attachments/${p.body.attachmentId}`)).data, "base64url") }); for (const c of p.parts || []) walk(c); };
       walk(full.payload);
       const body = gmailBody(full.payload);
       yield { body, ref: `gmail:${account}:${id}`, link: `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${id}`, date: e.date, subject: e.subject, snippet: e.snippet, name: e.name, address: e.address, domain: e.domain, files };
+      }
     }
     process.stdout.write("\n");
   } else {

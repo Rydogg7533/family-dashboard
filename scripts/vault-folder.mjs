@@ -408,7 +408,10 @@ async function serveLoop() {
         const asked = String(run.folder ?? "").trim();
         FOLDER = !asked || asked === DEFAULT_FOLDER || asked === "default" ? IMPORT_DIR : resolve(asked.replace(/^~/, HOME));
         process.env.STEWARD_RUN_ID = run.id;
-        await sb(`vault_imports?id=eq.${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "scanning", picked_at: new Date().toISOString() }) });
+        // Claim it only if it is still 'requested': when a Terminal window and the launchd job are both running, one of
+        // them gets the run and the other sees an empty answer and goes back to waiting.
+        const claimed = await sb(`vault_imports?id=eq.${run.id}&status=eq.requested`, { method: "PATCH", body: JSON.stringify({ status: "scanning", picked_at: new Date().toISOString() }) });
+        if (!Array.isArray(claimed) || !claimed.length) { await new Promise((r) => setTimeout(r, 4000)); continue; }
         console.log(`\nReading ${FOLDER} for the app…`);
         try { await main(); }
         catch (e) {
