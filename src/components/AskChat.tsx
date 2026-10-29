@@ -276,7 +276,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
       )}
       {!embedded && <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>}
 
-      <div className={embedded ? "flex flex-col gap-2 overflow-y-auto overscroll-contain min-h-0 flex-1 pr-1" : "flex-1 flex flex-col gap-2"}>
+      <div className={embedded ? "flex flex-col gap-5 overflow-y-auto overscroll-contain min-h-0 flex-1 pr-1" : "flex-1 flex flex-col gap-5"}>
         <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link>{embedded ? "" : " · the last 24 hours are here; everything is kept in history"}</div>
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Ask or tell me anything about the family&apos;s records: schedules, documents, money, people, vehicles, home, your own health. For example: {SUGGESTED.map((x) => `“${x}”`).join(", ")}.</div>
@@ -285,7 +285,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
             request never looks like a button next to the card that answers it. */}
         {bubbles.map((b, i) => b.role === "user" ? (
           <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
-            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-soft text-fg border border-line"}`}>{b.text}</button>
+            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-[22px] rounded-br-lg px-[18px] py-3 text-[17px] leading-[1.45] whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-soft text-fg border border-line"}`}>{b.text}</button>
             {b.files?.length ? <div className="text-[11px] text-muted px-1">📎 {b.files.map((f) => f.name).join(", ")}</div> : null}
             {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
             {b.stopped && editing !== i && <div className="text-[11px] text-muted px-1">Stopped · <button type="button" onClick={() => retry(i)} className="font-semibold text-accent">retry</button> · <button type="button" onClick={() => edit(i)} className="font-semibold text-accent">edit</button></div>}
@@ -375,7 +375,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
           <textarea ref={box} rows={1} value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
             placeholder={editing != null ? "Edit, then send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"}
-            aria-label="Ask" className="w-full resize-none bg-transparent px-1 py-1 text-base leading-snug outline-none max-h-40" />
+            aria-label="Ask" className="w-full resize-none bg-transparent px-1 py-1 text-[17px] leading-[1.45] outline-none max-h-40" />
           <div className="flex items-center gap-2">
             <input ref={picker} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void attach(e.target.files)} />
             <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file" title="Take a photo, or pick one from your photos or files" className="min-h-11 min-w-11 rounded-full bg-soft text-fg flex items-center justify-center disabled:opacity-40">
@@ -431,7 +431,7 @@ function AnswerText({ text, muted }: { text: string; muted?: boolean }) {
   const [open, setOpen] = useState(false);
   const { head, more } = splitAnswer(text);
   return (
-    <div className={`px-1 py-1 text-[15px] leading-snug whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${muted ? "text-muted" : ""}`}>
+    <div className={`px-1 py-1 text-[17px] leading-[1.5] whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${muted ? "text-muted" : ""}`}>
       {open ? `${head} ${more ?? ""}`.trim() : head}
       {more && <button type="button" onClick={() => setOpen((v) => !v)} className="block mt-1 text-xs font-semibold text-accent">{open ? "Less" : "More"}</button>}
     </div>
