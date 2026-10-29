@@ -72,7 +72,20 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   }
 
   useEffect(() => { if (prefill && !sent.current) { sent.current = true; void send(prefill); } }, [prefill]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [bubbles, busy]);
+  // Keep the newest bubble in view (Ryan, 2026-10-28: after a delivery the feed sat scrolled up). One scrollIntoView is not
+  // enough on a phone: the reply can grow after it lands (result line, link, card) and the keyboard closing resizes the
+  // viewport a moment later. So scroll now, again over the next ~1.5 s, and whenever the visual viewport changes size
+  // shortly after a change. The person scrolling up on purpose is not fought: the retries stop once their window ends.
+  useEffect(() => {
+    const toEnd = () => endRef.current?.scrollIntoView({ block: "end" });
+    toEnd();
+    const timers = [0, 120, 400, 900, 1500].map((ms) => setTimeout(() => requestAnimationFrame(toEnd), ms));
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const until = Date.now() + 3000;
+    const onResize = () => { if (Date.now() < until) toEnd(); };
+    vv?.addEventListener("resize", onResize);
+    return () => { timers.forEach(clearTimeout); vv?.removeEventListener("resize", onResize); };
+  }, [bubbles, busy]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
 
   // One tap files the miss with its trace; the maintainer reads the issue, fixes it, and the question joins the set.
