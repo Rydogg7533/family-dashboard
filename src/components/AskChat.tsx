@@ -31,8 +31,9 @@ async function shrink(file: File): Promise<Blob | null> {
 }
 
 // embedded: the same Ask, inside the sheet the + button opens on any page (one thread, two places to open it).
-// source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting.
-export function AskChat({ prefill, sample, who, embedded, source, onPending }: { prefill: string; sample: boolean; who: string; embedded?: boolean; source?: string; onPending?: (pending: boolean) => void }) {
+// source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting; onControls
+// hands the sheet the "New chat" action so it can sit in the sheet's own header row instead of a second row below it.
+export function AskChat({ prefill, sample, who, embedded, source, onPending, onControls }: { prefill: string; sample: boolean; who: string; embedded?: boolean; source?: string; onPending?: (pending: boolean) => void; onControls?: (c: { hasMessages: boolean; newChat: () => void }) => void }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState(prefill);
   const [busy, setBusy] = useState(false);
@@ -246,20 +247,30 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
   // D5 (2026-10-27): no chips. The thread is a conversation; the person answers in words.
   const pending = !!last && last.role === "assistant" && ((last.reply?.kind === "tool_confirm" && !last.toolResult) || ((last.reply?.kind === "event_confirm" || last.reply?.kind === "event_move") && !last.eventResult) || (last.reply?.kind === "instruction" && !!last.reply.confirm && !last.confirmed));
   useEffect(() => { onPending?.(pending); }, [pending, onPending]);
+  // The sheet draws its own header, so it needs the New chat action; newChat is read through a ref so the identity the
+  // parent holds never changes and this does not fire on every render.
+  const newChatRef = useRef(newChat); newChatRef.current = newChat;
+  const callNewChat = useRef(() => newChatRef.current()).current;
+  const hasMessages = bubbles.length > 0;
+  useEffect(() => { onControls?.({ hasMessages, newChat: callNewChat }); }, [hasMessages, callNewChat, onControls]);
 
   return (
     <div className={embedded ? "flex flex-col min-h-0 flex-1" : "flex flex-col min-h-[calc(100vh-140px)]"}>
-      <div className="flex items-center justify-end mb-1">
-        <h1 className="sr-only">Ask</h1>
-        <div className="flex items-center gap-3">
-          {sample && <div className="text-xs text-muted">sample mode · no API key</div>}
-          {bubbles.length > 0 && <button type="button" onClick={newChat} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">New chat</button>}
+      {embedded ? (
+        sample ? <div className="text-xs text-muted text-right mb-1">sample mode · no API key</div> : null
+      ) : (
+        <div className="flex items-center justify-end mb-1">
+          <h1 className="sr-only">Ask</h1>
+          <div className="flex items-center gap-3">
+            {sample && <div className="text-xs text-muted">sample mode · no API key</div>}
+            {hasMessages && <button type="button" onClick={newChat} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">New chat</button>}
+          </div>
         </div>
-      </div>
+      )}
       {!embedded && <p className="text-xs text-muted mb-3">Questions and instructions about the family&apos;s records, in plain words. For things (photos, files) use the + button.</p>}
 
       <div className={embedded ? "flex flex-col gap-2 overflow-y-auto overscroll-contain min-h-0 flex-1 pr-1" : "flex-1 flex flex-col gap-2"}>
-        <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link> · the last 24 hours are here; everything is kept in history</div>
+        <div className="text-[11px] text-muted px-1 -mb-1"><Link href="/ask/history" className="font-semibold text-accent">Earlier…</Link>{embedded ? "" : " · the last 24 hours are here; everything is kept in history"}</div>
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Ask or tell me anything about the family&apos;s records: schedules, documents, money, people, vehicles, home, your own health. For example: {SUGGESTED.map((x) => `“${x}”`).join(", ")}.</div>
         )}

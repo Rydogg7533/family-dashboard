@@ -18,6 +18,9 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
   const onTouchMove = (e: ReactTouchEvent) => setDrag((d) => (d ? { ...d, dy: Math.max(0, e.touches[0].clientY - d.start) } : d));
   const onTouchEnd = () => { const dy = drag?.dy ?? 0; setDrag(null); if (dy > 80) tryClose(); };
   const onPending = useCallback((p: boolean) => setPending(p), []);
+  // One header row (Ryan, 2026-10-28): the sheet's own row carries New chat, so the thread does not add a second row.
+  const [controls, setControls] = useState<{ hasMessages: boolean; newChat: () => void } | null>(null);
+  const onControls = useCallback((c: { hasMessages: boolean; newChat: () => void }) => setControls(c), []);
   const tryClose = useCallback(() => { if (pending) setConfirmClose(true); else onClose(); }, [pending, onClose]);
   useEffect(() => {
     if (!open) return;
@@ -58,9 +61,13 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
         <div className="flex items-center justify-between touch-none" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-line" />
           <div className="font-semibold text-sm text-accent flex items-center gap-2"><span aria-hidden="true" className="w-2 h-2 rounded-full bg-accent" />Ask</div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {controls?.hasMessages && (
+              <button type="button" onClick={controls.newChat} aria-label="New chat" title="New chat" className="min-h-9 min-w-9 grid place-items-center rounded-full text-muted">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+              </button>
+            )}
             <button type="button" onClick={tryClose} className="min-h-9 px-3 rounded-full bg-soft text-xs font-semibold">Done</button>
-            <button type="button" aria-label="Close" onClick={tryClose} className="min-h-9 min-w-9 grid place-items-center rounded-full bg-soft text-base leading-none">×</button>
           </div>
         </div>
         {confirmClose ? (
@@ -72,7 +79,7 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
             </div>
           </div>
         ) : (
-          <AskChat prefill="" sample={sample} who={who} embedded source={`page:${path}`} onPending={onPending} />
+          <AskChat prefill="" sample={sample} who={who} embedded source={`page:${path}`} onPending={onPending} onControls={onControls} />
         )}
       </div>
     </div>
