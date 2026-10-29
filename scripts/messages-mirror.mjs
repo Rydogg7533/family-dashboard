@@ -8,7 +8,9 @@
 //           2) mirrors FAMILY THREADS ONLY (chats whose members are all in MIRROR_FAMILY_HANDLES) for the last MIRROR_DAYS days into
 //              messages_threads / messages for MIRROR_PERSON_ID, 3) sends lines queued in messages_outbox through the Messages app
 //              as the signed-in account (they then appear on every device like a typed message), 4) queues one notification
-//              (type=message) per new inbound line so the app can show a bubble and a push, 5) writes system_status sync_messages.
+//              (type=message) per new inbound line so the app can show a bubble and a push, 5) judges each new inbound line
+//              once (one Haiku call, scripts/message-suggest-lib.mjs) and records the judgment in message_suggestions,
+//              6) writes system_status sync_messages. Set MIRROR_SUGGEST=off in the env file to skip 5.
 // --watch also holds a Supabase Realtime subscription on messages_outbox: a queued line is sent immediately, before any mirror pass.
 // Never reads a non-family chat past its handle list; mirrors attachments as {kind,label} only; never deletes anything in Messages.
 // Mirror rows older than the window are removed from the database (they are a copy; Messages and iCloud keep the history).
@@ -20,6 +22,7 @@ import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync, statSync } f
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import { judge, decide, MODEL, DEFAULT_BAR } from "./message-suggest-lib.mjs";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry"), LIST = args.includes("--list-chats"), WATCH = args.includes("--watch");
@@ -115,14 +118,46 @@ async function queueBubbles(msgRows, threadRows) {
     const seen = new Set(have.map((r) => r.item_id)); for (const id of seen) notified.add(id);
     fresh = fresh.filter((m) => !seen.has(m.id));
   }
-  if (!fresh.length) return 0;
+  if (!fresh.length) return [];
   const rows = fresh.map((m) => ({ person: PERSON, type: "message", channel: "push", title: names.get(m.thread_id) || m.sender,
     body: `${m.sender}: ${(m.text || `[${m.attachment?.kind || "attachment"}]`).slice(0, 160)}`, url: `/messages/${m.thread_id}`, tag: `thread:${m.thread_id}`,
     item_kind: "message", item_id: m.id }));
   try { await rest("POST", "notifications", rows, { Prefer: "return=minimal" }); }
   catch (e) { if (!/409|23505/.test(String(e.message))) throw e; } // a repeat slipped past the check: the index refused it, nothing to do
   for (const m of fresh) { notified.add(m.id); newsSince = Math.max(newsSince, Date.parse(m.at)); }
-  return fresh.length;
+  return fresh;
+}
+
+// ---- suggestion engine: one judgment per new inbound line, written to message_suggestions; the app shows the "shown" ones ----
+const AI_KEY = env.ANTHROPIC_API_KEY, SUGGEST = AI_KEY && (env.MIRROR_SUGGEST || "on") !== "off";
+const TZ = env.HOUSEHOLD_TZ || "America/Denver";
+let bars = null, barsAt = 0;
+async function loadBars() {
+  if (bars && Date.now() - barsAt < 5 * 60e3) return bars;
+  const rows = await rest("GET", `suggestion_bars?person=eq.${PERSON}&select=kind,bar`).catch(() => []);
+  bars = Object.fromEntries(rows.map((r) => [r.kind, Number(r.bar)])); barsAt = Date.now(); return bars;
+}
+async function suggestFor(fresh, msgRows) {
+  if (!SUGGEST || !fresh.length) return 0;
+  const b = await loadBars();
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long" }).format(new Date());
+  const household = { me: ME, members: [...new Set([ME, ...FAMILY.values()])] };
+  let n = 0;
+  for (const line of fresh.slice(-5)) { // a burst judges the last five; older ones in the same burst are context, not chips
+    const thread = msgRows.filter((m) => m.thread_id === line.thread_id);
+    const i = thread.findIndex((m) => m.id === line.id);
+    const context = thread.slice(Math.max(0, i - 6), i);
+    let j;
+    try { j = await judge({ key: AI_KEY, line, context, household, today, tz: TZ }); }
+    catch (e) { console.error(`${now()} suggest: ${String(e.message).slice(0, 160)}`); continue; }
+    const status = decide(j, b);
+    const row = { person: PERSON, thread_id: line.thread_id, message_id: line.id, kind: j.kind, confidence: j.confidence, title: j.title, payload: j.payload, reason: j.reason,
+      status, model: MODEL, in_tokens: j.usage.inTok, out_tokens: j.usage.outTok, latency_ms: j.usage.latencyMs };
+    try { await rest("POST", "message_suggestions?on_conflict=person,message_id", [row], { Prefer: "resolution=ignore-duplicates,return=minimal" }); n++; }
+    catch (e) { console.error(`${now()} suggest write: ${String(e.message).slice(0, 160)}`); }
+    if (status === "shown") console.log(`${now()} chip ${j.kind} ${j.confidence} "${j.title}" (${line.thread_id})`);
+  }
+  return n;
 }
 
 async function main() {
@@ -179,8 +214,8 @@ async function main() {
 
   familyChats = family; threadGroups = groups;
   // bubbles first: the app shows news the moment the row lands, before the slower mirror upserts
-  const bubbled = WATCH ? await queueBubbles(msgRows, threadRows) : 0;
-  if (bubbled) console.log(`${now()} ${bubbled} new inbound line(s) → notifications`);
+  const fresh = WATCH ? await queueBubbles(msgRows, threadRows) : [];
+  if (fresh.length) console.log(`${now()} ${fresh.length} new inbound line(s) → notifications`);
   // write (upsert; a re-run changes nothing that is already the same)
   for (let i = 0; i < threadRows.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", threadRows.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
@@ -193,6 +228,10 @@ async function main() {
   }
   const cutoff = new Date(Date.now() - DAYS * 86400e3).toISOString();
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
+
+  // judge the new lines (after the upserts, so a chip always points at a line the app can show)
+  const judged = await suggestFor(fresh, msgRows);
+  if (judged) console.log(`${now()} ${judged} line(s) judged`);
 
   // send what was typed on the dashboard
   const queued = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`);
