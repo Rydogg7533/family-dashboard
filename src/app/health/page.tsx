@@ -55,7 +55,7 @@ export default async function Health() {
       </div>
       {rows.some((s) => s.state === "ok") && (
         <div className="mt-2">
-          <Fold id="health-ok" title="Healthy" summary={`${rows.filter((s) => s.state === "ok").length}`}>
+          <Fold id="health-ok" title="Healthy" summary={`${rows.filter((s) => s.state === "ok").length} check${rows.filter((s) => s.state === "ok").length === 1 ? "" : "s"} fine`}>
             <div className="flex flex-col gap-2">
               {rows.filter((s) => s.state === "ok").map((s) => (
                 <Card key={s.key}>
