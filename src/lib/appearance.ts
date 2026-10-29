@@ -60,6 +60,7 @@ export function applyAppearance(a: Appearance) {
   const r = document.documentElement;
   r.dataset.theme = a.theme;
   r.dataset.cardStyle = a.cardStyle;
+  r.dataset.radius = a.radius;
   r.dataset.density = a.density;
   r.dataset.background = a.background;
   r.style.setProperty("--accent-user", a.accent);

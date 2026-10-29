@@ -86,7 +86,7 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
       <Link key={t.key} href={t.href} prefetch={t.href === "/ask" ? undefined : true} data-active={active}
         aria-label={n ? `${t.label}, ${n} new` : t.label} aria-current={active ? "page" : undefined}
         className={`shrink-0 snap-start min-h-12 flex flex-col items-center justify-center gap-0.5 ${scrolls ? "w-[25%] min-w-[64px]" : "flex-1 min-w-[60px]"} ${active ? "text-accent" : "text-muted"}`}>
-        <span className={`relative flex items-center justify-center w-14 h-7 rounded-full transition-colors ${active ? "bg-accent/12" : ""}`}>
+        <span data-active={active} className="tabbar-pill relative flex items-center justify-center w-14 h-7">
           <MoreIcon name={t.icon} size={22} strokeWidth={active ? 2.25 : 1.75} />
           {n > 0 && <span className="absolute -top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red text-white text-[10px] leading-[18px] text-center font-bold ring-2 ring-bg">{n > 99 ? "99+" : n}</span>}
         </span>
@@ -95,13 +95,16 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
     );
   };
   // More is pinned at the right edge; the other tabs scroll behind it when there are more than fit.
+  // .tabbar / .tabbar-wrap / .tabbar-pill are styled in globals.css and follow Look and feel (strip or floating island).
   return (
-    <nav ref={navRef} className="fixed bottom-0 inset-x-0 border-t border-line bg-bg/95 backdrop-blur">
-      <div className="max-w-md mx-auto flex items-stretch px-1 pt-1.5 pb-[max(14px,env(safe-area-inset-bottom))] text-[11px] font-semibold">
-        <div ref={rowRef} className={`flex flex-1 min-w-0 ${scrolls ? "overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
-          {row.map(tab)}
+    <nav ref={navRef} className="tabbar-wrap fixed bottom-0 inset-x-0">
+      <div className="tabbar max-w-md mx-auto">
+        <div className="tabbar-row flex items-stretch px-1 pt-1.5 pb-[max(14px,env(safe-area-inset-bottom))] text-[11px] font-semibold">
+          <div ref={rowRef} className={`flex flex-1 min-w-0 ${scrolls ? "overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
+            {row.map(tab)}
+          </div>
+          <div className={`shrink-0 flex ${scrolls ? "pl-1 border-l border-line/70" : ""}`}>{tab(more)}</div>
         </div>
-        <div className={`shrink-0 flex ${scrolls ? "pl-1 border-l border-line/70" : ""}`}>{tab(more)}</div>
       </div>
     </nav>
   );
