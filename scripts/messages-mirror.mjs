@@ -109,13 +109,18 @@ async function sendOne(o) {
 let newsSince = Date.now() - 10 * 60e3; const notified = new Set();
 async function queueBubbles(msgRows, threadRows) {
   const names = new Map(threadRows.map((t) => [t.id, t.name]));
-  const fresh = msgRows.filter((m) => !m.is_me && !notified.has(m.id) && Date.parse(m.at) > newsSince);
+  let fresh = msgRows.filter((m) => !m.is_me && !notified.has(m.id) && Date.parse(m.at) > newsSince);
+  if (fresh.length) { // one notification per guid, ever (the partial unique index is the backstop; a restart re-checks here)
+    const have = await rest("GET", `notifications?type=eq.message&select=item_id&item_id=in.(${fresh.map((m) => `"${m.id}"`).join(",")})`);
+    const seen = new Set(have.map((r) => r.item_id)); for (const id of seen) notified.add(id);
+    fresh = fresh.filter((m) => !seen.has(m.id));
+  }
   if (!fresh.length) return 0;
   const rows = fresh.map((m) => ({ person: PERSON, type: "message", channel: "push", title: names.get(m.thread_id) || m.sender,
     body: `${m.sender}: ${(m.text || `[${m.attachment?.kind || "attachment"}]`).slice(0, 160)}`, url: `/messages/${m.thread_id}`, tag: `thread:${m.thread_id}`,
     item_kind: "message", item_id: m.id }));
-  // one notification per guid, ever: the (type,item_id) unique index drops repeats from a re-mirror
-  await rest("POST", "notifications?on_conflict=type,item_id", rows, { Prefer: "resolution=ignore-duplicates,return=minimal" });
+  try { await rest("POST", "notifications", rows, { Prefer: "return=minimal" }); }
+  catch (e) { if (!/409|23505/.test(String(e.message))) throw e; } // a repeat slipped past the check: the index refused it, nothing to do
   for (const m of fresh) { notified.add(m.id); newsSince = Math.max(newsSince, Date.parse(m.at)); }
   return fresh.length;
 }
