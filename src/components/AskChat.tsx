@@ -6,6 +6,7 @@ import type { AskCard, AskItem, AskReply, Turn } from "@/lib/ask-engine";
 import { VoiceSession, type VoiceStatus } from "@/lib/voice-client";
 import { splitAnswer, ASK_FILE_BYTES, ASK_FILE_MAX, ASK_FILE_MIMES, type AskFile } from "@/lib/ask-shared";
 import { createClient } from "@/lib/supabase/client";
+import { useBeforePaint } from "@/lib/use-before-paint";
 import { FetchButton } from "@/components/FetchButton";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -44,7 +45,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
   const picker = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   // The box grows with what is typed, up to a few lines, and shrinks back after sending.
-  useEffect(() => { const t = box.current; if (!t) return; t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, 160)}px`; }, [input]);
+  useBeforePaint(() => { const t = box.current; if (!t) return; t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, 160)}px`; }, [input]);
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   const restored = useRef(false);
@@ -56,7 +57,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
   // The thread survives leaving the page (F4): it is kept in this browser, per person, until "New chat".
   // Only this device sees it; nothing about the thread goes to the database from here.
   const storeKey = `ask-thread:${who}`;
-  useEffect(() => {
+  // Before paint: restored this way the sheet is drawn once, at its real size. As a plain effect the sheet appeared
+  // empty, then the whole saved thread arrived and shoved its top edge up.
+  useBeforePaint(() => {
     try {
       const raw = window.localStorage.getItem(storeKey);
       if (raw) { const saved = JSON.parse(raw) as { bubbles?: Bubble[]; spent?: number }; if (Array.isArray(saved.bubbles)) setBubbles(inWindow(saved.bubbles)); if (typeof saved.spent === "number") setSpent(saved.spent); }
@@ -77,8 +80,12 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
   // enough on a phone: the reply can grow after it lands (result line, link, card) and the keyboard closing resizes the
   // viewport a moment later. So scroll now, again over the next ~1.5 s, and whenever the visual viewport changes size
   // shortly after a change. The person scrolling up on purpose is not fought: the retries stop once their window ends.
-  useEffect(() => {
+  const firstScroll = useRef(true);
+  useBeforePaint(() => {
     const toEnd = () => endRef.current?.scrollIntoView({ block: "end" });
+    // Opening: land at the bottom in the first frame and stop. The retries below are for a reply that is still
+    // growing; on open they just made the thread jump for a second and a half.
+    if (firstScroll.current) { firstScroll.current = false; toEnd(); return; }
     toEnd();
     const timers = [0, 120, 400, 900, 1500].map((ms) => setTimeout(() => requestAnimationFrame(toEnd), ms));
     const vv = typeof window !== "undefined" ? window.visualViewport : null;

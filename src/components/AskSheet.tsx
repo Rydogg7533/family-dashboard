@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
+import { useBeforePaint } from "@/lib/use-before-paint";
 import { usePathname } from "next/navigation";
 import { AskChat } from "@/components/AskChat";
 
@@ -7,11 +8,6 @@ import { AskChat } from "@/components/AskChat";
 // person is on, so a question never costs them their place. One thread, two doors: what is asked here is on
 // the Ask tab too (same window, same history), and closing only hides it. Four ways to close: the X, the
 // Done button, a tap on the dimmed page, or Escape. If a confirm card is still waiting the sheet asks once.
-// Anything that decides where the sheet sits must run before the browser paints, or the sheet is drawn once in the
-// wrong place and then corrected -- which is the shake Ryan saw on opening (2026-10-28). useLayoutEffect does that;
-// it does not exist on the server, so it falls back to useEffect there.
-const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect;
-
 export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClose: () => void; who: string; sample: boolean }) {
   const path = usePathname();
   const [pending, setPending] = useState(false);
