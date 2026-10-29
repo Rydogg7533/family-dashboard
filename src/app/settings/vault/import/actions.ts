@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { IMPORT_FOLDER } from "@/lib/data-vault-import";
 
 // What the person may do on the mapping screen. Everything here is a decision, never a secret and never a
 // change to someone else's row: the folder is read, the items are created and the links are written by the
@@ -14,11 +15,11 @@ async function me() {
   return user ? { sb, user } : null;
 }
 
-// Ask the hub to read a folder. The path is the person's own words; the hub decides whether it can read it
-// and says so on the run if it cannot.
+// Ask the hub to read a folder. Empty means the Import folder the kit made (~/StewardOS/Import), which is the
+// normal case; a typed path is the exception for documents that live somewhere else. The hub decides whether it
+// can read it and says so on the run if it cannot.
 export async function requestFolderScan(folder: string): Promise<{ ok: boolean; id?: string; error?: string }> {
-  const path = folder.trim();
-  if (path.length < 2) return { ok: false, error: "Type the folder on your Mac, for example ~/Desktop/Documents to file." };
+  const path = folder.trim() || IMPORT_FOLDER;
   if (path.length > 400) return { ok: false, error: "That path is too long." };
   if (!hasSupabaseEnv()) return { ok: true, id: "sample" };
   const who = await me();

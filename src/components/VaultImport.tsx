@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestFolderScan, saveImportItem, applyImport } from "@/app/settings/vault/import/actions";
 import type { ImportItem, ImportRow, VaultImport } from "@/lib/data-vault-import";
+import { IMPORT_FOLDER, type ImportFolder } from "@/lib/vault-import-shared";
 
 // Map your documents (mockup approved 2026-10-29). Three buckets as tabs rather than three long sections:
 // on a phone, scrolling past twenty confident cards to reach the four that want a decision is the whole
@@ -10,7 +11,7 @@ import type { ImportItem, ImportRow, VaultImport } from "@/lib/data-vault-import
 const PILL = "min-h-9 px-3 rounded-full text-[13px] font-semibold inline-flex items-center";
 const Spin = () => <span aria-hidden className="inline-block w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin align-[-3px] mr-2" />;
 
-export function VaultImport({ run, items, rows }: { run: VaultImport | null; items: ImportItem[]; rows: ImportRow[] }) {
+export function VaultImport({ run, items, rows, folder }: { run: VaultImport | null; items: ImportItem[]; rows: ImportRow[]; folder: ImportFolder | null }) {
   const router = useRouter();
   // While the Mac is reading or creating, the page re-reads itself: the person should never have to guess
   // whether anything is happening.
@@ -21,21 +22,41 @@ export function VaultImport({ run, items, rows }: { run: VaultImport | null; ite
     return () => clearInterval(t);
   }, [working, router]);
 
-  if (!run || run.status === "done" || run.status === "failed") return <StartScan run={run} />;
+  if (!run || run.status === "done" || run.status === "failed") return <StartScan run={run} folder={folder} />;
   if (working) return <Working run={run} />;
   return <Mapping run={run} items={items} rows={rows} />;
 }
 
-function StartScan({ run }: { run: VaultImport | null }) {
-  const [folder, setFolder] = useState("");
+// "How long ago" in words, for the folder line. Minutes and hours are what matter; older than a day says the date.
+function ago(iso: string, now: number): string {
+  const s = (now - Date.parse(iso)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// No path to type and nothing to pick (Ryan, 2026-10-29). The kit keeps one folder on the Mac, ~/StewardOS/Import; the
+// person puts everything there and the screen shows what the Mac sees in it before they tap. A web page cannot browse a
+// folder on another machine, so a picker was never on the table -- and a fixed folder is the better instruction anyway:
+// the same step whatever the documents' starting state (D27). "Somewhere else" keeps the typed path for the odd case.
+function StartScan({ run, folder }: { run: VaultImport | null; folder: ImportFolder | null }) {
+  const [other, setOther] = useState(false);
+  const [path, setPath] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, start] = useTransition();
   const router = useRouter();
   const go = () => start(async () => {
     setErr(null);
-    const r = await requestFolderScan(folder);
+    const r = await requestFolderScan(other ? path : "");
     if (r.ok) router.refresh(); else setErr(r.error ?? "Could not start.");
   });
+  // The Mac reports the folder every few seconds; the page asks again every 10 s so the count moves as files land.
+  // "now" is state, not Date.now() in render, so the staleness test is pure and ticks with the refresh.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => { setNow(Date.now()); router.refresh(); }, 10000); return () => clearInterval(t); }, [router]);
+  const stale = folder ? now - Date.parse(folder.seen_at) > 120000 : true;
+  const canGo = other ? path.trim().length >= 2 : !!folder && folder.files > 0 && !stale;
   return (
     <div className="flex flex-col gap-3">
       {run?.status === "done" && (
@@ -48,13 +69,27 @@ function StartScan({ run }: { run: VaultImport | null }) {
       {run?.status === "failed" && <div className="card border-red text-sm" role="alert">Your Mac could not read that folder. {run.error}</div>}
 
       <div className="card flex flex-col gap-2">
-        <div className="font-semibold text-sm">Gather everything into one folder</div>
-        <p className="text-xs text-muted leading-relaxed">Export your documents from 1Password, add photos of anything on paper, and any PDFs you have saved. Don&apos;t worry about naming or sorting them; we read each one.</p>
+        <div className="font-semibold text-sm">Put everything in the Import folder on your Mac</div>
+        <p className="text-xs text-muted leading-relaxed">It&apos;s <b className="text-fg">{IMPORT_FOLDER}</b> — your home folder › StewardOS › Import. Export your documents from 1Password, add photos of anything on paper, and any PDFs you have saved. Don&apos;t worry about naming or sorting them; we read each one.</p>
         <p className="text-xs text-muted leading-relaxed"><b className="text-fg">What this will do:</b> we create new items in your StewardOS vaults, each tagged <b className="text-fg">StewardOS</b> in 1Password. We never change or delete anything already in your vault, so if you already keep copies of these documents you will have both — the tag is how you tell them apart afterwards.</p>
-        <label htmlFor="folder" className="text-[11px] font-bold tracking-wide text-muted mt-1">THE FOLDER ON YOUR MAC</label>
-        <input id="folder" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="~/Desktop/Documents to file" className="min-h-11 w-full rounded-lg border border-line bg-bg px-3 text-[16px]" />
+
+        {!other && (
+          <div className="rounded-xl bg-soft p-3 flex flex-col gap-0.5" aria-live="polite">
+            <div className="text-[11px] font-bold tracking-wide text-muted">YOUR MAC SEES</div>
+            {!folder ? <div className="text-sm">Nothing reported yet. On the Mac, the import server has to be running: <span className="font-mono text-xs">node scripts/vault-folder.mjs --serve</span></div>
+              : stale ? <div className="text-sm">Last report {ago(folder.seen_at, now)} — the import server on the Mac may have stopped. Start it and this line updates by itself.</div>
+              : <div className="text-sm"><b>{folder.files} file{folder.files === 1 ? "" : "s"}</b> in the folder{folder.last_added ? `, last added ${ago(folder.last_added, now)}` : ""} <span className="text-muted">· checked {ago(folder.seen_at, now)}</span></div>}
+          </div>
+        )}
+        {other && (
+          <>
+            <label htmlFor="folder" className="text-[11px] font-bold tracking-wide text-muted mt-1">A DIFFERENT FOLDER ON YOUR MAC</label>
+            <input id="folder" value={path} onChange={(e) => setPath(e.target.value)} placeholder="~/Desktop/Documents to file" className="min-h-11 w-full rounded-lg border border-line bg-bg px-3 text-[16px]" />
+          </>
+        )}
         {err && <div className="text-sm text-red font-semibold" role="alert">{err}</div>}
-        <button type="button" disabled={busy || folder.trim().length < 2} onClick={go} className="min-h-12 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? <><Spin />Asking your Mac…</> : "Read this folder"}</button>
+        <button type="button" disabled={busy || !canGo} onClick={go} className="min-h-12 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? <><Spin />Asking your Mac…</> : other ? "Read that folder" : "Read the folder"}</button>
+        <button type="button" onClick={() => { setOther((v) => !v); setErr(null); }} className="text-xs text-accent font-semibold self-start min-h-9">{other ? "Use the Import folder instead" : "The documents are somewhere else…"}</button>
         <div className="text-[11px] text-muted">Your Mac reads the folder, works out what each document is, and brings the list back here. The documents themselves never leave your Mac.</div>
       </div>
     </div>

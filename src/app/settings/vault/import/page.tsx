@@ -10,12 +10,12 @@ export const dynamic = "force-dynamic";
 // 1Password items and writing the links is the Mac's job, under the service role: the app only carries
 // decisions. Decisions 2026-10-29 D27-D29.
 export default async function VaultImportPage() {
-  const { run, items, rows } = await getVaultImport();
+  const { run, items, rows, folder } = await getVaultImport();
   return (
     <>
       <Link href="/settings/vault" className="text-xs font-semibold text-accent">‹ 1Password</Link>
       <H1>Map your documents</H1>
-      <VaultImport run={run} items={items} rows={rows} />
+      <VaultImport run={run} items={items} rows={rows} folder={folder} />
     </>
   );
 }

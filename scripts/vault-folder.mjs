@@ -25,6 +25,11 @@ const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : ""
 const HOME = homedir();
 let FOLDER = resolve(opt("--folder").replace(/^~/, HOME));
 const SERVE = args.includes("--serve");   // take the folder, and the go-ahead, from the app instead of a localhost page
+// The one folder a customer ever has to know about (Ryan, 2026-10-29: "shouldn't the folder path be a picker?" -- a web
+// page cannot browse a folder on this Mac, so instead there is no choice to make). The server creates it, watches it, and
+// tells the app what it sees there, so the screen can say "14 files, last added 2 minutes ago" before anyone taps.
+const IMPORT_DIR = join(HOME, "StewardOS", "Import");
+const DEFAULT_FOLDER = "~/StewardOS/Import";
 const ACCOUNT = opt("--account") || process.env.OP_ACCOUNT || "";
 const SECRETS = join(HOME, "_secrets_local_only");
 const OCR = resolve(dirname(new URL(import.meta.url).pathname), "ocr", "stewardos-ocr");
@@ -372,13 +377,35 @@ document.getElementById('status').textContent='Done: '+out.filter(o=>o.ok).lengt
     spawnSync("open", [url]);
   });
 }
+// What is in the Import folder right now: readable files (the same kinds main() reads), newest change. Hidden files and
+// anything deeper than four levels are ignored, exactly as the reader ignores them.
+function importFolderState() {
+  try { mkdirSync(IMPORT_DIR, { recursive: true }); } catch { /* exists, or cannot: reported below as 0 files */ }
+  let files = 0, newest = 0;
+  const walk = (dir, depth = 0) => { let list = []; try { list = readdirSync(dir); } catch { return; } for (const f of list) { if (f.startsWith(".")) continue; const p = join(dir, f); let st; try { st = statSync(p); } catch { continue; } if (st.isDirectory() && depth < 4) walk(p, depth + 1); else if (st.isFile() && /\.(pdf|jpe?g|png|heic|tiff?)$/i.test(f)) { files++; if (st.mtimeMs > newest) newest = st.mtimeMs; } } };
+  walk(IMPORT_DIR);
+  return { files, newest: newest ? new Date(newest).toISOString() : null };
+}
+
+let lastReported = "";
+async function reportImportFolder() {
+  const st = importFolderState();
+  const sig = `${st.files}|${st.newest}`;
+  if (sig === lastReported) return;             // nothing changed: no write, no churn in the status table
+  await sb("system_status?on_conflict=key", { method: "POST", headers: { prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([{ key: "vault_import_folder", state: "ok", summary: `${DEFAULT_FOLDER}: ${st.files} file${st.files === 1 ? "" : "s"}${st.newest ? `, last added ${st.newest}` : ""}`, value_num: st.files, updated_at: new Date().toISOString() }]) });
+  lastReported = sig;
+}
+
 async function serveLoop() {
-  console.log("Waiting for a folder from the app (Settings > 1Password > Map your documents). Ctrl-C to stop.");
+  console.log(`Watching ${IMPORT_DIR} and waiting for the app (Settings > 1Password > Map your documents). Ctrl-C to stop.`);
   for (;;) {
     try {
+      await reportImportFolder();
       const [run] = await sb("vault_imports?status=eq.requested&select=id,folder&order=requested_at&limit=1");
       if (run) {
-        FOLDER = resolve(String(run.folder).replace(/^~/, HOME));
+        const asked = String(run.folder ?? "").trim();
+        FOLDER = !asked || asked === DEFAULT_FOLDER || asked === "default" ? IMPORT_DIR : resolve(asked.replace(/^~/, HOME));
         process.env.STEWARD_RUN_ID = run.id;
         await sb(`vault_imports?id=eq.${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "scanning", picked_at: new Date().toISOString() }) });
         console.log(`\nReading ${FOLDER} for the app…`);
@@ -387,6 +414,7 @@ async function serveLoop() {
           console.error(`That run failed: ${e.message}`);
           await sb(`vault_imports?id=eq.${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "failed", error: String(e.message).slice(0, 300) }) });
         }
+        lastReported = "";                       // the folder may have been deleted or emptied: report it fresh
       }
     } catch (e) { console.error(`(could not reach the app: ${e.message})`); }
     await new Promise((r) => setTimeout(r, 4000));
