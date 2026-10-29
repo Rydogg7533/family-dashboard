@@ -19,7 +19,7 @@ export function EventForm({ calendars, event, prefill }: { calendars: GCal[]; ev
   const router = useRouter();
   const writable = calendars.filter((c) => c.canWrite);
   const [f, setF] = useState<Form>(() => event
-    ? { id: event.id, title: event.title, calendarId: event.calendarId, allDay: event.allDay, date: event.date, endDate: event.endDate, start: event.start, end: event.end, location: event.location, description: (event.description ?? "").split(/\n\n(?=From a message: |Added in StewardOS by )/)[0], reminders: event.reminders.useDefault ? null : event.reminders.overrides, recurrence: event.recurrence, attendees: event.attendees.map((a) => a.email) }
+    ? { id: event.id, fromCalendarId: event.calendarId, title: event.title, calendarId: event.calendarId, allDay: event.allDay, date: event.date, endDate: event.endDate, start: event.start, end: event.end, location: event.location, description: (event.description ?? "").split(/\n\n(?=From a message: |Added in StewardOS by )/)[0], reminders: event.reminders.useDefault ? null : event.reminders.overrides, recurrence: event.recurrence, attendees: event.attendees.map((a) => a.email) }
     : { title: "", calendarId: writable.find((c) => c.primary)?.id ?? writable[0]?.id ?? "", allDay: false, date: today(), endDate: undefined, start: nextHour(), end: plusHour(nextHour()), location: "", description: "", reminders: null, recurrence: null, attendees: [], ...prefill });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

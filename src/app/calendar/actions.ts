@@ -3,9 +3,9 @@
 // before reporting success, so "saved" means Google has it. Nothing is cached in the app.
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { hasGoogleCal, insertEvent, updateEvent, deleteEvent, getEvent, listEvents, rescheduleEvent, type EventInput, type GEvent } from "@/lib/google-calendar";
+import { hasGoogleCal, insertEvent, updateEvent, deleteEvent, getEvent, listEvents, rescheduleEvent, moveEvent, type EventInput, type GEvent } from "@/lib/google-calendar";
 
-export type EventForm = EventInput & { id?: string; fromMessage?: string | null; origin?: { kind: string; ref: string | null; label: string } | null };
+export type EventForm = EventInput & { id?: string; fromCalendarId?: string; fromMessage?: string | null; origin?: { kind: string; ref: string | null; label: string } | null };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 function check(f: EventForm): string | null {
@@ -34,11 +34,24 @@ export async function saveEvent(f: EventForm): Promise<{ ok: true; event: GEvent
   try {
     const input: EventInput = { title: f.title, calendarId: f.calendarId, allDay: f.allDay, date: f.date, endDate: f.endDate, start: f.start, end: f.end, location: f.location, reminders: f.reminders, recurrence: f.recurrence, attendees: f.attendees,
       description: [f.description?.trim() || "", f.fromMessage ? `From a message: “${f.fromMessage.trim()}”` : "", `Added in StewardOS by ${actor ?? "a member"}${f.origin ? ` from ${f.origin.label}` : ""}`].filter(Boolean).join("\n\n") };
+    // Changing the calendar chip on an existing event: Google needs a move first, then the edit on the new calendar.
+    // Before (issue 3c757ffa, 2026-10-28) the edit was sent to the new calendar where the event did not exist.
+    if (f.id && f.fromCalendarId && f.fromCalendarId !== f.calendarId) await moveEvent(f.fromCalendarId, f.id, f.calendarId);
     const event = f.id ? await updateEvent(f.id, input) : await insertEvent(input);
     if (sb) await sb.from("activity_log").insert({ actor: actor!, action: f.id ? "event_updated" : "event_added", subject: `${event.title} · ${when(event)} · ${event.calendarName}${f.origin ? ` · from ${f.origin.label}` : ""}`, ref: `${event.calendarId}|${event.id}`, undoable: true }).then(() => {}, () => {});
     revalidatePath("/calendar"); revalidatePath("/day"); revalidatePath("/");
     return { ok: true, event };
-  } catch (e) { return { ok: false, error: (e as Error).message.slice(0, 200) }; }
+  } catch (e) {
+    // Google's refusal in words, and a Log line so the maintainer sees the reason without a screenshot (never the event's contents).
+    const raw = (e as Error).message.slice(0, 300);
+    const msg = /403/.test(raw) ? "Google refused: this calendar does not let you change this event (not yours to edit, or a guest-only event). Edit it in Google Calendar or ask its owner."
+      : /404/.test(raw) ? "Google could not find this event on that calendar. It may have been moved or deleted; go back and open it again."
+      : /400/.test(raw) && /recurrence/i.test(raw) ? "Google would not change the repeat rule on one occurrence. Edit the whole series in Google Calendar."
+      : /400/.test(raw) ? "Google rejected the change: " + (raw.match(/"message":\s*"([^"]{0,120})"/)?.[1] ?? raw)
+      : raw;
+    if (sb) await sb.from("activity_log").insert({ actor: actor!, action: "event_save_failed", subject: `Could not save an event: ${raw.replace(/"(summary|description|location)":\s*"[^"]*"/g, "").slice(0, 190)}`, ref: f.id ? `${f.calendarId}|${f.id}` : null, undoable: false }).then(() => {}, () => {});
+    return { ok: false, error: msg };
+  }
 }
 
 export async function removeEvent(calendarId: string, id: string, title: string): Promise<{ ok: boolean; error?: string }> {
