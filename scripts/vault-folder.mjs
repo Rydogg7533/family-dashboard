@@ -2,6 +2,9 @@
 // vault-folder.mjs — point at a folder of scans; everything else happens on this Mac (Ryan, 2026-10-28).
 //
 //   node scripts/vault-folder.mjs --folder "~/Desktop/Documents to file" --account <1Password account id>
+//   node scripts/vault-folder.mjs --serve --account <id>     # take the folder, and the go-ahead, from the app:
+//       Settings > 1Password > Map your documents. Keeps running; reads a folder whenever the app asks, sends what it
+//       found back to be checked there, and creates the items when the person taps Add. Nothing is created until then.
 //
 // Reads every photo and PDF in the folder (never moved, copied or deleted), OCRs each one on this Mac (Apple Vision),
 // works out what it is and whose, matches it to a row on Settings › 1Password, and opens a MAPPING SCREEN in the browser at a
@@ -10,7 +13,7 @@
 // script has no delete or edit call), builds the private link, writes link and date into the app row, and puts a vehicle's
 // registration or insurance date on the vehicle. Each result is read back before it is shown.
 // Nothing leaves the Mac except the item's name, its link and its date, which go to the household's own database.
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
@@ -20,7 +23,8 @@ import { join, resolve, dirname, extname, basename } from "node:path";
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : ""; };
 const HOME = homedir();
-const FOLDER = resolve(opt("--folder").replace(/^~/, HOME));
+let FOLDER = resolve(opt("--folder").replace(/^~/, HOME));
+const SERVE = args.includes("--serve");   // take the folder, and the go-ahead, from the app instead of a localhost page
 const ACCOUNT = opt("--account") || process.env.OP_ACCOUNT || "";
 const SECRETS = join(HOME, "_secrets_local_only");
 const OCR = resolve(dirname(new URL(import.meta.url).pathname), "ocr", "stewardos-ocr");
@@ -135,7 +139,7 @@ async function main() {
   // Every photo and PDF in the folder and its subfolders. A subfolder's name is a hint ("Melissa/passport.jpg" is Melissa's).
   const walk = (dir, depth = 0) => { const out = []; for (const f of readdirSync(dir)) { if (f.startsWith(".")) continue; const p = join(dir, f); const st = statSync(p); if (st.isDirectory() && depth < 4) out.push(...walk(p, depth + 1)); else if (st.isFile() && /\.(pdf|jpe?g|png|heic|tiff?)$/i.test(f)) out.push(p); } return out; };
   const files = walk(FOLDER).sort();
-  if (!files.length) { console.error(`STOP: no photos or PDFs in ${FOLDER}`); process.exit(1); }
+  if (!files.length) { if (SERVE) throw new Error(`no photos or PDFs in ${FOLDER}`); console.error(`STOP: no photos or PDFs in ${FOLDER}`); process.exit(1); }
   console.log(`Reading ${files.length} file${files.length === 1 ? "" : "s"} in ${FOLDER} (on this Mac)…`);
   // Front and back of one card (or page 1 / page 2) are one document: files whose names differ only by (Front)/(Back),
   // front/back, or a trailing 1/2 are grouped, OCR'd together, and become ONE 1Password item with every file attached.
@@ -164,6 +168,83 @@ async function main() {
     items.push({ i: items.length, file, files: group, name: group.map((g) => basename(g)).join(" + "), kind, person: person?.name ?? "", vehicle: vehicle?.short ?? "", rowIds, title, vaultId: vault?.id ?? "", date: date?.iso ?? "", dateFrom: date ? `${date.sure ? "" : "guess: "}${date.line}` : (kind && EXPIRES.has(kind) ? "no date read" : ""), alreadyLinked: !!row?.link, dup: existingTitles.has(norm(title)), sure, skip: !!row?.link || existingTitles.has(norm(title)), preview: text.replace(/\s+/g, " ").slice(0, 220) });
   }
   console.log(`Read ${items.length}: ${items.filter((x) => x.sure).length} mapped with confidence, ${items.filter((x) => !x.sure && x.kind).length} to check, ${items.filter((x) => !x.kind).length} unrecognised.`);
+
+  // ---------- serving the app (decisions 2026-10-29) ----------
+  // The same reading, the same creating; the screen is just somewhere else. What goes back is only what the
+  // person needs in order to decide: a file name, what it read as, a date, a row. Never the document.
+  if (SERVE) {
+    const runId = process.env.STEWARD_RUN_ID;
+    const bucketOf = (x) => (x.alreadyLinked || x.dup) ? "done" : x.sure ? "ready" : "needs";
+    const reasonOf = (x) => x.alreadyLinked ? "Already linked on your list. Tick it only if this is a newer copy."
+      : x.dup ? "An item with this name is already in 1Password."
+      : !x.kind ? "Could not tell what this is. Pick the row it belongs to, or leave it out."
+      : !x.rowIds.length ? "Could not tell whose it is. Pick the row."
+      : "Check the date, then it is ready.";
+    const body = items.map((x) => ({
+      import_id: runId, file_name: x.name, file_count: x.files?.length ?? 1, is_pdf: /\.pdf$/i.test(x.file),
+      kind: x.kind || null, reads_as: x.kind ? KIND_LABEL[x.kind] : null, title: x.title, vault_id: x.vaultId,
+      vault_name: (vaults.find((v) => v.id === x.vaultId) || {}).name || null,
+      expires_on: /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? x.date : null, date_note: x.dateFrom || null,
+      preview: x.preview, bucket: bucketOf(x), reason: reasonOf(x), row_ids: x.rowIds, include: !x.skip,
+    }));
+    if (body.length) await sb("vault_import_items", { method: "POST", body: JSON.stringify(body) });
+    await sb(`vault_imports?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "ready", scanned_at: new Date().toISOString(), found: items.length }) });
+    console.log(`Sent ${items.length} to the app; waiting for the go-ahead there.`);
+
+    // The person is deciding. Nothing happens on this Mac until they tap Add.
+    let run = null;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 3000));
+      run = (await sb(`vault_imports?id=eq.${runId}&select=status,delete_folder`))[0];
+      if (!run || run.status !== "ready") break;
+    }
+    if (!run || run.status !== "applying") { console.log("The run was left; nothing was created."); return; }
+
+    const chosen = await sb(`vault_import_items?import_id=eq.${runId}&include=is.true&select=id,file_name,title,vault_id,expires_on,note,row_ids,bucket&order=created_at`);
+    let made = 0;
+    for (const w of chosen) {
+      const x = items.find((q) => q.name === w.file_name);
+      const mark = (text) => sb(`vault_import_items?id=eq.${w.id}`, { method: "PATCH", body: JSON.stringify({ result: text }) });
+      try {
+        if (!x) { await mark("could not find that file again"); continue; }
+        const targets = (w.row_ids || []).map((id) => rows.find((q) => q.id === id)).filter(Boolean);
+        if (!targets.length) { await mark("skipped: no row picked"); continue; }
+        const title = String(w.title || targets[0].label).trim().slice(0, 120);
+        const created = JSON.parse(op(["document", "create", x.file, "--title", title, "--vault", w.vault_id, "--file-name", basename(x.file), "--tags", "StewardOS", "--format", "json"]));
+        for (const extra of (x.files ?? []).slice(1)) {
+          try { op(["item", "edit", created.id, "--vault", w.vault_id, `Attachments.${basename(extra).replace(/[^A-Za-z0-9]+/g, "_")}[file]=${extra}`]); } catch { /* the first page is attached; a second is a bonus */ }
+        }
+        // Where it came from, in the item itself: two passports in a vault should say which is which.
+        try { op(["item", "edit", created.id, "--vault", w.vault_id, `notesPlain=Added by StewardOS from ${basename(x.file)} on ${new Date().toISOString().slice(0, 10)}`]); } catch { /* the note is a nicety */ }
+        const link = `https://start.1password.com/open/i?a=${me.account_uuid}&v=${created.vault?.id ?? w.vault_id}&i=${created.id}&h=${host}`;
+        const patch = { link, updated_at: new Date().toISOString() };
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(w.expires_on || ""))) patch.expires_on = w.expires_on;
+        if (w.note) patch.note = String(w.note).slice(0, 300);
+        for (const t of targets) {
+          const [a] = await sb(`vault_pointers?id=eq.${t.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+          if (!a?.link) throw new Error(`the row "${t.label}" did not take the link`);
+          if (a.attached_kind === "vehicle" && patch.expires_on && (x.kind === "registration" || x.kind === "auto_card")) {
+            const v = vehicles.find((q) => q.id === a.attached_id);
+            if (v) {
+              const cur = (await sb(`vehicles?id=eq.${v.id}&select=details`))[0]?.details ?? {};
+              const field = x.kind === "registration" ? "regExpiry" : "insuranceExpiry";
+              await sb(`vehicles?id=eq.${v.id}`, { method: "PATCH", body: JSON.stringify({ details: { ...cur, [field]: patch.expires_on } }) });
+            }
+          }
+        }
+        made++;
+        await mark(`created in 1Password and linked to ${targets.map((t) => t.label).join(", ")}`);
+      } catch (e) { await mark(`failed: ${e.message}`.slice(0, 300)); }
+    }
+    let deleted = null;
+    if (run.delete_folder) {
+      try { rmSync(FOLDER, { recursive: true, force: true }); deleted = new Date().toISOString(); console.log(`Deleted ${FOLDER}.`); }
+      catch (e) { console.log(`Could not delete the folder: ${e.message}`); }
+    }
+    await sb(`vault_imports?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "done", applied_at: new Date().toISOString(), created: made, folder_deleted_at: deleted }) });
+    console.log(`Created ${made} of ${chosen.length}.`);
+    return;
+  }
 
   // ---------- the mapping screen ----------
   const token = randomBytes(12).toString("hex");
@@ -291,4 +372,26 @@ document.getElementById('status').textContent='Done: '+out.filter(o=>o.ok).lengt
     spawnSync("open", [url]);
   });
 }
-main().catch((e) => { console.error(`STOP: ${e.message}`); process.exit(1); });
+async function serveLoop() {
+  console.log("Waiting for a folder from the app (Settings > 1Password > Map your documents). Ctrl-C to stop.");
+  for (;;) {
+    try {
+      const [run] = await sb("vault_imports?status=eq.requested&select=id,folder&order=requested_at&limit=1");
+      if (run) {
+        FOLDER = resolve(String(run.folder).replace(/^~/, HOME));
+        process.env.STEWARD_RUN_ID = run.id;
+        await sb(`vault_imports?id=eq.${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "scanning", picked_at: new Date().toISOString() }) });
+        console.log(`\nReading ${FOLDER} for the app…`);
+        try { await main(); }
+        catch (e) {
+          console.error(`That run failed: ${e.message}`);
+          await sb(`vault_imports?id=eq.${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "failed", error: String(e.message).slice(0, 300) }) });
+        }
+      }
+    } catch (e) { console.error(`(could not reach the app: ${e.message})`); }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+}
+
+if (SERVE) serveLoop();
+else main().catch((e) => { console.error(`STOP: ${e.message}`); process.exit(1); });

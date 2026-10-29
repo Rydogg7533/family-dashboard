@@ -51,6 +51,15 @@ export default async function VaultSettings() {
       <H1 right={<Link href="/settings" className="font-semibold text-accent">Settings ›</Link>}>1Password</H1>
       <p className="text-xs text-muted mb-3">The sensitive things live in 1Password. This page holds only each item&rsquo;s name and its private link, so Ask can say &ldquo;it&rsquo;s in 1Password&rdquo; and open it behind your own unlock. Three levels: Just me, Parents (the two of you), Everyone (the whole family). Never a number, never a scan. Items are grouped by person, the same way your 1Password vaults are: each adult&rsquo;s own items are theirs alone, each child&rsquo;s items sit under that child, and <span className="text-fg">Shared</span> is the vault both parents hold.</p>
       <p className="text-xs text-muted mb-3">To get a link: in 1Password, open the item &rsaquo; the &ldquo;&hellip;&rdquo; menu &rsaquo; <span className="text-fg">Copy Private Link</span>. It opens only for someone signed in to your 1Password.</p>
+      <Link href="/settings/vault/import" className="block mb-3">
+        <div className="card border-accent flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-sm">Map your documents</div>
+            <div className="text-xs text-muted">Point at a folder of scans on your Mac. It reads each one, works out what it is, and fills these rows for you.</div>
+          </div>
+          <span aria-hidden className="text-accent shrink-0">&rsaquo;</span>
+        </div>
+      </Link>
       <VaultList rows={rows} removed={removed} me={me} adults={adults} kids={kids} vehicles={vehicles} devices={devices} accounts={accounts} retired={retired} isOwner={isOwner} groups={VAULT_GROUPS.map((g) => ({ id: g.id, label: g.label, blurb: g.blurb }))} />
     </>
   );
