@@ -8,6 +8,9 @@ import { AskChat } from "@/components/AskChat";
 // person is on, so a question never costs them their place. One thread, two doors: what is asked here is on
 // the Ask tab too (same window, same history), and closing only hides it. Four ways to close: the X, the
 // Done button, a tap on the dimmed page, or Escape. If a confirm card is still waiting the sheet asks once.
+// What the keyboard measured last time, so the next open reserves exactly the right space.
+const KEYBOARD_KEY = "ask-keyboard-height";
+
 export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClose: () => void; who: string; sample: boolean }) {
   const path = usePathname();
   const [pending, setPending] = useState(false);
@@ -58,16 +61,37 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
     if (!open) return;
     const v = window.visualViewport;
     if (!v) return;
-    let settle: ReturnType<typeof setTimeout> | undefined;
+    // The keyboard's space is reserved before it arrives, so nothing resizes when it does (Ryan, 2026-10-28, after a
+    // screen recording showed the sheet's top edge moving five times while the keyboard rose through its opening
+    // animation). The sheet opens at the size it will have WITH the keyboard up, the input is focused, and the
+    // keyboard then rises into space that is already empty: two things moving up together, no reflow.
+    // A web page cannot ask iOS how tall the keyboard is, so the first open on a device uses a proportion and the
+    // real height is measured and kept for every open after that. If the keyboard never comes (hardware keyboard, or
+    // the focus is refused) the reservation is handed back after 800ms.
+    const h0 = v.height;
+    const saved = Number((() => { try { return window.localStorage.getItem(KEYBOARD_KEY); } catch { return null; } })() ?? 0);
+    const reserve = saved > 120 && saved < h0 * 0.7 ? saved : Math.round(h0 * 0.42);
+    let released = false, settle: ReturnType<typeof setTimeout> | undefined;
     const apply = () => {
       const o = overlayRef.current;
-      if (o) { o.style.top = `${v.offsetTop}px`; o.style.height = `${v.height}px`; o.style.bottom = "auto"; }
+      const gap = released ? 0 : reserve;
+      if (o) { o.style.top = `${v.offsetTop}px`; o.style.height = `${Math.max(240, v.height - gap)}px`; o.style.bottom = "auto"; }
       clearTimeout(settle);
-      settle = setTimeout(() => { const sh = sheetRef.current; if (sh) sh.style.maxHeight = `${Math.round(v.height * 0.85)}px`; }, 150);
+      settle = setTimeout(() => { const sh = sheetRef.current; if (sh) sh.style.maxHeight = `${Math.round(Math.max(240, v.height - (released ? 0 : reserve)) * 0.85)}px`; }, 150);
+    };
+    const onViewport = () => {
+      const shrunk = h0 - v.height;
+      if (!released && shrunk > 120) {
+        // The keyboard is up: the space it takes is now real, so stop reserving and remember its height.
+        released = true;
+        try { window.localStorage.setItem(KEYBOARD_KEY, String(Math.round(shrunk))); } catch { /* fine */ }
+      }
+      apply();
     };
     apply();
-    v.addEventListener("resize", apply); v.addEventListener("scroll", apply);
-    return () => { clearTimeout(settle); v.removeEventListener("resize", apply); v.removeEventListener("scroll", apply); };
+    const giveBack = setTimeout(() => { if (!released) { released = true; apply(); } }, 800);
+    v.addEventListener("resize", onViewport); v.addEventListener("scroll", onViewport);
+    return () => { clearTimeout(settle); clearTimeout(giveBack); v.removeEventListener("resize", onViewport); v.removeEventListener("scroll", onViewport); };
   }, [open]);
   if (!open) return null;
   return (
