@@ -35,15 +35,6 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       else { setMsg(r.error); setConfirming(false); }
     } catch { setMsg("That took too long and may not have gone through. Nothing is shown as requested until it is saved; reload the page and try again."); setConfirming(false); }
   });
-  // Archive only (D16): hides the ticked senders here, Gmail untouched, no unsubscribe. One tap, no confirm, reversible from "Archived".
-  const archive = () => start(async () => {
-    setMsg(null); setConfirming(false);
-    try {
-      const r = await withTimeout(archiveSenders([...picked], true), 25000);
-      if (r.ok) { setMsg(`Archived ${r.count}. Hidden here only; Gmail is unchanged. Find them under Archived at the bottom.`); setPicked(new Set()); router.refresh(); }
-      else setMsg(r.error);
-    } catch { setMsg("That took too long and may not have gone through. Reload the page and look under Archived."); }
-  });
   const groups = CATEGORY_ORDER.map((c) => ({ c, rows: subs.filter((s) => (s.category ?? "unclear") === c) })).filter((g) => g.rows.length > 0);
   const tickedAccount = subs.filter((s) => picked.has(s.id) && s.category === "account");
   const tickedUnverified = subs.filter((s) => picked.has(s.id) && s.auth_ok === false && !s.trusted_at);
@@ -54,7 +45,6 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       <span className="text-sm font-semibold" aria-live="polite">{n === 0 ? "Nothing ticked" : `${n} ticked`}</span>
       <div className="flex gap-2">
         {n > 0 && <button className="min-h-11 px-3 rounded-xl border border-line text-sm font-semibold" onClick={() => { setPicked(new Set()); setConfirming(false); }}>Clear</button>}
-        <button className="min-h-11 px-3 rounded-xl border border-line text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending} onClick={archive} title="Hide here only. Gmail is not changed.">Archive{n > 0 ? ` (${n})` : ""}</button>
         <button className="min-h-11 px-4 rounded-xl border border-accent bg-accent text-white text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending || !ready} onClick={() => setConfirming(true)}>{pending ? <><Spin />Working…</> : <>Unsubscribe{n > 0 ? ` (${n})` : ""}</>}</button>
       </div>
     </div>

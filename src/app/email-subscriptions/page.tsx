@@ -35,7 +35,7 @@ export default async function EmailSubscriptions() {
       <H1>Mailing lists</H1>
       <p className="text-xs text-muted mb-3">
         {scan.at ? `Mailing lists found in your Gmail, updated ${ago(scan.at)} and every few hours after that.` : "Mailing lists found in your Gmail."}{" "}
-        Only the sender, date and subject line are read, never the message itself. Tick the ones you are done with and tap Unsubscribe, or Archive to hide them here without changing Gmail.
+        Only the sender, date and subject line are read, never the message itself. Tick the ones you are done with and tap Unsubscribe.
         {scan.state === "warn" && <span className="text-amber font-semibold"> The last scan had trouble reading some mail.</span>}
       </p>
 
