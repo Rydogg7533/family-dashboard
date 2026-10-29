@@ -76,9 +76,9 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
 
   return (
     <div className="flex flex-col gap-3 pb-16">
-      <div className="flex items-center justify-between text-[11px] font-bold text-muted">
-        <span>{thread.name.toUpperCase()} · {thread.members.length} people</span>
-        <button aria-label="About this thread" aria-expanded={info} onClick={() => setInfo((v) => !v)} className="w-7 h-7 rounded-full border border-line text-accent font-bold text-xs">i</button>
+      <div className="flex items-center justify-center gap-2 text-[11px] text-muted">
+        <span>{thread.members.join(", ")}</span>
+        <button aria-label="About this thread" aria-expanded={info} onClick={() => setInfo((v) => !v)} className="w-6 h-6 rounded-full border border-line text-accent font-bold text-[11px]">i</button>
       </div>
       {info && (
         <div className="card text-xs text-muted flex flex-col gap-1">
