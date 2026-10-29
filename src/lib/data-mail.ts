@@ -100,8 +100,16 @@ export async function getNewsletters(): Promise<{ senders: NewsletterSender[]; r
     const { data: subs } = await sb.from("email_subscriptions").select("id,sender_name,address,status,archived_at,category").is("deleted_at", null).not("address", "is", null);
     const byAddr = new Map((subs ?? []).map((s) => [String(s.address).toLowerCase(), s]));
     if (!byAddr.size) return { senders: [], rows: [] };
-    const all = await getMail("inbox");
-    const rows = all.filter((r) => r.from_addr && byAddr.has(r.from_addr.toLowerCase()));
+    // Asked for by sender address, not taken from the newest 300 of the whole inbox and filtered afterwards: of those
+    // 300 exactly one was from a mailing list, so fifteen senders with messages showed none (Ryan, 2026-10-29).
+    const { data: accts } = await sb.from("mail_accounts").select("id,address");
+    const acct = new Map((accts ?? []).map((a) => [a.id, a.address]));
+    const { data } = await sb.from("mail_messages")
+      .select("id,account_id,folder,from_name,from_addr,to_addrs,subject,snippet,sent_at,unread,attachments")
+      .eq("folder", "inbox").is("left_inbox_at", null)
+      .in("from_addr", [...byAddr.keys()])
+      .order("sent_at", { ascending: false, nullsFirst: false }).limit(600);
+    const rows: MailRow[] = (data ?? []).map((r) => ({ id: r.id, account: acct.get(r.account_id) ?? "", folder: r.folder, from_name: r.from_name, from_addr: r.from_addr, to_addrs: r.to_addrs ?? [], subject: r.subject, snippet: r.snippet, sent_at: r.sent_at, unread: r.unread, has_files: Array.isArray(r.attachments) && r.attachments.length > 0 }));
     const groups = new Map<string, NewsletterSender>();
     for (const r of rows) {
       const s = byAddr.get(r.from_addr!.toLowerCase())!;
