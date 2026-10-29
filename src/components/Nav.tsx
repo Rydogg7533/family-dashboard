@@ -48,16 +48,28 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
     return () => { document.removeEventListener("visibilitychange", onVisible); sb?.removeChannel(ch); };
   }, [hidden, live, refresh]);
 
+  // Typing: the bar leaves while a text field has focus, so the compose box sits straight on the keyboard the way every
+  // messaging app does, and nothing sits where thumbs reach for the top keyboard row. It returns the moment focus leaves.
+  // A short delay on blur covers focus hopping between two fields without the bar bouncing.
+  const [typing, setTyping] = useState(false);
   useEffect(() => {
-    // Keep fixed elements (compose bar, + button) flush with the real tab bar height.
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const isField = (el: EventTarget | null) => el instanceof HTMLElement && (el.matches("input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable='true']"));
+    const onIn = (e: FocusEvent) => { if (isField(e.target)) { clearTimeout(t); setTyping(true); } };
+    const onOut = (e: FocusEvent) => { if (isField(e.target)) { clearTimeout(t); t = setTimeout(() => setTyping(false), 120); } };
+    document.addEventListener("focusin", onIn); document.addEventListener("focusout", onOut);
+    return () => { clearTimeout(t); document.removeEventListener("focusin", onIn); document.removeEventListener("focusout", onOut); };
+  }, []);
+  useEffect(() => {
+    // Keep fixed elements (compose bar, + button) flush with the real tab bar height — 0 while it is away.
     const el = navRef.current;
     if (!el) return;
-    const set = () => document.documentElement.style.setProperty("--bar-bottom", `${Math.round(el.getBoundingClientRect().height)}px`);
+    const set = () => document.documentElement.style.setProperty("--bar-bottom", typing ? "0px" : `${Math.round(el.getBoundingClientRect().height)}px`);
     set();
     const ro = new ResizeObserver(set);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [hidden]);
+  }, [hidden, typing]);
 
   // Overflow: more tabs than fit → the row scrolls; the current page's tab is brought into view on arrival, and the row
   // slides back to the start SNAP_BACK_MS after the last touch so the bar always looks the same when you glance at it.
@@ -97,7 +109,7 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
   // More is pinned at the right edge; the other tabs scroll behind it when there are more than fit.
   // .tabbar / .tabbar-wrap / .tabbar-pill are styled in globals.css and follow Look and feel (strip or floating island).
   return (
-    <nav ref={navRef} className="tabbar-wrap fixed bottom-0 inset-x-0">
+    <nav ref={navRef} aria-hidden={typing || undefined} className={`tabbar-wrap fixed bottom-0 inset-x-0 transition-transform duration-200 ${typing ? "translate-y-full pointer-events-none" : ""}`}>
       <div className="tabbar max-w-md mx-auto">
         <div className="tabbar-row flex items-stretch px-2 pb-[max(16px,env(safe-area-inset-bottom))] text-[11px] font-semibold">
           <div ref={rowRef} className={`flex flex-1 min-w-0 ${scrolls ? "overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
