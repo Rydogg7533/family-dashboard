@@ -62,7 +62,10 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
    so every layout correction behind it read as a glitch (Ryan, 2026-10-28). */
 @keyframes ask-sheet-in { from { transform: translateY(14px); } to { transform: none; } }
 @keyframes ask-scrim-in { from { opacity: 0; } to { opacity: 1; } }
-.ask-sheet { animation: ask-sheet-in 190ms cubic-bezier(0.22, 0.7, 0.3, 1); will-change: transform; }
+/* No backdrop blur behind the sheet and no standing layer promotion: the scrim covers three screen heights, and
+   blurring that much live page while anything animates over it is the most expensive thing an iPhone can be asked to
+   do here. A solid dim costs nothing and reads the same. */
+.ask-sheet { animation: ask-sheet-in 190ms cubic-bezier(0.22, 0.7, 0.3, 1); }
 .ask-scrim { animation: ask-scrim-in 190ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .ask-sheet, .ask-scrim { animation: none; } }
 
