@@ -54,7 +54,7 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
   return (
     <div className="fixed left-0 right-0 z-50 flex items-end justify-center" style={vv ? { top: vv.top, height: vv.height } : { top: 0, bottom: 0 }} role="dialog" aria-modal="true" aria-label="Ask">
       <button aria-label="Close" className="absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-black/75 backdrop-blur-sm touch-none" onClick={tryClose} />
-      <div className={`relative w-full max-w-md bg-soft rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
+      <div className={`ask-sheet relative w-full max-w-md bg-soft rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
         <div className="flex items-center justify-between touch-none" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-line" />
           <div className="font-semibold text-sm text-accent flex items-center gap-2"><span aria-hidden="true" className="w-2 h-2 rounded-full bg-accent" />Ask</div>
