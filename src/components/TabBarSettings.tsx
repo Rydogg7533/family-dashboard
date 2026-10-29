@@ -1,6 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import { DEFAULT_TABS, FIXED_MAX, TAB_CATALOG, resolveTabs, type TabKey } from "@/lib/tabs";
+import { DEFAULT_TABS, FIXED_MAX, TAB_CATALOG, TAB_GROUPS, resolveTabs, type TabKey } from "@/lib/tabs";
 import { MoreIcon } from "@/components/MoreIcons";
 import { saveTabBar } from "@/app/settings/tabs/actions";
 
@@ -34,7 +34,11 @@ export function TabBarSettings({ initial }: { initial: TabKey[] }) {
         <li className="flex items-center gap-3 py-2.5 text-muted"><span className="w-6" /><span className="flex items-center justify-center w-9 h-9 rounded-full bg-soft"><MoreIcon name="grid" size={20} /></span><span className="flex-1 font-semibold">More <span className="font-normal">· always last</span></span></li>
       </ul>
       <h2 className="text-xs font-bold uppercase tracking-wide text-muted mb-1">Under More</h2>
-      <ul className="mb-5">{off.map((k) => <Row key={k.key} k={k} on={false} />)}</ul>
+      {TAB_GROUPS.map((g) => { const rows = off.filter((k) => (k.group ?? "core") === g.id); return rows.length ? (
+        <div key={g.id} className="mb-4">
+          <div className="text-[11px] font-semibold text-muted mt-2 mb-0.5">{g.label}</div>
+          <ul>{rows.map((k) => <Row key={k.key} k={k} on={false} />)}</ul>
+        </div>) : null; })}
       <div className="flex items-center gap-3 text-sm">
         <button type="button" onClick={() => apply(DEFAULT_TABS.filter((k) => k !== "more"))} className="font-semibold text-accent">Reset to default</button>
         <span className="text-muted">{pending ? "Saving…" : note}</span>

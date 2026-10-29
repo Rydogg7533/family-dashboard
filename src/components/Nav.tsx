@@ -89,7 +89,9 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
   }, [scrolls, path]);
 
   if (hidden) return null;
-  const isActive = (t: Tab) => t.href === "/" ? path === "/" : t.key === "more" ? extraRoots.some((r) => path.startsWith(r)) : path.startsWith(t.href);
+  // The longest matching href wins, so Money and Receipts can both sit on the bar without both lighting up.
+  const best = tabs.filter((t) => t.href !== "/" && t.key !== "more" && (path === t.href || path.startsWith(t.href + "/"))).sort((a, b) => b.href.length - a.href.length)[0];
+  const isActive = (t: Tab) => t.href === "/" ? path === "/" : t.key === "more" ? !best && extraRoots.some((r) => path.startsWith(r)) : t === best;
   const count = (t: Tab) => (t.badge ? badges[t.badge] : 0);
   const more = tabs[tabs.length - 1], row = tabs.slice(0, -1);
   const tab = (t: Tab) => {
