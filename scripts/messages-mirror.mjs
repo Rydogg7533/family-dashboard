@@ -285,7 +285,7 @@ async function main() {
     // family threads keep their name-based ids (pins, notifications and suggestions point at them); others are keyed by
     // their handles so a renamed contact does not become a new thread
     const id = isFamily ? `${kind}-${members.join("-")}`.toLowerCase().replace(/[^a-z0-9-]+/g, "_")
-                        : `${kind}-${[...handles].sort().map((h) => h.replace(/[^a-z0-9@.]+/gi, "")).join("-")}`.toLowerCase().replace(/[^a-z0-9@.-]+/g, "_").slice(0, 120);
+                        : `${kind}-${[...handles].sort().map((h) => h.toLowerCase().replace(/[^a-z0-9]+/g, "_")).join("-")}`.slice(0, 120); // letters, digits, _ and - only: safe in a URL, a push tag and a file path
     if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [], isFamily, handles: [...new Set(handles)] });
     const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name; for (const h of handles) if (!g.handles.includes(h)) g.handles.push(h);
   }
