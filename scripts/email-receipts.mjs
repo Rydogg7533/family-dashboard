@@ -10,7 +10,11 @@
 //                re-run adds nothing twice. This is what Subscriptions reads to spot repeat charges.
 //   2. DOCUMENT  each attached PDF or image (the kinds the Inbox reader can read, ≤ 20 MB) is copied into the private "captures" bucket
 //                and becomes an Inbox item that asks "Yes, file it", exactly like a phone upload. Dedupe by content hash: an attachment
-//                already in the Inbox is skipped, so a re-run is safe. Body-only receipts make no document (sighting only).
+//                already in the Inbox is skipped, so a re-run is safe.
+//   2b. BODY     a money email with NO usable attachment has its text rendered to a PDF and put in the Inbox the same way, so that every
+//                charge ends with a document and not just a number (Ryan, 2026-10-29). Rendered from the TEXT, never the HTML: a receipt
+//                email's remote images are the sender's tracking pixel, and fetching them would report the mail opened again, months
+//                later, from the hub. The bytes are deterministic, so the same email re-rendered is caught by the same hash check.
 // The MAILBOX IS NEVER CHANGED: Gmail is opened read-only (any write call throws); iCloud folders are opened EXAMINE with BODY.PEEK.
 // Nothing is deleted, nothing is sent, no model is called. Secrets: ~/_secrets_local_only/family-dashboard.env (Supabase) and
 // ~/_secrets_local_only/email-agent/ (Gmail tokens, icloud-ryan.env). Never printed.
@@ -20,6 +24,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { dir, option, openGmail, parse, decide, merchantKey, amountOf } from "./email-lib.mjs";
+import { emailPdf } from "./lib/text-pdf.mjs";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
@@ -35,6 +40,33 @@ const before = WIN_NEW > 0 ? (() => { const d = new Date(); d.setMonth(d.getMont
 const WIN_TXT = `${WIN_NEW}-${WIN_OLD} months ago`;
 const READABLE = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" };
 const MAX_BYTES = 20 * 1024 * 1024;
+const MAX_BODY = 60_000;        // a rendered receipt is a page or two; a newsletter-length body is truncated, not refused
+const MIN_BODY = 40;            // below this there is nothing worth keeping and no document is made
+
+// Last resort when a sender ships HTML only: strip it to something readable. Scripts and styles go first, so their
+// contents never appear as text; block tags become newlines so the layout survives roughly.
+const stripHtml = (h) => String(h || "")
+  .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+  .replace(/<\/(p|div|tr|table|h[1-6]|li|ul|ol)>/gi, "\n")
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<[^>]+>/g, " ")
+  .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"')
+  .replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+
+// Gmail hands back the body in base64url, split across parts. Plain text wins; HTML is the fallback.
+function gmailBody(payload) {
+  let text = "", html = "";
+  const walk = (p) => {
+    if (!p) return;
+    const mime = (p.mimeType || "").toLowerCase();
+    const data = p.body?.data ? Buffer.from(p.body.data, "base64url").toString("utf8") : "";
+    if (data && mime === "text/plain" && !p.filename) text += (text ? "\n" : "") + data;
+    if (data && mime === "text/html" && !p.filename) html += (html ? "\n" : "") + data;
+    for (const c of p.parts || []) walk(c);
+  };
+  walk(payload);
+  return (text.trim() || stripHtml(html)).slice(0, MAX_BODY);
+}
 
 const readEnv = (p) => { const o = {}; if (!existsSync(p)) return o; for (const l of readFileSync(p, "utf8").split("\n")) { const m = l.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; };
 const env = readEnv(join(homedir(), "_secrets_local_only", "family-dashboard.env"));
@@ -78,7 +110,8 @@ async function* moneyMail() {
       const files = [];
       const walk = (p) => { if (!p) return; if (p.filename && p.body?.attachmentId && READABLE[(p.mimeType || "").toLowerCase()]) files.push({ name: p.filename, mime: p.mimeType.toLowerCase(), size: p.body.size || 0, get: async () => Buffer.from((await api(`/gmail/v1/users/me/messages/${id}/attachments/${p.body.attachmentId}`)).data, "base64url") }); for (const c of p.parts || []) walk(c); };
       walk(full.payload);
-      yield { ref: `gmail:${account}:${id}`, link: `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${id}`, date: e.date, subject: e.subject, snippet: e.snippet, name: e.name, address: e.address, domain: e.domain, files };
+      const body = gmailBody(full.payload);
+      yield { body, ref: `gmail:${account}:${id}`, link: `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${id}`, date: e.date, subject: e.subject, snippet: e.snippet, name: e.name, address: e.address, domain: e.domain, files };
     }
     process.stdout.write("\n");
   } else {
@@ -107,11 +140,11 @@ async function* moneyMail() {
       }
       process.stdout.write("\n");
       for (const { uid, e } of money) {
-        let files = [], snippet = "";
+        let files = [], snippet = "", body = "";
         const dl = await c.download(uid.toString(), undefined, { uid: true }).catch(() => null);
         if (dl) { const chunks = []; for await (const ch of dl.content) chunks.push(ch); const src = Buffer.concat(chunks);
-          if (src.length <= MAX_BYTES) { const p = await simpleParser(src); snippet = (p.text || "").replace(/\s+/g, " ").slice(0, 300); files = (p.attachments || []).filter((a) => READABLE[(a.contentType || "").toLowerCase()]).map((a) => ({ name: a.filename || "attachment", mime: a.contentType.toLowerCase(), size: a.size || a.content.length, get: async () => a.content })); } }
-        yield { ref: FOLDER === "INBOX" ? `icloud:${account}:${uidv}-${uid}` : `icloud:${account}:${FOLDER}:${uidv}-${uid}`, sighting: FOLDER === "INBOX", link: null, date: e.date, subject: e.subject, snippet, name: e.name, address: e.address, domain: e.domain, files };
+          if (src.length <= MAX_BYTES) { const p = await simpleParser(src); snippet = (p.text || "").replace(/\s+/g, " ").slice(0, 300); body = ((p.text || "").trim() || stripHtml(p.html)).slice(0, MAX_BODY); files = (p.attachments || []).filter((a) => READABLE[(a.contentType || "").toLowerCase()]).map((a) => ({ name: a.filename || "attachment", mime: a.contentType.toLowerCase(), size: a.size || a.content.length, get: async () => a.content })); } }
+        yield { body, ref: FOLDER === "INBOX" ? `icloud:${account}:${uidv}-${uid}` : `icloud:${account}:${FOLDER}:${uidv}-${uid}`, sighting: FOLDER === "INBOX", link: null, date: e.date, subject: e.subject, snippet, name: e.name, address: e.address, domain: e.domain, files };
       }
     } finally { lock.release(); }
     }
@@ -122,7 +155,7 @@ async function* moneyMail() {
 async function main() {
   const person = (await rest("GET", "profiles?display_name=eq.Ryan&select=id"))[0]?.id;
   if (!person) throw new Error("no profile named Ryan");
-  const stats = { money: 0, sightings: 0, seen: 0, docs: 0, dupes: 0, skipped: 0, bodyOnly: 0 };
+  const stats = { money: 0, sightings: 0, seen: 0, docs: 0, dupes: 0, skipped: 0, bodyOnly: 0, rendered: 0, bodyThin: 0 };
   const examples = [];
   for await (const m of moneyMail()) {
     stats.money++;
@@ -132,7 +165,24 @@ async function main() {
     // 2. documents
     const usable = m.files.filter((f) => f.size <= MAX_BYTES && (f.mime === "application/pdf" || f.size >= MIN_KB * 1024));
     stats.skipped += m.files.length - usable.length;
-    if (!usable.length) { stats.bodyOnly++; if (examples.length < 12) examples.push(`${m.domain.padEnd(26)} ${m.subject.slice(0, 50).padEnd(50)} (no attachment)`); continue; }
+    // 2b. No attachment: the email itself is the receipt, so render it. Same Inbox path, same hash dedupe, same
+    //     "what is this?" question -- the only difference is that the document says where it came from.
+    if (!usable.length) {
+      stats.bodyOnly++;
+      if (!m.body || m.body.trim().length < MIN_BODY) { stats.bodyThin++; if (examples.length < 12) examples.push(`${m.domain.padEnd(26)} ${m.subject.slice(0, 50).padEnd(50)} (no attachment, nothing to render)`); continue; }
+      const buf = emailPdf({ from: m.name, address: m.address, date: m.date, subject: m.subject, account, body: m.body });
+      const hash = sha(buf);
+      if ((await rest("GET", `inbox_items?sha256=eq.${hash}&select=id`)).length) { stats.dupes++; continue; }
+      stats.rendered++; if (examples.length < 12) examples.push(`${m.domain.padEnd(26)} ${m.subject.slice(0, 50).padEnd(50)} → rendered from the email body`);
+      if (!APPLY) continue;
+      const title = `${m.date} ${(m.name || m.domain || "email").slice(0, 40)} ${m.subject}`.replace(/[^\w.\- @]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) + ".pdf";
+      const key = `${person}/${new Date().toISOString().slice(0, 10)}/${randomUUID().slice(0, 8)}-${title.replace(/[^\w.\- ]+/g, "_")}`;
+      await upload(key, "application/pdf", buf);
+      await rest("POST", "inbox_items", [{ kind: "identify", requested_by: "email", title, origin: "Email body", origin_href: m.link || "#", origin_label: account,
+        missing: `From ${m.name || m.address}: "${m.subject.slice(0, 80)}". The sender attached nothing, so this is the email itself. What is it? A receipt, a bill, a statement, a form, or something else?`,
+        options: ["Receipt", "Bill", "Statement", "Form", "Something else"], file_path: key, mime: "application/pdf", size_bytes: buf.length, sha256: hash, created_by: person, for_person: "Ryan" }], { Prefer: "return=minimal" });
+      continue;
+    }
     for (const f of usable) {
       const buf = await f.get(); const hash = sha(buf);
       const dup = (await rest("GET", `inbox_items?sha256=eq.${hash}&select=id`)).length;
@@ -149,10 +199,11 @@ async function main() {
   }
   console.log(`\n${APPLY ? "APPLIED" : "DRY RUN"} ${account}: ${stats.money} receipt/statement emails, ${WIN_TXT}`);
   console.log(`  sightings: ${stats.sightings} new${stats.seen ? `, ${stats.seen} already recorded` : ""}`);
-  console.log(`  documents to the Inbox: ${stats.docs}${stats.dupes ? `, ${stats.dupes} already there` : ""}; ${stats.bodyOnly} body-only receipts (sighting only); ${stats.skipped} tiny images/logos skipped`);
+  console.log(`  documents to the Inbox: ${stats.docs} attached${stats.dupes ? `, ${stats.dupes} already there` : ""}; ${stats.skipped} tiny images/logos skipped`);
+  console.log(`  body-only receipts: ${stats.bodyOnly}, of which ${stats.rendered} rendered to PDF${stats.bodyThin ? ` and ${stats.bodyThin} had nothing to render` : ""}`);
   if (examples.length) { console.log("  examples:"); for (const x of examples) console.log(`    ${x}`); }
   if (APPLY) {
-    const rows = (await rest("GET", `inbox_items?origin=eq.Email&origin_label=eq.${encodeURIComponent(account)}&select=id`)).length;
+    const rows = (await rest("GET", `inbox_items?origin=in.(Email,"Email body")&origin_label=eq.${encodeURIComponent(account)}&select=id`)).length;
     const obs = (await rest("GET", `recurring_observations?mailbox=eq.${encodeURIComponent(account)}&source=eq.receipt&select=id`)).length;
     console.log(`  verified in the database: ${rows} Email documents in the Inbox for this account, ${obs} receipt sightings. Mailbox unchanged.`);
     if (skippedSus) console.log(`  skipped as suspicious (not recorded, attachments not copied): ${skippedSus}.`);

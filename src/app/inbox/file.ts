@@ -20,7 +20,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, summary: "Not signed in." };
-  const { data: row } = await sb.from("inbox_items").select("id,title,file_path,pages,read_result,suggested_name,status,claim_id").eq("id", inboxId).maybeSingle();
+  const { data: row } = await sb.from("inbox_items").select("id,title,file_path,pages,read_result,suggested_name,status,claim_id,origin").eq("id", inboxId).maybeSingle();
   if (!row || row.status !== "open") return { ok: false, summary: "That item is no longer open." };
 
   if (answer === FILE_NO) {
@@ -30,6 +30,10 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   }
 
   const r = (row.read_result ?? {}) as Read;
+  // Where this document came from, kept on the receipt. It is the difference between the vendor's own invoice and a
+  // page StewardOS rendered from an email that had no attachment, and the filing agent needs it: when one charge ends
+  // up with both, only one file belongs in the card folder, and it should be the vendor's.
+  const docSource = row.origin === "Email body" ? "email-body" : "upload";
   const who = user.email ?? "member";
   const name = (row.suggested_name as string | null) || row.title;
   const done: string[] = [];
@@ -90,11 +94,11 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
       // Same purchase already filed: keep that row (first wins), fill only its empty fields, link this document to it.
       const patch = blanksToFill(same, { file_path: row.file_path, captured_by: who });
       if (Object.keys(patch).length) await sb.from("receipts").update(patch).eq("id", same.id);
-      await attachDocument(sb, same.id, { inbox_id: inboxId, path: (row.file_path as string | null) ?? null, name: name ?? null, source: "upload" });
+      await attachDocument(sb, same.id, { inbox_id: inboxId, path: (row.file_path as string | null) ?? null, name: name ?? null, source: docSource });
       filed.duplicate_of = same.id; filed.receipt_id = same.id; done.push("already in Receipts (this document attached to it, not added twice)");
     }
     else if (r.vendor && typeof r.amount === "number" && r.amount > 0 && r.date) {
-      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, external_ref: orderNo && answer !== FILE_DIFFERENT ? `amazon:${orderNo}` : null, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id, documents: [{ inbox_id: inboxId, path: row.file_path ?? null, name: name ?? null, source: "upload", added_at: new Date().toISOString() }] }).select("id").single();
+      const { data: rc, error } = await sb.from("receipts").insert({ merchant: r.vendor, amount: r.amount, date: r.date, external_ref: orderNo && answer !== FILE_DIFFERENT ? `amazon:${orderNo}` : null, source: "upload", file_path: row.file_path, status: "expecting_charge", entity: null, captured_by: who, uploaded_by: user.id, documents: [{ inbox_id: inboxId, path: row.file_path ?? null, name: name ?? null, source: docSource, added_at: new Date().toISOString() }] }).select("id").single();
       if (!error && rc) { filed.receipt_id = rc.id; done.push("Receipts, waiting for its card charge"); }
     }
   }

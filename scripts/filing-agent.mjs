@@ -87,6 +87,19 @@ export function receiptHome(rc, now = Date.now()) {
   return card ? `Organized/Personal/Documents/Finance/${year}/${card}/${month}/` : `Organized/Personal/Documents/Finance/${year}/Unplaced/${month}/`;
 }
 
+// One charge, one file in the card folder (Ryan, 2026-10-29). A single purchase can reach the Inbox twice -- the
+// vendor's own invoice as an attachment, and the page rendered from an email that had none -- and both attach to the
+// SAME receipt. Copying both would put two files for one charge under two different names, and whichever ran last
+// would overwrite receipts.home_path, which was built to hold "where the single file lives".
+// The vendor's own document wins; among equals the first to arrive does. The rendered body stays attached to the
+// receipt in the app either way, so nothing is lost -- it just does not get its own copy on disk.
+export function preferredDoc(documents) {
+  const list = (Array.isArray(documents) ? documents : []).filter((d) => d && d.inbox_id);
+  if (list.length < 2) return list[0]?.inbox_id ?? null;
+  const rank = (d) => (d.source === "email-body" ? 1 : 0);
+  return [...list].sort((a, b) => rank(a) - rank(b) || String(a.added_at ?? "").localeCompare(String(b.added_at ?? "")))[0].inbox_id;
+}
+
 // "2026-10-20 AAA Toyota Sienna battery replacement $242.88" : the vehicle and the amount in the name, so a search finds it anywhere.
 export function receiptFileName(title, amount, vehicleShort) {
   let n = safeSegment(title) || "receipt";
@@ -278,14 +291,26 @@ async function main() {
   const vehicles = await rest("GET", "vehicles?select=id,short,name").catch(() => []);
   const vshort = new Map((vehicles ?? []).map((v) => [v.id, v.short]));
   const log = [];
-  let ok = 0, failed = 0, waiting = 0;
+  let ok = 0, failed = 0, waiting = 0, kept = 0;
   for (const it of items) {
     try {
       let over = {}, rc = null;
       if (it.filed?.receipt_id) {
-        const rows = await rest("GET", `receipts?id=eq.${it.filed.receipt_id}&select=id,merchant,amount,date,card,card_confidence,card_conflict,created_at`);
+        const rows = await rest("GET", `receipts?id=eq.${it.filed.receipt_id}&select=id,merchant,amount,date,card,card_confidence,card_conflict,created_at,home_path,documents`);
         rc = rows?.[0] ?? null;
         if (rc) {
+          // This charge already has its file. Mark this document as dealt with -- pointing at that file, so the row
+          // is not retried every ten minutes -- and leave the card folder with one receipt for one charge.
+          if (rc.home_path) {
+            if (!DRY) await rest("PATCH", `inbox_items?id=eq.${it.id}`, { copied_path: rc.home_path, copied_at: new Date().toISOString(), copy_error: null }, { Prefer: "return=minimal" });
+            kept++; log.push(`${it.title}: this charge is already filed at ${rc.home_path}; kept as an extra document on the receipt, not copied twice`);
+            continue;
+          }
+          // Two documents, neither copied yet: let the better one go first. Bounded by the same hold the card uses,
+          // so a preferred document that never gets answered cannot keep this one waiting for ever.
+          const pref = preferredDoc(rc.documents);
+          const age = (Date.now() - new Date(rc.created_at ?? Date.now()).getTime()) / 86400_000;
+          if (pref && pref !== it.id && age < HOLD_DAYS) { waiting++; log.push(`${it.title}: the vendor's own document for this charge goes to the card folder; this one stays on the receipt in the app`); continue; }
           const home = receiptHome(rc);
           if (!home) { waiting++; log.push(`${it.title}: waiting for its card (held up to ${HOLD_DAYS} days)`); continue; }
           over = { home, base: receiptFileName(it.title, Number(rc.amount), vshort.get(it.filed.vehicle_id)) };
@@ -303,7 +328,7 @@ async function main() {
     }
   }
   try { await writeIndexes(vehicles ?? [], log); } catch (e) { log.push(`vehicle index: ${e.message}`); }
-  const summary = items.length ? `${ok} copied, ${failed} failed${waiting ? `, ${waiting} waiting for a card` : ""}` : "nothing waiting";
+  const summary = items.length ? `${ok} copied, ${failed} failed${waiting ? `, ${waiting} waiting for a card` : ""}${kept ? `, ${kept} already filed with their charge` : ""}` : "nothing waiting";
   if (!DRY) await rest("POST", "system_status?on_conflict=key", [{ key: "sync_filing", state: failed ? "error" : "ok", summary: `Filing agent: ${summary}`, value_num: null, updated_at: new Date().toISOString() }], { Prefer: "resolution=merge-duplicates,return=minimal" }).catch(() => {});
   for (const l of log) console.log(l);
   console.log(`${new Date().toISOString()} ${DRY ? "[dry] " : ""}${summary}`);
