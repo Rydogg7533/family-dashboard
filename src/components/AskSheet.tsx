@@ -39,9 +39,14 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
     if (!open) return;
     const y = window.scrollY;
     const b = document.body.style;
-    const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width };
+    const h = document.documentElement.style;
+    const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width, htmlOverflow: h.overflow };
     b.position = "fixed"; b.top = `-${y}px`; b.left = "0"; b.right = "0"; b.width = "100%";
-    return () => { b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; window.scrollTo(0, y); };
+    // The root too: pinning the body alone still let iPhone Safari pan the page when the keyboard opened, and that
+    // pan is visible through the scrim at the top of the screen -- which is the shake (Ryan's recording, 2026-10-28:
+    // the top 290px, which the sheet never reaches, changes across eleven frames as the keyboard arrives).
+    h.overflow = "hidden";
+    return () => { b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; h.overflow = prev.htmlOverflow; window.scrollTo(0, y); };
   }, [open]);
   // With the keyboard up, iPhone Safari shrinks the visual viewport but not the layout one, so a plain fixed
   // overlay leaves a strip of page showing between the input and the keyboard. The overlay follows the visual
@@ -96,7 +101,7 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
   if (!open) return null;
   return (
     <div ref={overlayRef} className="fixed left-0 right-0 top-0 bottom-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Ask">
-      <button aria-label="Close" className="ask-scrim absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-black/80 touch-none" onClick={tryClose} />
+      <button aria-label="Close" className="ask-scrim absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-black/95 touch-none" onClick={tryClose} />
       <div ref={sheetRef} className={`ask-sheet relative w-full max-w-md bg-bg rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
         <div className="flex items-center justify-between touch-none" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-line" />
