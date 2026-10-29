@@ -9,6 +9,8 @@ import { getReview } from "@/lib/data-review";
 import { Banner, Card } from "@/components/ui";
 import { TodayGreeting } from "@/components/TodayGreeting";
 import { TaskRow } from "@/components/TaskRow";
+import { buildQueue, countNew, type QueueInboxItem } from "@/lib/today-queue";
+import { TodaySeen } from "@/components/TodaySeen";
 import SetupCard from "@/components/c/SetupCard";
 import GuidedCard from "@/components/c/GuidedCard";
 import { SitterToday } from "@/components/c/SitterToday";
@@ -35,14 +37,21 @@ export default async function Today() {
   const isSunday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(new Date()) === "Sun";
   const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;
-  let handed = 0, handedBy = "";
+  // The one queue (D23, 2026-10-28): urgent tasks, Inbox items waiting on me, replies to send, then the rest. Items that
+  // arrived since I last opened Today are marked new; that count is the badge. Opening Today marks them all seen.
+  let inbox: QueueInboxItem[] = [], seenAt: string | null = null;
   if (me && hasSupabaseEnv()) {
     const sb = await createClient();
-    const { data: hs } = await sb.from("inbox_items").select("assigned_by").eq("status", "open").eq("assigned_to", me);
-    handed = hs?.length ?? 0;
-    const from = [...new Set((hs ?? []).map((r) => r.assigned_by as string | null).filter((x): x is string => !!x && x !== me))].map((id) => names[id]).filter(Boolean);
-    handedBy = from.length === 1 ? from[0] : "";
+    const [{ data: items }, { data: prof }] = await Promise.all([
+      sb.from("inbox_items").select("id,title,missing,captured_at,assigned_to,for_person,requested_by").eq("status", "open").order("captured_at", { ascending: false }).limit(50),
+      sb.from("profiles").select("today_seen_at").eq("id", me).maybeSingle(),
+    ]);
+    inbox = (items ?? []) as QueueInboxItem[];
+    seenAt = prof?.today_seen_at ?? null;
+    await sb.from("profiles").update({ today_seen_at: new Date().toISOString() }).eq("id", me).then(() => {}, () => {});
   }
+  const queue = buildQueue(tasks, inbox, { me, myName: name, tz, seenAt });
+  const newCount = countNew(queue);
   // One set-up step at a time: the first connection that is not done and was not put off with "Not now".
   const nextStep = setup.conns.find((c) => (c.state === "todo" || c.state === "needs") && !setup.dismissed.has(c.step));
   const catalog = nextStep ? null : await getCatalogNudge();
@@ -59,8 +68,8 @@ export default async function Today() {
   }
   const connDone = setup.conns.filter((c) => c.state === "connected" || c.state === "off").length;
   const o = overall(status);
-  const top = tasks.filter((t) => t.kind !== "fyi").slice(0, 5);
-  const more = tasks.filter((t) => t.kind !== "fyi").length - top.length;
+  const top = queue.slice(0, 7);
+  const more = queue.length - top.length;
   const fyi = tasks.filter((t) => t.kind === "fyi").length;
   const today = new Date().toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" });
 
@@ -76,17 +85,27 @@ export default async function Today() {
       {sitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${sitterNudge.done} of ${sitterNudge.total} sections done`} body={`What a babysitter needs, written once.${sitterNudge.next ? ` Next: ${sitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter?tab=house" startLabel="Continue" />}
       {sitterDebrief && <SitterDebrief night={sitterDebrief} kids={kidList} />}
       <SitterToday review={sitterReview} proposal={sitterProposal} tz={tz} upcoming={sitterUpcoming} sitters={sitterList} />
-      {handed > 0 && <Link href="/inbox" className="block mb-4"><div className="card border-accent text-sm font-semibold">{handedBy ? `${handedBy} handed you` : "Handed to you:"} {handed} item{handed === 1 ? "" : "s"} in the Inbox. <span className="text-accent">Open</span></div></Link>}
+      <TodaySeen />
       <section className="mb-5">
         <div className="flex items-baseline justify-between mb-2">
           <h2 className="text-base">Needs you</h2>
-          <span className="text-xs text-muted">{tasks.length} open</span>
+          <span className="text-xs text-muted">{queue.length === 0 ? "" : `${queue.length} to do${newCount ? ` · ${newCount} new` : ""}`}</span>
         </div>
         {top.length === 0 ? (
-          <Card className="text-muted">Nothing needs you right now.</Card>
+          <Card className="text-muted">Nothing needs you. You&apos;re done for now.</Card>
         ) : (
           <div className="flex flex-col gap-2">
-            {top.map((t) => <TaskRow key={t.id} task={t} me={me} names={names} />)}
+            {top.map((q) => q.kind === "task" ? (
+              <div key={q.id} className="relative">
+                {(q.why || q.isNew) && <div className="flex gap-2 px-1 mb-0.5 text-[11px] font-semibold">{q.why && <span className={q.why === "Overdue" || q.why === "Due today" ? "text-red" : "text-muted"}>{q.why}</span>}{q.isNew && <span className="text-accent">New</span>}</div>}
+                <TaskRow task={q.task} me={me} names={names} />
+              </div>
+            ) : (
+              <Link key={q.id} href="/inbox" className="block">
+                <div className="flex gap-2 px-1 mb-0.5 text-[11px] font-semibold"><span className="text-muted">{q.why}</span>{q.isNew && <span className="text-accent">New</span>}</div>
+                <Card className="flex flex-col gap-0.5"><div className="font-semibold text-sm">{q.item.title}</div><div className="text-xs text-muted">{q.item.missing}</div></Card>
+              </Link>
+            ))}
             {more > 0 && <Link href="/tasks" className="text-sm font-semibold text-accent px-1">and {more} more</Link>}
           </div>
         )}

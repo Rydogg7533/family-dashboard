@@ -10,6 +10,8 @@ self.addEventListener("push", (event) => {
     event.waitUntil(self.registration.getNotifications({ tag: data.close }).then((ns) => ns.forEach((n) => n.close())));
     return;
   }
+  // D23: the payload may carry badge = how many queue items this person has not seen; mirrored on the app icon.
+  if (typeof data.badge === "number" && self.navigator && self.navigator.setAppBadge) { self.navigator.setAppBadge(data.badge).catch(() => {}); }
   event.waitUntil(self.registration.showNotification(data.title, { body: data.body, tag: data.tag, data: { url: data.url }, icon: "/icon-192.png", badge: "/icon-192.png", renotify: false }));
 });
 

@@ -53,6 +53,21 @@ const stats = { sent: 0, held: 0, deduped: 0, failed: 0, retracted: 0, gone: 0 }
 const subsFor = new Map();
 async function subs(person) { if (!subsFor.has(person)) subsFor.set(person, await rest("GET", `push_subscriptions?person=eq.${person}&select=id,endpoint,keys`)); return subsFor.get(person); }
 
+// D23 (2026-10-28): the app icon badge is the number of queue items the person has not seen since they last opened
+// Today: open tasks for them (or for both) and open Inbox items waiting on them, created after profiles.today_seen_at.
+// A rough count is fine; the app corrects it on open. null = could not compute, send no badge.
+async function unseenCount(person) {
+  try {
+    const [prof] = await rest("GET", `profiles?id=eq.${person}&select=today_seen_at,display_name`);
+    const since = prof?.today_seen_at || "1970-01-01";
+    const tasks = await rest("GET", `tasks?status=eq.open&kind=neq.fyi&created_at=gt.${encodeURIComponent(since)}&or=(person.eq.${person},person.is.null,audience.eq.both)&select=id`);
+    const inbox = await rest("GET", `inbox_items?status=eq.open&captured_at=gt.${encodeURIComponent(since)}&or=(assigned_to.eq.${person},assigned_to.is.null)&select=id,for_person`);
+    const name = String(prof?.display_name || "").toLowerCase();
+    const mine = inbox.filter((i) => !i.for_person || !name || String(i.for_person).toLowerCase() === name);
+    return tasks.length + mine.length;
+  } catch { return null; }
+}
+
 async function main() {
   const rows = await rest("GET", "notifications?status=eq.queued&channel=eq.push&order=queued_at.asc&limit=50&select=id,person,type,title,body,url,tag,queued_at");
   for (const n of rows) {
@@ -69,9 +84,10 @@ async function main() {
       continue;
     }
     if (DRY) { console.log(`would send "${n.title}" to ${list.length} device(s)`); stats.sent++; continue; }
+    const badge = await unseenCount(n.person);
     let ok = 0, err = null;
     for (const s of list) {
-      const r = await push(s, { title: n.title, body: n.body, url: n.url || "/", tag: n.tag || undefined });
+      const r = await push(s, { title: n.title, body: n.body, url: n.url || "/", tag: n.tag || undefined, ...(badge == null ? {} : { badge }) });
       if (r.ok) { ok++; await rest("PATCH", `push_subscriptions?id=eq.${s.id}`, { last_used_at: now() }, { Prefer: "return=minimal" }); }
       else if (r.gone) { stats.gone++; await rest("DELETE", `push_subscriptions?id=eq.${s.id}`, undefined, { Prefer: "return=minimal" }); subsFor.delete(n.person); }
       else err = r.error;
