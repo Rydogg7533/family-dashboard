@@ -71,8 +71,8 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
       if (!r.ok) { show(r.error ?? "Could not send"); return; }
       setText("");
       if (r.sample) { setSent((s) => [...s, { id: r.id ?? `s${Date.now()}`, thread_id: thread.id, sender: "Ryan", mine: true, at: new Date().toISOString(), text: t, assistant_kind: isAssistant ? "command" : null }]); show("Sample mode: not sent"); return; }
+      // No toast: the line itself shows as "Sending…" under the thread until the mirror reads it back (a second or two).
       setWaiting((w) => [...w, { id: r.id ?? `q${Date.now()}`, text: t, status: "queued", error: null }]);
-      show(`Queued · your Mac sends it to ${thread.name} through Messages`);
     });
   }
 
@@ -173,7 +173,7 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
         {waiting.map((w) => (
           <div key={w.id} className="self-end max-w-[85%] rounded-2xl px-3 py-2 bg-soft text-sm opacity-80 break-words [overflow-wrap:anywhere]">
             <div>{w.text}</div>
-            <div className="text-[11px] text-muted">{w.status === "failed" ? `Not sent: ${w.error ?? "the Mac could not send it"}` : "Sending through Messages…"}</div>
+            <div className="text-[11px] text-muted">{w.status === "failed" ? `Not sent: ${w.error ?? "the Mac could not send it"}` : "Sending…"}</div>
           </div>
         ))}
         <form onSubmit={send} className="flex gap-2 items-center">
