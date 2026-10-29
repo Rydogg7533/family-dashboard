@@ -35,3 +35,33 @@ export async function markThreadSeen(threadId: string) {
   await sb.from("notifications").update({ dismissed_at: new Date().toISOString() })
     .eq("person", user.id).eq("type", "message").eq("url", `/messages/${threadId}`).is("dismissed_at", null);
 }
+
+// A chip was tapped. "task" creates the task here (with the line as its origin); "calendar", "reply" and "receipt" are
+// finished by the caller (calendar form, sendLine, receipts) after this records the outcome. Either way the bar moves.
+export async function takeSuggestion(id: string) {
+  if (!hasSupabaseEnv()) return { ok: true, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { data: s } = await sb.from("message_suggestions").select("id,kind,title,payload,thread_id,message_id").eq("id", id).eq("person", user.id).maybeSingle();
+  if (!s) return { ok: false, error: "That suggestion is gone." };
+  let taskId: string | null = null;
+  if (s.kind === "task") {
+    const p = (s.payload ?? {}) as { title?: string; due_at?: string | null; for?: string | null };
+    const { data: thread } = await sb.from("messages_threads").select("name").eq("id", s.thread_id).maybeSingle();
+    const { data: t, error } = await sb.from("tasks").insert({ person: user.id, audience: "one", fyi: [], kind: "do", title: (p.title || s.title || "").slice(0, 200),
+      summary: `From ${thread?.name ?? "a text"} thread · suggested by the assistant, created by you`, origin_kind: "message", origin_ref: s.message_id, due_at: p.due_at || null, tier: 2, status: "open" }).select("id").single();
+    if (error) return { ok: false, error: error.message };
+    taskId = t?.id ?? null;
+  }
+  const { error } = await sb.rpc("suggestion_outcome", { sid: id, outcome: "taken" });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/messages/${s.thread_id}`);
+  return { ok: true, kind: s.kind as string, taskId, payload: (s.payload ?? {}) as Record<string, unknown>, threadId: s.thread_id as string };
+}
+export async function ignoreSuggestion(id: string) {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { error } = await sb.rpc("suggestion_outcome", { sid: id, outcome: "ignored" });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}

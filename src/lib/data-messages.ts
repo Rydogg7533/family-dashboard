@@ -95,3 +95,12 @@ export async function getConfirmations(): Promise<Confirmation[]> {
 }
 
 export { clock } from "@/lib/c-shared";
+
+// Chips: judgments the engine marked "shown" for this thread, keyed by message id. Taken/ignored ones are not chips.
+export type Suggestion = { id: string; message_id: string; kind: "task" | "calendar" | "reply" | "receipt"; title: string; payload: Record<string, unknown>; reason: string };
+export async function getSuggestions(threadId: string): Promise<Suggestion[]> {
+  if (!hasSupabaseEnv()) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("message_suggestions").select("id,message_id,kind,title,payload,reason").eq("thread_id", threadId).eq("status", "shown").order("created_at", { ascending: false }).limit(50);
+  return (data ?? []).filter((r) => r.kind !== "none" && r.title) as Suggestion[];
+}

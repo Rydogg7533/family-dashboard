@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
-import { pendingLines, sendLine } from "@/app/messages/actions";
+import { pendingLines, sendLine, takeSuggestion, ignoreSuggestion } from "@/app/messages/actions";
 import { useRouter } from "next/navigation";
-import type { Confirmation, Message, Thread } from "@/lib/data-messages";
+import type { Confirmation, Message, Suggestion, Thread } from "@/lib/data-messages";
 import { clock } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
 import { Who } from "@/components/c/Who";
@@ -35,14 +35,18 @@ export function ConfirmCards({ items }: { items: Confirmation[] }) {
   );
 }
 
-export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; messages: Message[]; mirrorOk: boolean }) {
+const CHIP: Record<Suggestion["kind"], { label: string; icon: string }> = { task: { label: "Make it a task", icon: "✓" }, calendar: { label: "Add to calendar", icon: "📅" }, reply: { label: "Reply", icon: "↩" }, receipt: { label: "Save receipt", icon: "🧾" } };
+
+export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { thread: Thread; messages: Message[]; mirrorOk: boolean; suggestions?: Suggestion[] }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [sent, setSent] = useState<Message[]>([]);
   const [waiting, setWaiting] = useState<{ id: string; text: string; status: string; error: string | null }[]>([]);
   const [busy, start] = useTransition();
-  const [menu, setMenu] = useState<string | null>(null);
-  const [pending, setPending] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<string | null>(null);          // message id whose chips are slid out
+  const [gone, setGone] = useState<Record<string, string>>({});   // suggestion id → what happened, for the inline note
+  const [info, setInfo] = useState(false);
+  const chipsFor = (mid: string) => suggestions.filter((x) => x.message_id === mid && !gone[x.id]);
   const { show, el } = useToast();
   const all = [...messages, ...sent];
   const isAssistant = thread.kind === "assistant";
@@ -72,32 +76,58 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
 
   return (
     <div className="flex flex-col gap-3 pb-16">
-      <div className="text-[11px] font-bold text-muted">{thread.name.toUpperCase()} · {thread.members.length} people · today</div>
+      <div className="flex items-center justify-between text-[11px] font-bold text-muted">
+        <span>{thread.name.toUpperCase()} · {thread.members.length} people</span>
+        <button aria-label="About this thread" aria-expanded={info} onClick={() => setInfo((v) => !v)} className="w-7 h-7 rounded-full border border-line text-accent font-bold text-xs">i</button>
+      </div>
+      {info && (
+        <div className="card text-xs text-muted flex flex-col gap-1">
+          <div>A mirror of your own Messages thread: family threads only, the last 30 days, owner-only and encrypted at rest. Full history stays in Messages and iCloud.</div>
+          <div>What you type here goes out from your Mac through Messages, as you, so it appears on every phone like any other text. If the mirror is paused, use Messages directly.</div>
+          <div>⋯ on a line means the assistant spotted something it could turn into a task, event, reply or receipt. Nothing happens until you tap; "Not this" teaches it to suggest less.</div>
+          <a href="messages://" className="font-semibold text-accent">Open in Messages</a>
+        </div>
+      )}
       {all.map((m) => (
         <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] min-w-0 ${m.mine ? "self-end items-end" : "self-start"}`}>
-          <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender}{isAssistant && !m.mine ? " · AI" : ""} · {clock(m.at)}{!m.mine && !isAssistant ? ` · for ${thread.kind === "group" ? "Family" : "you"}` : ""}</div>
+          <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender}{isAssistant && !m.mine ? " · AI" : ""} · {clock(m.at)}</div>
           <div className={`px-3.5 py-2.5 text-sm max-w-full min-w-0 break-words [overflow-wrap:anywhere] whitespace-pre-wrap ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
             {m.text}
             {m.attachment && <div className={`text-xs mt-1 ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷 photo" : "🔗"} {m.attachment.label} · opens in Messages</div>}
           </div>
-          {!m.mine && !isAssistant && (
-            <div className="flex gap-1.5 flex-wrap">
-              <button className={btn} onClick={() => { setPending((p) => ({ ...p, [m.id]: "task" })); show("Task created from this message · with the sender and time", () => setPending((p) => { const n = { ...p }; delete n[m.id]; return n; })); }}>Make it a task</button>
-              <button className={btn} onClick={() => router.push("/calendar?added=e6")}>Add to schedule</button>
-              <button aria-label="More" className={`${btn} w-9`} onClick={() => setMenu(menu === m.id ? null : m.id)}>…</button>
+          {!m.mine && chipsFor(m.id).length > 0 && (
+            <div className="flex flex-col gap-1.5 w-full">
+              <button aria-label={open === m.id ? "Hide suggestions" : "Suggestions"} aria-expanded={open === m.id} onClick={() => setOpen(open === m.id ? null : m.id)}
+                className={`self-start min-w-8 min-h-7 px-2 rounded-full text-sm font-bold leading-none ${open === m.id ? "bg-accent text-white" : "bg-soft text-accent"}`}>⋯</button>
+              {open === m.id && (
+                <div className="flex flex-col gap-1.5 w-full animate-[fadein_.15s_ease]">
+                  {chipsFor(m.id).map((sg) => (
+                    <div key={sg.id} className="flex items-center gap-2 flex-wrap">
+                      <button className={`${btn} min-h-10 bg-accent text-white border-accent`} onClick={() => start(async () => {
+                        const r = await takeSuggestion(sg.id);
+                        if (!r.ok) { show(r.error ?? "Could not do that"); return; }
+                        setGone((g) => ({ ...g, [sg.id]: sg.kind })); setOpen(null);
+                        const p = r.payload ?? {};
+                        if (r.kind === "task") show(r.sample ? "Sample mode: not created" : "Task created · from this text");
+                        else if (r.kind === "calendar") { const st = String(p.start ?? ""); router.push(`/calendar/new?title=${encodeURIComponent(String(p.title ?? sg.title))}&date=${st.slice(0, 10)}&time=${st.slice(11, 16)}${p.where ? `&where=${encodeURIComponent(String(p.where))}` : ""}&origin=message&ref=${encodeURIComponent(sg.message_id)}&label=${encodeURIComponent(thread.name + " thread")}`); }
+                        else if (r.kind === "reply") { setText(String(p.text ?? "")); show("Reply drafted · edit, then send"); }
+                        else if (r.kind === "receipt") router.push(`/inbox?from=message&ref=${encodeURIComponent(sg.message_id)}`);
+                      })}>{CHIP[sg.kind].icon} {CHIP[sg.kind].label}{sg.kind !== "reply" ? ` · ${sg.title}` : ""}</button>
+                      <button className={`${btn} min-h-10`} onClick={() => { setGone((g) => ({ ...g, [sg.id]: "ignored" })); setOpen(null); void ignoreSuggestion(sg.id); }}>Not this</button>
+                    </div>
+                  ))}
+                  <div className="text-[10px] text-muted">Suggested from this text · nothing happens until you tap · {chipsFor(m.id)[0]?.reason}</div>
+                </div>
+              )}
             </div>
           )}
-          {menu === m.id && (
-            <div className="card flex flex-col gap-1 text-sm font-semibold w-52">
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => { setMenu(null); show("Saved to [Child 1]'s Family page"); }}>Save to a Family page</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => { setMenu(null); show("Added to the Smith's list"); }}>Add to a list</button>
-              <a className="text-left min-h-10 px-2 rounded-lg hover:bg-soft flex items-center" href="messages://">Open in Messages</a>
-            </div>
-          )}
-          {(m.action || pending[m.id]) && (
-            <div className={`self-center text-[11px] rounded-full px-2.5 py-1 ${m.action?.status === "waiting" || pending[m.id] === "task" && !m.action ? "bg-amber-bg text-amber" : "bg-soft text-muted"}`}>
-              {m.action?.label ?? "Task created from this · Undo in the toast"}
-              <span className="block text-[10px] opacity-80">{m.action ? `${m.action.requested_by} · for ${m.action.for_person}` : `Asked here · for you`} · from {thread.name} thread</span>
+          {suggestions.filter((x) => x.message_id === m.id && gone[x.id] && gone[x.id] !== "ignored").map((x) => (
+            <div key={x.id} className="self-center text-[11px] rounded-full px-2.5 py-1 bg-soft text-muted">{CHIP[x.kind].label} · done · from {thread.name} thread</div>
+          ))}
+          {m.action && (
+            <div className={`self-center text-[11px] rounded-full px-2.5 py-1 ${m.action.status === "waiting" ? "bg-amber-bg text-amber" : "bg-soft text-muted"}`}>
+              {m.action.label}
+              <span className="block text-[10px] opacity-80">{m.action.requested_by} · for {m.action.for_person} · from {thread.name} thread</span>
             </div>
           )}
           {isAssistant && m.assistant_kind === "confirmation" && m.action?.status === "waiting" && !sent.some((s) => /^(y|yes|n|no)$/i.test(s.text)) && (
@@ -109,7 +139,7 @@ export function ThreadView({ thread, messages, mirrorOk }: { thread: Thread; mes
         </div>
       ))}
 
-      {isAssistant && (
+      {isAssistant && info && (
         <div className="card text-xs text-muted flex flex-col gap-1">
           <div className="font-semibold text-fg text-sm">How this thread works</div>
           <div>The assistant has its own Apple ID (email only, no phone number) signed into a second macOS user on the Mac mini, so it appears in Messages as a normal contact. It is not in the Family thread.</div>

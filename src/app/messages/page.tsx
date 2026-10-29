@@ -40,20 +40,24 @@ export default async function Messages() {
             <div className="min-w-0">
               <div className={`flex items-center gap-1.5 ${t.unread > 0 ? "font-bold" : "font-semibold"}`}>{t.unread > 0 && <span aria-hidden className="w-2 h-2 rounded-full bg-accent shrink-0" />}<span className="truncate">{t.name}</span>{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold">· AI, by text</span>}{t.kind === "group" && <span className="text-[10px] font-bold uppercase tracking-wide text-accent bg-accent/12 rounded px-1.5 py-0.5 shrink-0">Group</span>}</div>
               <div className={`text-xs truncate ${t.unread > 0 ? "text-fg" : "text-muted"}`}>{t.last_line}</div>
-              <div className="text-[10px] text-muted">{t.kind === "assistant" ? "Assistant · AI · for you" : `${t.members.filter((m) => m !== viewer.name).join(", ")} · for ${t.kind === "group" ? "Family" : "you"}`} · from Messages (your Mac)</div>
+              {t.kind === "group" && <div className="text-[10px] text-muted">{t.members.filter((m) => m !== viewer.name).join(", ")}</div>}
             </div>
             {t.unread > 0 ? <span className="shrink-0 text-[11px] font-bold text-white bg-accent rounded-full px-2 py-0.5">{t.unread}</span> : <span className="shrink-0 text-[11px] text-muted">{clock(t.last_at)}</span>}
           </Link>
         ))}
       </div>
 
-      {otherParent && <Card className="mb-3 text-sm">
-        <div className="font-semibold mb-1">{otherParent}&apos;s one-to-one threads</div>
-        <div className="text-muted text-xs">Not mirrored yet. They appear on their page once their own Mac runs the mirror with their consent; until then they see the Family thread and “Open Messages” buttons.</div>
-      </Card>}
 
       <section className="card"><SyncLine items={sync} /></section>
-      <p className="text-xs text-muted mt-3">Family threads only · last 30 days · owner-only, encrypted at rest · full history stays in Messages and iCloud. Children's pages do not show Messages. If the mirror pauses, every thread shows an “Open Messages” button instead. <a href="messages://" className="font-semibold text-accent">Open in Messages</a></p>
+      <details className="mt-3 text-xs text-muted">
+        <summary className="cursor-pointer list-none flex items-center gap-2"><span className="w-6 h-6 rounded-full border border-line text-accent font-bold flex items-center justify-center not-italic">i</span>About Messages</summary>
+        <div className="mt-2 flex flex-col gap-1">
+          <div>Family threads only · last 30 days · owner-only, encrypted at rest · full history stays in Messages and iCloud. Children's pages do not show Messages.</div>
+          <div>Typing here sends through Messages as you, from your Mac. If the mirror pauses, use Messages directly.</div>
+          {otherParent && <div>{otherParent}&apos;s one-to-one threads appear on their page once their own Mac runs the mirror with their consent.</div>}
+          <a href="messages://" className="font-semibold text-accent">Open in Messages</a>
+        </div>
+      </details>
     </>
   );
 }
