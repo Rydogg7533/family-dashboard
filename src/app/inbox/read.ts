@@ -9,6 +9,7 @@ import { matchAccount, accountLabel, statementPeriod, statementName, statementHo
 import { FILE_YES, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
+import { fileCapture } from "@/app/inbox/file";   // a rule already answered "where does this go": file it, do not ask again
 import { vendorKey, fromTemplate } from "@/lib/filing-folders";
 import { matchVehicle, type VRow } from "@/lib/match-vehicle";
 import { cleanDetails } from "@/lib/receipt-details";
@@ -49,7 +50,7 @@ type Sb = Awaited<ReturnType<typeof createClient>>;
 
 // The planning half of reading: from the facts in `parsed` work out the plan, the one question and its answers. It touches no model and no file, so it can run
 // again after a person corrects a field (see correctRead). Returns the update to store; the caller applies it.
-async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<string, unknown>): Promise<{ update: Record<string, unknown>; name: string | null; conf: number }> {
+async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<string, unknown>): Promise<{ update: Record<string, unknown>; name: string | null; conf: number; ruleLabel: string }> {
   // Line items: kept clean; two or more kinds of purchase make the receipt "mixed" (it is still filed whole, once).
   const lines = cleanLines(parsed.lines);
   parsed.lines = lines;
@@ -79,7 +80,7 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
     const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
     if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}. File it?`; update.options = [FILE_YES, FILE_NO]; }
     else { update.missing = `Looks like a statement${bal}${parsed.card_last4 ? ` ending ····${String(parsed.card_last4).replace(/\D/g, "").slice(-4)}` : ""}, ${period}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
-    return { update, name: sName as string | null, conf };
+    return { update, name: sName as string | null, conf, ruleLabel: "" };
   }
 
   const { data: vehicles } = await sb.from("vehicles").select("id,name,short,make,model,year,details").limit(12);
@@ -93,9 +94,10 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
   const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
   let home0 = vehicle ? `Organized/Personal/Documents/Vehicles/${vehicle.short}/${yr}/` : (parsed.category === "home_repairs" ? `Organized/Personal/Documents/Home/${yr}/` : `Organized/Personal/Documents/Finance/${yr}/${parsed.category === "dining" ? "Dining" : "Receipts"}/`);
   let ruleNote = "";
+  let ruleLabel = "";                 // set when the person has already said where this vendor's receipts go
   if (!vehicle && parsed.vendor) {
     const { data: rule } = await sb.from("filing_rules").select("folder_template,vendor_label").eq("vendor_key", vendorKey(parsed.vendor)).maybeSingle();
-    if (rule?.folder_template) { home0 = fromTemplate(rule.folder_template as string, yr); ruleNote = ` (your rule for ${rule.vendor_label})`; }
+    if (rule?.folder_template) { home0 = fromTemplate(rule.folder_template as string, yr); ruleNote = ` (your rule for ${rule.vendor_label})`; ruleLabel = String(rule.vendor_label ?? ""); }
   }
   const home = home0;
   plan.push({ t: "file", text: parsed.vendor && typeof parsed.amount === "number" && parsed.amount > 0 ? `${name ?? "this receipt"} → kept in the app; one file goes to Finance by card and month once you say which card (Money › Receipts)${vehicle ? `, and it is listed in the ${vehicle.short} index` : ""}` : `${name ?? "this document"} → kept in the app; a copy goes to ${home}${ruleNote} when the Mac mini filing agent is running` });
@@ -140,7 +142,7 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
     else if (parsed.near_receipt) { const nr = parsed.near_receipt as { merchant: string; amount: number; date: string; order?: string }; update.missing = nr.order ? `${summary} This is Amazon order ${nr.order}. The order total on file is $${nr.amount.toFixed(2)}, but this document says ${money.trim() || "a different amount"} (an invoice can cover part of an order). Attach it to that order?` : `${summary} It may be the same purchase as ${nr.merchant} $${nr.amount.toFixed(2)} on ${nr.date}, already in Receipts. Is it?`; update.options = [FILE_SAME, FILE_DIFFERENT, FILE_NO]; }
     else { const sr = parsed.same_receipt as { merchant: string } | undefined; update.missing = sr ? `${summary} This is the same purchase as ${sr.merchant} already in Receipts; filing attaches it there, not as a second receipt. Is that right?` : `${summary} Is that right?`; update.options = parsed.category === "vehicle" || parsed.warranty_relevant || parsed.reimbursement_hint ? ["Yes, file it", "File it and open a reimbursement claim", "Not quite"] : ["Yes, file it", "Not quite"]; }
   } else if (summary) { update.missing = `${summary} I am not sure; what is this?`; }
-  return { update, name, conf };
+  return { update, name, conf, ruleLabel };
 }
 
 export async function readCapture(inboxId: string) {
@@ -171,8 +173,22 @@ export async function readCapture(inboxId: string) {
   if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
 
   Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
-  const { update, name, conf } = await planFromRead(sb, (row.claim_id as string | null) ?? null, parsed);
+  const { update, name, conf, ruleLabel } = await planFromRead(sb, (row.claim_id as string | null) ?? null, parsed);
   await sb.from("inbox_items").update(update).eq("id", inboxId);
+
+  // Already answered, so don't ask again (Ryan, 2026-10-29: 84 receipts from nine vendors, every one asking).
+  // A rule is the person having said where this vendor's receipts go. When one matches AND the read is confident
+  // AND the only question was "file it?", the answer is already known: file it and put a line in the Log. Anything
+  // short of all three still asks -- a statement that needs an account, a receipt that might be a duplicate, a
+  // vehicle document, a low-confidence read. Nothing is deleted and the filing is the same path a tap takes.
+  const asked = Array.isArray((update as { options?: unknown }).options) ? (update as { options: string[] }).options : [];
+  if (ruleLabel && conf >= 0.8 && asked.length === 2 && asked.includes(FILE_YES) && asked.includes(FILE_NO)) {
+    const filed = await fileCapture(inboxId, FILE_YES).catch(() => ({ ok: false, summary: "" }));
+    if (filed.ok) {
+      await sb.from("activity_log").insert({ actor: "filing rules", action: "inbox_auto_filed", subject: `Filed without asking, by your rule for ${ruleLabel}: ${name ?? row.title ?? "a document"}`.slice(0, 200), ref: inboxId, undoable: true }).then(() => {}, () => {});
+      return { ok: true, name, confidence: conf, autoFiled: ruleLabel };
+    }
+  }
   return { ok: true, name, confidence: conf };
 }
 
