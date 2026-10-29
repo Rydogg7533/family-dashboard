@@ -124,9 +124,10 @@ function labelFrom(params, groupLabel) {
   const t = types[0] || "other";
   return t === "cell" ? "mobile" : t;
 }
+const photoShapes = new Map(); // diagnostic: which PHOTO shapes iCloud sent (params only, never data)
 function parseVcard(text) {
   const lines = unfold(text).split("\n").filter(Boolean);
-  const card = { uid: null, full_name: "", first_name: null, last_name: null, nickname: null, org: null, phones: [], emails: [], addresses: [], birthday: null, notes: null, photo: null };
+  const card = { uid: null, full_name: "", first_name: null, last_name: null, nickname: null, org: null, phones: [], emails: [], addresses: [], birthday: null, notes: null, photo: null, photo_url: null };
   const groupLabels = {}; const pending = [];
   for (const line of lines) {
     const idx = line.indexOf(":"); if (idx < 0) continue;
@@ -144,9 +145,12 @@ function parseVcard(text) {
       case "BDAY": { const v = decodeValue(value, params).replace(/T.*$/, ""); card.birthday = /^\d{4}-?\d{2}-?\d{2}$/.test(v) ? v.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : (/^--?\d{2}-?\d{2}$/.test(v) ? v.replace(/^-?-?(\d{2})-?(\d{2})$/, "--$1-$2") : null); break; }
       case "TEL": { const number = decodeValue(value, params).replace(/^tel:/i, ""); pending.push({ kind: "phones", group, params, item: { number, digits: number.replace(/\D/g, "") } }); break; }
       case "EMAIL": pending.push({ kind: "emails", group, params, item: { address: decodeValue(value, params).toLowerCase() } }); break;
-      case "PHOTO": { // inline base64 (vCard 3: ENCODING=b / vCard 4: data: URI); a URL photo is left alone
-        const m = value.match(/^data:image\/\w+;base64,(.+)$/i); const b64 = m ? m[1] : (/ENCODING=b/i.test(params) ? value : null);
-        if (b64) card.photo = Buffer.from(b64.replace(/\s+/g, ""), "base64"); break; }
+      case "PHOTO": { // inline base64 (vCard 3: ENCODING=b / vCard 4: data: URI) or a URL (iCloud often serves VALUE=uri)
+        photoShapes.set(params.replace(/[^A-Z=;-]/gi, "").slice(0, 60) || "(bare)", (photoShapes.get(params.replace(/[^A-Z=;-]/gi, "").slice(0, 60) || "(bare)") || 0) + 1);
+        const m = value.match(/^data:image\/[\w+.-]+;base64,(.+)$/i); const b64 = m ? m[1] : (/ENCODING=b/i.test(params) || /^[A-Za-z0-9+/=\s]{200,}$/.test(value) ? value : null);
+        if (b64) card.photo = Buffer.from(b64.replace(/\s+/g, ""), "base64");
+        else if (/^https?:\/\//i.test(value.trim())) card.photo_url = value.trim();
+        break; }
       case "ADR": { const [, , street, city, state, zip, country] = splitSemi(value); pending.push({ kind: "addresses", group, params, item: { street: street || "", city: city || "", state: state || "", zip: zip || "", country: country || "" } }); break; }
       default: break;
     }
@@ -194,6 +198,12 @@ async function syncPerson(cfg, log) {
       seen.add(card.uid);
       // photo: upload when new or changed (hash), keep the old path when the card lost its photo? no — a removed photo is removed here too
       let photo_path = null, photo_hash = null;
+      if (!card.photo && card.photo_url) {
+        try {
+          const r = await fetch(card.photo_url, { headers: { Authorization: "Basic " + Buffer.from(`${cfg.user}:${cfg.pass}`).toString("base64") } });
+          if (r.ok) card.photo = Buffer.from(await r.arrayBuffer()); else log.push(`photo url for ${card.full_name}: ${r.status}`);
+        } catch (e) { log.push(`photo url for ${card.full_name}: ${e.message}`); }
+      }
       if (card.photo) {
         photo_hash = createHash("sha1").update(card.photo).digest("hex");
         const prev = existing.get(card.uid);
@@ -203,6 +213,7 @@ async function syncPerson(cfg, log) {
       rows.push({ person: person.id, provider: "icloud", uid: card.uid, href: f.path, etag: f.etag, full_name: card.full_name, first_name: card.first_name, last_name: card.last_name, nickname: card.nickname, org: card.org, phones: card.phones, emails: card.emails, addresses: card.addresses, birthday: card.birthday, notes: card.notes, photo_path, photo_hash, synced_at: new Date().toISOString(), deleted_at: null });
     }
     if (photos) log.push(`${person.display_name}: ${photos} photo(s) stored`);
+    if (photoShapes.size) log.push(`photo lines seen: ${[...photoShapes].map(([k, n]) => `${k}×${n}`).join(", ")}`);
     for (let i = 0; i < rows.length; i += 200) {
       await rest("POST", "contact_cards?on_conflict=person,uid", rows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
       upserted += Math.min(200, rows.length - i);
