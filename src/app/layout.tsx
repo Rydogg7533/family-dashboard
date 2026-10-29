@@ -19,7 +19,10 @@ export const metadata: Metadata = {
   icons: { icon: "/icon-192.png", apple: "/icon-180.png" },
   appleWebApp: { title: "StewardOS" },
 };
-export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1 };
+// interactiveWidget: where the browser supports it (Chrome, and Safari from 17.4) the keyboard resizes the layout
+// viewport itself and the browser animates it, so the Ask sheet needs no correction at all; older browsers ignore it
+// and fall back to the visualViewport tracking in AskSheet.
+export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width", initialScale: 1, interactiveWidget: "resizes-content" };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // The + button's Ask sheet needs who is asking (the thread is kept per person) and whether a model is set.

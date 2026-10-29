@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useLayoutEffect, useState, type TouchEvent as ReactTouchEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import { usePathname } from "next/navigation";
 import { AskChat } from "@/components/AskChat";
 
@@ -48,26 +48,36 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
   // overlay leaves a strip of page showing between the input and the keyboard. The overlay follows the visual
   // viewport instead: its top and height are set from visualViewport, so the scrim and the sheet always fill
   // exactly what is on screen.
-  // Seeded at mount and never cleared: an empty value would make the first paint of the next open use the layout
-  // viewport and then jump to the visual one.
-  const [vv, setVv] = useState<{ top: number; height: number } | null>(() => {
-    const v = typeof window === "undefined" ? null : window.visualViewport;
-    return v ? { top: v.offsetTop, height: v.height } : null;
-  });
+  // The keyboard is the hard part (Ryan, 2026-10-28: still shaky). iPhone Safari fires a stream of visualViewport
+  // resize events while the keyboard slides up. Two things made that stream visible:
+  //   - it was React state, so every event re-rendered the sheet and the whole thread;
+  //   - the sheet's height was a percentage of a container that was shrinking each frame, so its TOP edge was
+  //     recomputed frame by frame instead of the sheet simply riding up with the keyboard.
+  // So the overlay's geometry is written straight to the node, with no render, and the sheet's own height is only
+  // recomputed once the viewport has been still for a moment. While the keyboard animates the sheet keeps its height
+  // and its bottom follows the viewport: it slides, it does not reflow.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   useBeforePaint(() => {
     if (!open) return;
     const v = window.visualViewport;
     if (!v) return;
-    const on = () => setVv({ top: v.offsetTop, height: v.height });
-    on();
-    v.addEventListener("resize", on); v.addEventListener("scroll", on);
-    return () => { v.removeEventListener("resize", on); v.removeEventListener("scroll", on); };
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const apply = () => {
+      const o = overlayRef.current;
+      if (o) { o.style.top = `${v.offsetTop}px`; o.style.height = `${v.height}px`; o.style.bottom = "auto"; }
+      clearTimeout(settle);
+      settle = setTimeout(() => { const sh = sheetRef.current; if (sh) sh.style.maxHeight = `${Math.round(v.height * 0.85)}px`; }, 150);
+    };
+    apply();
+    v.addEventListener("resize", apply); v.addEventListener("scroll", apply);
+    return () => { clearTimeout(settle); v.removeEventListener("resize", apply); v.removeEventListener("scroll", apply); };
   }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed left-0 right-0 z-50 flex items-end justify-center" style={vv ? { top: vv.top, height: vv.height } : { top: 0, bottom: 0 }} role="dialog" aria-modal="true" aria-label="Ask">
+    <div ref={overlayRef} className="fixed left-0 right-0 top-0 bottom-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Ask">
       <button aria-label="Close" className="ask-scrim absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-black/75 backdrop-blur-sm touch-none" onClick={tryClose} />
-      <div className={`ask-sheet relative w-full max-w-md bg-bg rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
+      <div ref={sheetRef} className={`ask-sheet relative w-full max-w-md bg-bg rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
         <div className="flex items-center justify-between touch-none" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-line" />
           <div className="font-semibold text-sm text-accent flex items-center gap-2"><span aria-hidden="true" className="w-2 h-2 rounded-full bg-accent" />Ask</div>
