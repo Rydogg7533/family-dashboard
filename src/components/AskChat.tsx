@@ -354,7 +354,11 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
         <div ref={endRef} />
       </div>
 
-      {/* One rounded box: the words get the full width on top; plus, mic and send sit underneath (Ryan, 2026-10-28). */}
+      {/* One rounded box: the words get the full width on top; plus, mic and send sit underneath (Ryan, 2026-10-28).
+          The sheet does NOT focus this on opening. It used to, and the keyboard then rose through the sheet's own
+          opening animation: a screen recording of the real phone shows the top edge going 190 -> 140 -> 205 -> 139 -> 90
+          over about 300ms as the keyboard resize, the rise animation and the height settle all moved it at once. The
+          sheet now opens as one motion and the keyboard comes up only when the person taps the box. */}
       <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "py-2" : "sticky bottom-[88px] py-2 bg-bg"}>
         <div className={`rounded-3xl border bg-bg px-3 pt-3 pb-2 flex flex-col gap-1 ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line focus-within:border-accent"}`}>
           {(files.length > 0 || uploading) && (
@@ -366,7 +370,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
               {uploading && <span className="text-xs text-muted self-center">Uploading…</span>}
             </div>
           )}
-          <textarea ref={box} rows={1} value={input} onChange={(e) => setInput(e.target.value)} autoFocus={embedded}
+          <textarea ref={box} rows={1} value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
             placeholder={editing != null ? "Edit, then send" : voice !== "idle" && voice !== "error" ? { connecting: "Connecting…", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" }[voice] : "Ask or tell me something…"}
             aria-label="Ask" className="w-full resize-none bg-transparent px-1 py-1 text-base leading-snug outline-none max-h-40" />
