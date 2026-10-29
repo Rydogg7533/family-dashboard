@@ -17,6 +17,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
     { href: "/settings/connections", label: "Connections", sub: "Mail, calendar, location, contacts, notifications" },
     { href: "/settings/contacts", label: "Contacts source", sub: "Apple or Google, chosen per person" },
     { href: "/settings/location", label: "Location", sub: "Your phone's location on your own Day page" },
+    { href: "/settings/capture", label: "Camera shortcut", sub: "One tap from the lock screen: a photo goes straight to the Inbox" },
   ] },
   { title: "Notifications", rows: [
     { href: "/settings/notifications", label: "Notifications", sub: "Where each kind appears, quiet hours, this device" },

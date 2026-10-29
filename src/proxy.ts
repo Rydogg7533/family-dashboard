@@ -9,10 +9,11 @@ export async function proxy(request: NextRequest) {
   if (!url || !key) return NextResponse.next();
 
   // Slice C: device-token routes bypass the cookie session. They authenticate themselves:
-  // /api/location/overland checks a per-person token in device_tokens; /tv checks a "Family room TV" token
-  // (?token= or cookie) against device_tokens kind='tv' (see src/app/tv/page.tsx).
+  // /api/location/overland checks a per-person token in device_tokens; /api/capture/shortcut the same, kind='capture'
+  // (the iPhone camera shortcut, 2026-10-29); /tv checks a "Family room TV" token (?token= or cookie) against
+  // device_tokens kind='tv' (see src/app/tv/page.tsx).
   const p = request.nextUrl.pathname;
-  if (p.startsWith("/api/location/") || p === "/tv" || p.startsWith("/tv/")) return NextResponse.next();
+  if (p.startsWith("/api/location/") || p === "/api/capture/shortcut" || p === "/tv" || p.startsWith("/tv/")) return NextResponse.next();
   // Public legal pages (Google's OAuth consent screen links here): no login, no data, static text.
   if (p === "/privacy" || p === "/terms") return NextResponse.next();
   // The kitchen tablet proves itself with a paired device token; the review screen (/sitter/review/...) still needs a login.
