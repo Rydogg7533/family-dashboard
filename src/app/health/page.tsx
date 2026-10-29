@@ -37,6 +37,8 @@ export default async function Health() {
       <div className="text-xs text-muted mb-4">Server region: <span className="font-semibold text-fg">{process.env.VERCEL_REGION ?? "local"}</span> (the database is in us-west-1; sfo1 is next to it) · version {(process.env.VERCEL_GIT_COMMIT_SHA ?? "dev").slice(0, 7)}</div>
       {/* Healthy checks roll up into one fold; only what needs a look gets a card (Ryan, 2026-10-29). */}
       {rows.filter((s) => s.state !== "ok").length === 0 && <Card className="text-sm text-muted">Everything is healthy.</Card>}
+      {rows.some((s) => s.state !== "ok") && (
+      <Fold id="health-attention" title="Needs attention" tone={rows.some((s) => s.state === "error") ? "red" : "amber"} defaultOpen summary={`${rows.filter((s) => s.state !== "ok").length}`}>
       <div className="flex flex-col gap-2">
         {rows.filter((s) => s.state !== "ok").map((s) => (
           <Card key={s.key}>
@@ -53,6 +55,8 @@ export default async function Health() {
           </Card>
         ))}
       </div>
+      </Fold>
+      )}
       {rows.some((s) => s.state === "ok") && (
         <div className="mt-2">
           <Fold id="health-ok" title="Healthy" tone="green" summary={`${rows.filter((s) => s.state === "ok").length} check${rows.filter((s) => s.state === "ok").length === 1 ? "" : "s"} fine`}>
