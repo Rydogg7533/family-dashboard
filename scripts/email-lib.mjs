@@ -33,14 +33,27 @@ export function openGmail(args, { allowWrite }) {
     const j = await r.json();
     if (!r.ok) throw new Error(`could not refresh the Google login (${j.error || r.status}${j.error === "invalid_grant" ? ": access was revoked or expired; run google-auth.mjs again" : ""})`);
     accessToken = j.access_token;
+    // Google tokens last an hour (3600 s). Renew a few minutes early so a long run never meets the expiry mid-batch.
+    expiresAt = Date.now() + Math.max(60, (Number(j.expires_in) || 3600) - 300) * 1000;
+  }
+  // One refresh at a time. With several requests in flight, an expiry makes all of them fail together; each used to
+  // refresh on its own and spend its retries doing it (a long mailbox run died with a 401 that way, 2026-10-29).
+  // A caller passes the token it used: if someone has already replaced it, there is nothing to refresh.
+  let expiresAt = 0, refreshing = null;
+  async function ensureFresh(used) {
+    if (used && accessToken && used !== accessToken) return;
+    refreshing ||= refresh().finally(() => { refreshing = null; });
+    await refreshing;
   }
   async function api(path, { method = "GET", body } = {}) {
     if (method !== "GET" && !allowWrite) throw new Error(`read-only script tried a ${method} call: refused`);
-    if (!accessToken) await refresh();
+    if (!accessToken || Date.now() >= expiresAt) await ensureFresh(null);
+    let authFails = 0;
     for (let attempt = 1; attempt <= 8; attempt++) {
-      const r = await netFetch(BASE + path, { method, headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+      const used = accessToken;
+      const r = await netFetch(BASE + path, { method, headers: { Authorization: `Bearer ${used}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
       if (r.ok) { const t = await r.text(); return t ? JSON.parse(t) : {}; }
-      if (r.status === 401 && attempt < 3) { await refresh(); continue; }
+      if (r.status === 401 && ++authFails <= 3) { await ensureFresh(used); continue; }
       let reason = "", detail = "";
       try { const j = await r.json(); reason = j?.error?.errors?.[0]?.reason || j?.error?.status || ""; detail = j?.error?.message || ""; } catch { /* no JSON body */ }
       if (r.status === 429 || r.status >= 500 || /ratelimit|quota|backenderror/i.test(reason)) { await sleep(1000 * attempt ** 2 + Math.random() * 1000); continue; }
