@@ -3,6 +3,8 @@ import { getThreads, getConfirmations, getPinned, clock } from "@/lib/data-messa
 import { getSyncStatus } from "@/lib/data-day";
 import { Card, H1 } from "@/components/ui";
 import { ThreadAvatar } from "@/components/c/Avatar";
+import { MessagesSearch } from "@/components/c/MessagesSearch";
+import { SquarePen } from "lucide-react";
 import { getPeople, getViewer } from "@/lib/data-registers";
 import { SyncLine } from "@/components/c/SyncLine";
 import { ConfirmCards } from "@/components/c/MessagesView";
@@ -12,7 +14,8 @@ export const dynamic = "force-dynamic";
 // F16: a window on the person's own Messages threads (family only, last 30 days), mirrored by their own Mac.
 // F17: the Assistant thread, with Y/N confirmations that can be answered here or by text.
 export default async function Messages() {
-  const [threads, confirmations, sync, viewer, people, pinnedIds] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"]), getViewer(), getPeople(), getPinned()]);
+  const [allThreads, confirmations, sync, viewer, people, pinnedIds] = await Promise.all([getThreads(), getConfirmations(), getSyncStatus(["messages"]), getViewer(), getPeople(), getPinned()]);
+  const threads = allThreads.filter((t) => !t.hidden);
   const pinned = pinnedIds.map((id) => threads.find((t) => t.id === id)).filter((t): t is NonNullable<typeof t> => !!t);
   const rest = threads.filter((t) => !pinnedIds.includes(t.id));
   const othersOf = (t: (typeof threads)[number]) => t.kind === "assistant" ? ["Assistant"] : t.members.filter((m) => m !== viewer.name);
@@ -21,7 +24,8 @@ export default async function Messages() {
   const mirror = sync[0];
   return (
     <>
-      <H1 right={mirror ? <span className={`text-xs ${mirror.state === "ok" ? "text-green font-semibold" : "text-amber font-semibold"}`}>● {mirror.state === "ok" ? "live" : "paused"} · {clock(mirror.last_sync)}</span> : null}>Messages</H1>
+      <H1 right={<span className="flex items-center gap-2">{mirror && <span className={`text-xs ${mirror.state === "ok" ? "text-green font-semibold" : "text-amber font-semibold"}`}>● {mirror.state === "ok" ? "live" : "paused"} · {clock(mirror.last_sync)}</span>}<Link href="/messages/new" aria-label="New message" className="min-w-9 min-h-9 flex items-center justify-center rounded-lg text-accent hover:bg-soft"><SquarePen size={20} strokeWidth={2} /></Link></span>}>Messages</H1>
+      <MessagesSearch threads={threads} viewer={viewer.name}>
 
       {waiting.length > 0 && (
         <section className="mb-4">
@@ -76,6 +80,7 @@ export default async function Messages() {
       </ul>
 
 
+      </MessagesSearch>
       {mirror?.state !== "ok" && <section className="card"><SyncLine items={sync} /></section>}
       <details className="mt-3 text-xs text-muted">
         <summary className="cursor-pointer list-none flex items-center gap-2"><span className="w-6 h-6 rounded-full border border-line text-accent font-bold flex items-center justify-center not-italic">i</span>About Messages</summary>

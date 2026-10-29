@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
-import { pendingLines, sendLine, takeSuggestion, ignoreSuggestion } from "@/app/messages/actions";
+import { pendingLines, sendLine, takeSuggestion, ignoreSuggestion, setThreadSwitch } from "@/app/messages/actions";
 import { useRouter } from "next/navigation";
 import type { Confirmation, Message, Suggestion, Thread } from "@/lib/data-messages";
 import { clock } from "@/lib/c-shared";
@@ -46,6 +46,8 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
   const [open, setOpen] = useState<string | null>(null);          // message id whose chips are slid out
   const [gone, setGone] = useState<Record<string, string>>({});   // suggestion id → what happened, for the inline note
   const [info, setInfo] = useState(false);
+  const [reads, setReads] = useState(!!thread.assistant_reads);
+  const [hidden, setHidden] = useState(!!thread.hidden);
   const chipsFor = (mid: string) => suggestions.filter((x) => x.message_id === mid && !gone[x.id]);
   const { show, el } = useToast();
   const all = [...messages, ...sent];
@@ -85,6 +87,14 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
           <div>A mirror of your own Messages thread: family threads only, the last 30 days, owner-only and encrypted at rest. Full history stays in Messages and iCloud.</div>
           <div>What you type here goes out from your Mac through Messages, as you, so it appears on every phone like any other text. If the mirror is paused, use Messages directly.</div>
           <div>⋯ on a line means the assistant spotted something it could turn into a task, event, reply or receipt. Nothing happens until you tap; "Not this" teaches it to suggest less.</div>
+          <label className="flex items-center justify-between gap-3 min-h-10 mt-1 text-fg">
+            <span><span className="font-semibold">Assistant reads this thread</span><span className="block text-muted">Only then do inbound lines go to the model for suggestions. {thread.is_family ? "On for family threads unless you turn it off." : "Off for everyone outside the family unless you turn it on."}</span></span>
+            <input type="checkbox" checked={reads} onChange={(e) => { const v = e.target.checked; setReads(v); void setThreadSwitch(thread.id, { assistant_reads: v }); }} className="w-5 h-5 accent-[var(--accent)]" />
+          </label>
+          <label className="flex items-center justify-between gap-3 min-h-10 text-fg">
+            <span><span className="font-semibold">Hide from StewardOS</span><span className="block text-muted">Keeps mirroring nothing to show: the thread leaves the list and sends no badges. Messages is untouched.</span></span>
+            <input type="checkbox" checked={hidden} onChange={(e) => { const v = e.target.checked; setHidden(v); start(async () => { await setThreadSwitch(thread.id, { hidden: v }); if (v) router.push("/messages"); }); }} className="w-5 h-5 accent-[var(--accent)]" />
+          </label>
           <a href="messages://" className="font-semibold text-accent">Open in Messages</a>
         </div>
       )}

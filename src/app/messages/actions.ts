@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
+
 // Queues a line for the person's own Mac to send through Messages as them (F16). The dashboard never sends anything itself.
 export async function sendLine(threadId: string, text: string) {
   const t = text.trim();
@@ -79,4 +80,55 @@ export async function togglePin(threadId: string) {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/messages"); revalidatePath(`/messages/${threadId}`);
   return { ok: true, pinned: next.includes(threadId) };
+}
+
+// The two per-thread switches: hidden (not shown here) and assistant_reads (the suggestion engine may read it).
+export async function setThreadSwitch(threadId: string, patch: { hidden?: boolean; assistant_reads?: boolean }) {
+  if (!hasSupabaseEnv()) return { ok: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { error } = await sb.from("messages_threads").update(patch).eq("id", threadId).eq("person", user.id);
+  if (error) return { ok: false, error: error.message };
+  await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "thread_switch", subject: `${threadId}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, undoable: false }).then(() => {}, () => {});
+  revalidatePath("/messages"); revalidatePath(`/messages/${threadId}`);
+  return { ok: true };
+}
+
+// Start a conversation with someone who has no thread in the window: the line goes out to their phone or email,
+// and the thread appears here on the mirror's next pass.
+export async function startThread(toHandle: string, text: string) {
+  const t = text.trim(), h = toHandle.trim();
+  if (!t || !h) return { ok: false, error: "Who, and what to say?" };
+  if (!hasSupabaseEnv()) return { ok: true, sample: true };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { error } = await sb.from("messages_outbox").insert({ person: user.id, thread_id: null, to_handle: h, text: t.slice(0, 4000) });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+// Searches are server actions so client components (search field, new-message picker) can call them.
+// Search: thread names and message text (the mirror's copy; a database query, no model). Returns matching thread ids
+// with the line that matched, newest first.
+export async function searchMessages(q: string): Promise<{ thread_id: string; text: string; at: string }[]> {
+  const t = q.trim();
+  if (!hasSupabaseEnv() || t.length < 2) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("messages").select("thread_id,text,at").ilike("text", `%${t.replace(/[%_]/g, "\\$&")}%`).order("at", { ascending: false }).limit(60);
+  const seen = new Set<string>(); const out: { thread_id: string; text: string; at: string }[] = [];
+  for (const r of data ?? []) { if (seen.has(r.thread_id)) continue; seen.add(r.thread_id); out.push({ thread_id: String(r.thread_id), text: String(r.text ?? ""), at: String(r.at) }); }
+  return out;
+}
+
+export type ContactHit = { id: string; name: string; handles: { label: string; value: string }[]; photo: string | null };
+export async function searchContacts(q: string): Promise<ContactHit[]> {
+  const t = q.trim();
+  if (!hasSupabaseEnv() || t.length < 2) return [];
+  const sb = await createClient();
+  const { data } = await sb.from("contact_cards").select("id,full_name,phones,emails,photo_path").is("deleted_at", null).ilike("full_name", `%${t.replace(/[%_]/g, "\\$&")}%`).order("full_name").limit(12);
+  return (data ?? []).map((c) => ({ id: String(c.id), name: String(c.full_name), photo: c.photo_path ? `/api/avatar/${c.photo_path}` : null,
+    handles: [...((c.phones as { label: string; number: string }[]) ?? []).map((p) => ({ label: p.label, value: p.number })), ...((c.emails as { label: string; address: string }[]) ?? []).map((e) => ({ label: e.label, value: e.address }))] }))
+    .filter((c) => c.handles.length);
 }

@@ -92,10 +92,10 @@ const sending = new Set();
 async function sendOne(o) {
   if (sending.has(o.id)) return false; sending.add(o.id);
   try {
-    const guid = sendTargets.get(o.thread_id);
-    if (!guid) { await rest("PATCH", `messages_outbox?id=eq.${o.id}&status=eq.queued`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); return false; }
+    const guid = o.thread_id ? sendTargets.get(o.thread_id) : null;
+    if (!guid && !o.to_handle) { await rest("PATCH", `messages_outbox?id=eq.${o.id}&status=eq.queued`, { status: "failed", error: "not a mirrored thread" }, { Prefer: "return=minimal" }); return false; }
     let err = null;
-    try { sendViaMessages(guid, o.text); } catch (e) { err = String(e.message).slice(0, 300); }
+    try { if (guid) sendViaMessages(guid, o.text); else sendToHandle(o.to_handle, o.text); } catch (e) { err = String(e.message).slice(0, 300); }
     // Messages sometimes reports an error after the line has already gone out: believe the database, not the error.
     if (err) { await new Promise((r) => setTimeout(r, 4000)); snapshot(); const esc = o.text.replace(/'/g, "''");
       const chatIds = familyChats.filter((c) => guid === c.guid || threadGroups.get(o.thread_id)?.chats.some((x) => x.id === c.id)).map((c) => c.id).join(",") || 0;
@@ -110,9 +110,12 @@ async function sendOne(o) {
 
 // Inbound lines seen so far (guid). Lines older than the watermark on the first pass are history, not news.
 let newsSince = Date.now() - 10 * 60e3; const notified = new Set();
+let switches = new Map(); // thread id -> { hidden, assistant_reads }
+async function loadSwitches() { switches = new Map((await rest("GET", `messages_threads?person=eq.${PERSON}&select=id,hidden,assistant_reads`).catch(() => [])).map((r) => [r.id, r])); }
 async function queueBubbles(msgRows, threadRows) {
   const names = new Map(threadRows.map((t) => [t.id, t.name]));
-  let fresh = msgRows.filter((m) => !m.is_me && !notified.has(m.id) && Date.parse(m.at) > newsSince);
+  await loadSwitches();
+  let fresh = msgRows.filter((m) => !m.is_me && !notified.has(m.id) && Date.parse(m.at) > newsSince && !switches.get(m.thread_id)?.hidden);
   if (fresh.length) { // one notification per guid, ever (the partial unique index is the backstop; a restart re-checks here)
     const have = await rest("GET", `notifications?type=eq.message&select=item_id&item_id=in.(${fresh.map((m) => `"${m.id}"`).join(",")})`);
     const seen = new Set(have.map((r) => r.item_id)); for (const id of seen) notified.add(id);
@@ -128,22 +131,23 @@ async function queueBubbles(msgRows, threadRows) {
   return fresh;
 }
 
-// ---- avatars: a family member's photo from the person's own Contacts (contact_cards.photo_path), matched by handle ----
-let avatarMap = null, avatarAt = 0; // name -> photo_path
-async function loadAvatars() {
-  if (avatarMap && Date.now() - avatarAt < 30 * 60e3) return avatarMap;
-  const map = {};
+// ---- people: names and photos from the person's own Contacts (contact_cards), matched by handle. Family handles come
+// from MIRROR_FAMILY_HANDLES first; anyone else is named from their contact card, else shown as the number/email. ----
+let people = null, peopleAt = 0; // { names: Map(handle->name), photos: Map(name->photo_path) }
+async function loadPeople() {
+  if (people && Date.now() - peopleAt < 30 * 60e3) return people;
+  const names = new Map(), photos = new Map();
   try {
-    const cards = await rest("GET", `contact_cards?person=eq.${PERSON}&deleted_at=is.null&photo_path=not.is.null&select=phones,emails,photo_path,provider`);
-    for (const [handle, name] of FAMILY) {
-      if (map[name]) continue;
-      const digits = handle.replace(/\D/g, ""), email = handle.includes("@") ? handle.toLowerCase() : null;
-      const hit = cards.find((c) => (email && (c.emails || []).some((e) => (e.address || "").toLowerCase() === email)) || (digits.length >= 7 && (c.phones || []).some((p) => (p.digits || "").endsWith(digits.slice(-10)))));
-      if (hit) map[name] = hit.photo_path;
-    }
-  } catch (e) { console.error(`${now()} avatars: ${String(e.message).slice(0, 120)}`); }
-  avatarMap = map; avatarAt = Date.now(); return map;
+    const cards = await rest("GET", `contact_cards?person=eq.${PERSON}&deleted_at=is.null&select=full_name,phones,emails,photo_path`);
+    const byDigits = new Map(), byEmail = new Map();
+    for (const c of cards) { for (const p of c.phones || []) if (p.digits?.length >= 7) byDigits.set(p.digits.slice(-10), c); for (const e of c.emails || []) if (e.address) byEmail.set(e.address.toLowerCase(), c); }
+    const cardFor = (h) => h.includes("@") ? byEmail.get(h.toLowerCase()) : byDigits.get(h.replace(/\D/g, "").slice(-10));
+    for (const [handle, name] of FAMILY) { names.set(handle, name); const c = cardFor(handle); if (c?.photo_path && !photos.has(name)) photos.set(name, c.photo_path); }
+    people = { names, photos, cardFor };
+  } catch (e) { console.error(`${now()} contacts: ${String(e.message).slice(0, 120)}`); people = { names: new Map(FAMILY), photos, cardFor: () => null }; }
+  peopleAt = Date.now(); return people;
 }
+const prettyHandle = (h) => /^\+?\d{10,}$/.test(h) ? h.replace(/^\+?1?(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3") : h;
 
 // ---- suggestion engine: one judgment per new inbound line, written to message_suggestions; the app shows the "shown" ones ----
 const AI_KEY = env.ANTHROPIC_API_KEY, SUGGEST = AI_KEY && (env.MIRROR_SUGGEST || "on") !== "off";
@@ -154,13 +158,15 @@ async function loadBars() {
   const rows = await rest("GET", `suggestion_bars?person=eq.${PERSON}&select=kind,bar`).catch(() => []);
   bars = Object.fromEntries(rows.map((r) => [r.kind, Number(r.bar)])); barsAt = Date.now(); return bars;
 }
+let threadRowsFamily = new Map();
 async function suggestFor(fresh, msgRows) {
   if (!SUGGEST || !fresh.length) return 0;
   const b = await loadBars();
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long" }).format(new Date());
   const household = { me: ME, members: [...new Set([ME, ...FAMILY.values()])] };
   let n = 0;
-  for (const line of fresh.slice(-5)) { // a burst judges the last five; older ones in the same burst are context, not chips
+  const readable = fresh.filter((m) => { const sw = switches.get(m.thread_id); return sw ? sw.assistant_reads : threadRowsFamily.get(m.thread_id); });
+  for (const line of readable.slice(-5)) { // a burst judges the last five; older ones in the same burst are context, not chips
     const thread = msgRows.filter((m) => m.thread_id === line.thread_id);
     const i = thread.findIndex((m) => m.id === line.id);
     const context = thread.slice(Math.max(0, i - 6), i);
@@ -177,6 +183,26 @@ async function suggestFor(fresh, msgRows) {
   return n;
 }
 
+// A new conversation: address the person, not a chat. iMessage first; SMS when the handle is a number with no iMessage.
+function sendToHandle(handle, text) {
+  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const script = `tell application "Messages"
+  set ok to false
+  try
+    set acct to 1st account whose service type = iMessage
+    send "${esc(text)}" to participant "${esc(handle)}" of acct
+    set ok to true
+  end try
+  if not ok then
+    set acct to 1st account whose service type = SMS
+    send "${esc(text)}" to participant "${esc(handle)}" of acct
+  end if
+end tell`;
+  const r = spawnSync("osascript", ["-e", script], { encoding: "utf8", timeout: 120000 });
+  if (r.error?.code === "ETIMEDOUT" || r.signal) throw new Error("Messages did not answer in 2 minutes.");
+  if (r.status !== 0) throw new Error((r.stderr || "").trim().slice(0, 200) || `osascript exited ${r.status}`);
+}
+
 async function main() {
   if (!URL_ || !KEY) throw new Error(`SUPABASE_URL / SUPABASE_SERVICE_KEY missing in ${envPath}`);
   snapshot();
@@ -190,21 +216,30 @@ async function main() {
     return;
   }
   if (!PERSON || !FAMILY.size) throw new Error("MIRROR_PERSON_ID or MIRROR_FAMILY_HANDLES missing in the env file (run --list-chats to find the handles)");
-  const family = chats.filter((c) => c.handles && c.handles.split("|").every((h) => FAMILY.has(h)));
-  const nameOf = (h) => FAMILY.get((h || "").toLowerCase()) || h || "?";
   const sinceNs = (Date.now() / 1000 - DAYS * 86400 - APPLE_EPOCH) * 1e9;
+  // Every conversation with a line inside the window (not only family): the app is a window on Messages. Family is a
+  // flag on the thread (all handles in MIRROR_FAMILY_HANDLES), which decides whether the assistant reads it by default.
+  const Pn = await loadPeople();
+  const active = new Set(q(`select distinct cm.chat_id as id from message m join chat_message_join cm on cm.message_id = m.ROWID where m.date > ${Math.floor(sinceNs)}`).map((r) => r.id));
+  const family = chats.filter((c) => c.handles && active.has(c.id));
+  const nameOf = (h) => { const k = (h || "").toLowerCase(); return FAMILY.get(k) || Pn.cardFor(k)?.full_name || prettyHandle(h || "?"); };
   // Messages keeps several chats for one person (iMessage vs SMS, number vs email). The app shows ONE thread per set of people:
   // thread id = kind + member names; lines are sent into whichever of its chats spoke most recently.
   const groups = new Map(); // thread id -> { kind, members, chats: [] }
   for (const c of family) {
-    const members = [...new Set(c.handles.split("|").map(nameOf))].sort();
+    const handles = c.handles.split("|");
+    const isFamily = handles.every((h) => FAMILY.has(h));
+    const members = [...new Set(handles.map(nameOf))].sort();
     const kind = c.style === 43 ? "group" : "direct";
-    const id = `${kind}-${members.join("-")}`.toLowerCase().replace(/[^a-z0-9-]+/g, "_"); // plain slug: safe in a URL
-    if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [] });
-    const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name;
+    // family threads keep their name-based ids (pins, notifications and suggestions point at them); others are keyed by
+    // their handles so a renamed contact does not become a new thread
+    const id = isFamily ? `${kind}-${members.join("-")}`.toLowerCase().replace(/[^a-z0-9-]+/g, "_")
+                        : `${kind}-${[...handles].sort().map((h) => h.replace(/[^a-z0-9@.]+/gi, "")).join("-")}`.toLowerCase().replace(/[^a-z0-9@.-]+/g, "_").slice(0, 120);
+    if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [], isFamily, handles: [...new Set(handles)] });
+    const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name; for (const h of handles) if (!g.handles.includes(h)) g.handles.push(h);
   }
   let msgCount = 0; const threadRows = [], msgRows = [];
-  const avatars = await loadAvatars();
+  const P = await loadPeople();
   for (const g of groups.values()) {
     const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes
@@ -226,34 +261,37 @@ async function main() {
     const unread = rows.filter((m) => !m.me && !m.read).length;
     threadRows.push({ id: g.id, person: PERSON, kind: g.kind, name: g.name || g.members.filter((x) => x !== ME).join(", "), members: [ME, ...g.members.filter((x) => x !== ME)],
       last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME,
-      avatars: Object.fromEntries(g.members.filter((m) => avatars[m]).map((m) => [m, avatars[m]])) });
+      is_family: g.isFamily, handles: g.handles, avatars: Object.fromEntries(g.members.filter((m) => P.photos.has(m)).map((m) => [m, P.photos.get(m)])) });
   }
-  console.log(`${now()} ${threadRows.length} family threads (${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
+  console.log(`${now()} ${threadRows.length} threads (${threadRows.filter((t) => t.is_family).length} family, ${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }
 
   familyChats = family; threadGroups = groups;
   // bubbles first: the app shows news the moment the row lands, before the slower mirror upserts
   const fresh = WATCH ? await queueBubbles(msgRows, threadRows) : [];
   if (fresh.length) console.log(`${now()} ${fresh.length} new inbound line(s) → notifications`);
-  // write (upsert; a re-run changes nothing that is already the same)
-  for (let i = 0; i < threadRows.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", threadRows.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
+  // write (upsert; a re-run changes nothing that is already the same). The person's switches (hidden, assistant_reads)
+  // are never in the upsert: a NEW thread gets assistant_reads = is_family in a separate insert, an existing one keeps its own.
+  const passStart = now();
+  for (const t of threadRows) t.updated_at = passStart;
+  const known = new Set((await rest("GET", `messages_threads?person=eq.${PERSON}&select=id`)).map((r) => r.id));
+  const fresh_t = threadRows.filter((t) => !known.has(t.id)).map((t) => ({ ...t, assistant_reads: t.is_family }));
+  const old_t = threadRows.filter((t) => known.has(t.id));
+  for (let i = 0; i < fresh_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", fresh_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
+  for (let i = 0; i < old_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", old_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
-  // mirror copies only: drop threads that no longer exist under these ids (renamed or no longer family) and lines past the window
-  const ids = threadRows.map((t) => t.id);
-  if (ids.length) {
-    const inList = `(${ids.map((x) => `"${x}"`).join(",")})`;
-    await rest("DELETE", `messages?person=eq.${PERSON}&thread_id=not.in.${inList}`, undefined, { Prefer: "return=minimal" });
-    await rest("DELETE", `messages_threads?person=eq.${PERSON}&id=not.in.${inList}`, undefined, { Prefer: "return=minimal" });
-  }
+  // mirror copies only: a thread this pass did not touch has left the window (or Messages); its lines go with it (cascade)
+  await rest("DELETE", `messages_threads?person=eq.${PERSON}&updated_at=lt.${encodeURIComponent(passStart)}`, undefined, { Prefer: "return=minimal" });
   const cutoff = new Date(Date.now() - DAYS * 86400e3).toISOString();
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
 
   // judge the new lines (after the upserts, so a chip always points at a line the app can show)
+  threadRowsFamily = new Map(threadRows.map((t) => [t.id, t.is_family]));
   const judged = await suggestFor(fresh, msgRows);
   if (judged) console.log(`${now()} ${judged} line(s) judged`);
 
   // send what was typed on the dashboard
-  const queued = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`);
+  const queued = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,to_handle,text`);
   let sent = 0, failed = 0;
   for (const o of queued) { if (await sendOne(o)) sent++; else failed++; }
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "numeric", minute: "2-digit" }).format(new Date());
@@ -272,7 +310,7 @@ else {
   const run = async (why) => { if (busy) { again = true; return; } busy = true; try { do { again = false; await main(); lastPass = Date.now(); lastStamp = stamp(); } while (again); } catch (e) { await fail(e); } finally { busy = false; } };
   await run("start");
   setInterval(() => { if (stamp() !== lastStamp) void run("messages changed"); else if (Date.now() - lastPass > 60000) void run("minute"); }, 500);
-  const drain = async () => { try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`); for (const o of w) await sendOne(o); if (w.length) void run("outbox"); } catch { /* next tick */ } };
+  const drain = async () => { try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,to_handle,text`); for (const o of w) await sendOne(o); if (w.length) void run("outbox"); } catch { /* next tick */ } };
   setInterval(drain, 3000);
   const sb = createClient(URL_, KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 5 } } });
   sb.channel("outbox").on("postgres_changes", { event: "INSERT", schema: "public", table: "messages_outbox", filter: `person=eq.${PERSON}` },
