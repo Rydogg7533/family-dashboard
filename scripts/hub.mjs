@@ -5,18 +5,22 @@
 //   node scripts/hub.mjs --apply         # install or refresh the launchd job of every module whose prerequisite is met; nothing else
 //   node scripts/hub.mjs --apply --only mail-sync,push-sender
 //   node scripts/hub.mjs --json          # the report as JSON (for the Health page later)
+//   node scripts/hub.mjs --apply --retire-legacy   # also unload every com.ryan.* job that has a running com.stewardos.* twin, and move its plist aside
 //
 // Rules:
 //   • A module is ON only when its prerequisite exists on this Mac (a token file, an env key, a folder). No prerequisite, no job.
 //   • Jobs are written as ~/Library/LaunchAgents/com.stewardos.<module>.plist, built for THIS user, repo path and node, with logs under
-//     ~/StewardOS/logs. Only files with that prefix are ever written. Older com.ryan.* jobs are reported, never touched: unload them by hand
-//     once the com.stewardos.* copy is seen running (the report says which ones overlap).
+//     ~/StewardOS/logs. Only files with that prefix are ever written. Older com.ryan.* jobs are reported and left alone unless
+//     --retire-legacy is passed, which unloads only those whose com.stewardos.* twin is seen running and renames the old plist to
+//     .retired (never deleted).
+//   • Rule D34 (2026-10-29): every agent on the hub is a module here and nowhere else. Adding an agent means adding a MODULES entry;
+//     hand-written plists are gone from the repo. Only agents we want permanently in the product go in.
 //   • A plist that already matches is left alone. A changed one is rewritten and reloaded (bootout + bootstrap). Nothing is deleted.
 //   • Secrets stay in ~/_secrets_local_only (one env file: family-dashboard.env, names SUPABASE_URL / SUPABASE_SERVICE_KEY). Nothing is printed
 //     from it except which keys are present.
 //   • Not modules: dashboard-report (mini-report.sh, owned by the File Organization project) and bookmark-evening (Ryan's own). Both are reported as "personal".
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, renameSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +29,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const JSON_OUT = args.includes("--json");
+const RETIRE = args.includes("--retire-legacy");
 const ONLY = (() => { const i = args.indexOf("--only"); return i >= 0 ? new Set(args[i + 1].split(",").map((s) => s.trim())) : null; })();
 
 const HOME = homedir();
@@ -50,6 +55,11 @@ const nodeBin = (() => { for (const p of ["/opt/homebrew/bin/node", "/usr/local/
 
 // Each module: what it runs, how often, and the prerequisite that switches it on. `why` is shown when it is off.
 export const MODULES = [
+  { id: "hub-fetcher", script: "hub-fetcher.mjs", every: 15, needs: () => supabase, why: "needs the Supabase keys in the env file", powers: "the app's fetch requests (pull, never push)" },
+  { id: "tx-match", script: "tx-match.mjs", every: 3600, needs: () => supabase, why: "needs the Supabase keys in the env file", powers: "Money: links receipts to ledger lines, sets cards", extraArgs: () => ["--apply"] },
+  { id: "vault-import", script: "vault-folder.mjs", keepAlive: true, needs: () => supabase && canRun("op"), why: "needs the 1Password CLI (op) on this Mac", powers: "Settings › 1Password › Map your documents (watches ~/StewardOS/Import)", extraArgs: () => ["--serve"] },
+  { id: "catalog-walker", script: "catalog-walker.mjs", every: 600, needs: () => supabase && existsSync(join(HOME, "Organized")), why: "needs ~/Organized (the document tree)", powers: "Ask: the document catalog (text stays on the hub)", extraArgs: () => ["--sweep"] },
+  { id: "contact-geo", script: "contact-geo.mjs", every: 3600, needs: () => supabase, why: "needs the Supabase keys in the env file", powers: "Contacts: addresses on the map" },
   { id: "push-sender", script: "push-sender.mjs", every: 30, needs: () => supabase && has("VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY"), why: "needs VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY in the env file (node scripts/make-vapid.mjs)", powers: "push notifications" },
   { id: "location-agent", script: "location-agent.mjs", every: 600, needs: () => supabase, why: "needs the Supabase keys in the env file", powers: "Day page: stops, Places, questions" },
   { id: "filing-agent", script: "filing-agent.mjs", every: 600, needs: () => supabase && existsSync(join(HOME, "Organized")), why: "needs ~/Organized (the filing tree)", powers: "Inbox › file into Organized" },
@@ -68,11 +78,12 @@ export const MODULES = [
 const PERSONAL = ["com.ryan.dashboard-report", "com.ryan.nightly-mirror", "com.ryan.bookmark-evening"];
 
 function canRead(p) { try { readFileSync(p, { flag: "r" }).length; return true; } catch { return false; } }
+function canRun(bin) { return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].some((d) => existsSync(join(d, bin))); }
 
 function plistFor(m) {
   const argsXml = [nodeBin, join(REPO, "scripts", m.script), ...(m.extraArgs ? m.extraArgs() : [])].map((a) => `<string>${a.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</string>`).join("");
   const log = join(LOGS, `${m.id}.log`);
-  const timing = m.keepAlive ? `<key>KeepAlive</key><true/>` : `<key>StartInterval</key><integer>${m.every}</integer>`;
+  const timing = m.keepAlive ? `<key>KeepAlive</key><true/>\n  <key>ThrottleInterval</key><integer>10</integer>` : `<key>StartInterval</key><integer>${m.every}</integer>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -123,6 +134,19 @@ function main() {
     row.loaded = b.status === 0; row.state = b.status === 0 ? "ok" : "load-failed";
     report.changes.push(`${state === "install" ? "installed" : state === "load" ? "loaded" : "updated"} ${label}${b.status === 0 ? "" : ` (bootstrap failed: ${(b.stderr || "").trim()})`}`);
   }
+  // --retire-legacy: an old com.ryan.<module> job is unloaded only when its com.stewardos.<module> twin is loaded right now,
+  // so nothing ever stops running. The old plist is renamed .retired, never deleted. Personal jobs are never touched.
+  report.retired = [];
+  if (APPLY && RETIRE) {
+    const now = loadedLabels();
+    for (const r of report.modules) {
+      const old = `com.ryan.${r.id}`, oldFile = join(AGENTS, `${old}.plist`);
+      if (!r.on || !now.has(PREFIX + r.id) || !(now.has(old) || existsSync(oldFile))) continue;
+      spawnSync("launchctl", ["bootout", `gui/${uid()}/${old}`], { stdio: "ignore" });
+      if (existsSync(oldFile)) renameSync(oldFile, `${oldFile}.retired`);
+      r.legacyLoaded = false; report.retired.push(old);
+    }
+  }
   if (JSON_OUT) { console.log(JSON.stringify(report, null, 2)); return; }
 
   console.log(`StewardOS hub on ${report.host} (user ${report.user})${APPLY ? "" : "  — REPORT ONLY, nothing changed (add --apply)"}`);
@@ -139,7 +163,8 @@ function main() {
   for (const p of report.personal) console.log(`  ${p.loaded ? "✓" : "·"} ${p.label}${p.loaded ? " loaded" : " not loaded"}`);
   if (report.changes.length) console.log(`\n${APPLY ? "Changes made" : "Would change"}:\n  ${report.changes.join("\n  ")}`);
   else console.log("\nNo changes needed.");
+  if (report.retired.length) console.log(`\nRetired old jobs (plist kept as .retired): ${report.retired.join(", ")}`);
   const overlap = report.modules.filter((r) => r.on && r.loaded && r.legacyLoaded);
-  if (overlap.length) console.log(`\nBoth old and new jobs are loaded for: ${overlap.map((r) => r.id).join(", ")}. Each runs twice until the old one is unloaded:\n  launchctl bootout gui/$(id -u)/com.ryan.<module>   (and move the plist out of ~/Library/LaunchAgents)`);
+  if (overlap.length) console.log(`\nBoth old and new jobs are loaded for: ${overlap.map((r) => r.id).join(", ")}. Each runs twice until the old one is retired:\n  node scripts/hub.mjs --apply --retire-legacy`);
 }
 if (process.argv[1] && process.argv[1].endsWith("hub.mjs")) main();
