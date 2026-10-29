@@ -430,13 +430,13 @@ function DeliveryCard({ card, onShare }: { card: AskCard; onShare: () => void })
     <div className="card p-0 overflow-hidden flex flex-col">
       {card.kind === "file" && card.open && (
         imgFailed || isPdf
-          ? <a href={card.open} target="_blank" rel="noopener" className="h-32 bg-soft flex items-center justify-center gap-3 text-muted text-sm"><DocIcon />{isPdf ? "PDF · tap to open" : "Tap to open"}</a>
-          : <a href={card.open} target="_blank" rel="noopener" className="bg-soft flex items-center justify-center" aria-label={`${card.name}, full screen`}>
+          ? <a href={card.open} target="_blank" rel="noopener" className="h-32 card-media flex items-center justify-center gap-3 text-muted text-sm"><DocIcon />{isPdf ? "PDF · tap to open" : "Tap to open"}</a>
+          : <a href={card.open} target="_blank" rel="noopener" className="card-media flex items-center justify-center" aria-label={`${card.name}, full screen`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={card.open} alt={card.name} className="max-h-64 w-full object-contain" onError={() => setImgFailed(true)} />
             </a>
       )}
-      {card.kind === "vault" && <div className="h-28 bg-soft flex items-center justify-center gap-3 text-muted px-4"><LockIcon /><div className="text-sm leading-snug max-w-[200px]">Kept in 1Password. The app has the label, not the card.</div></div>}
+      {card.kind === "vault" && <div className="h-28 card-media flex items-center justify-center gap-3 text-muted px-4"><LockIcon /><div className="text-sm leading-snug max-w-[200px]">Kept in 1Password. The app has the label, not the card.</div></div>}
       <div className="px-3.5 pt-3 pb-3 flex flex-col gap-2.5">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
