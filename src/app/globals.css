@@ -58,6 +58,14 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
    :root[data-card-style="..."] .card and outrank a descendant rule. On --bg every card style reads here exactly as it
    does on the Ask tab, which is the arrangement that already worked. The sheet still reads as a sheet: accent top
    border, rounded top, deep shadow, dimmed backdrop. */
+/* Opening the Ask sheet: a short rise, and the dimmed page fades in with it. Before this the sheet simply appeared,
+   so every layout correction behind it read as a glitch (Ryan, 2026-10-28). */
+@keyframes ask-sheet-in { from { transform: translateY(14px); } to { transform: none; } }
+@keyframes ask-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+.ask-sheet { animation: ask-sheet-in 190ms cubic-bezier(0.22, 0.7, 0.3, 1); will-change: transform; }
+.ask-scrim { animation: ask-scrim-in 190ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .ask-sheet, .ask-scrim { animation: none; } }
+
 /* The picture or placeholder panel inside a card. Never --soft: on the Ask sheet that is the sheet's own colour, so the
    top half of a delivery card melted into the background. One step off the card, with a divider under it. */
 .card-media { background: color-mix(in srgb, var(--fg) 7%, var(--bg)); border-bottom: 1px solid var(--line); }
