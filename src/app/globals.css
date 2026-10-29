@@ -2,13 +2,14 @@
 
 :root {
   --bg: #FFFFFF; --fg: #16181D; --muted: #5B6472; --line: #E3E6EA; --soft: #F5F6F8;
+  --me: color-mix(in srgb, var(--accent-user) 12%, var(--bg));   /* your own words on Ask: a tint that is not a button */
   --accent-user: #1F6FA3; --accent: var(--accent-user); --accent-ink: color-mix(in srgb, var(--accent) 80%, black);
   --amber: #9A4D00; --amber-bg: #FFF4E5; --green: #176B45; --green-bg: #E8F5EE; --red: #B3261E; --red-bg: #FDECEA;
   --base-size: 15px; --radius: 14px; --font-display: Manrope, system-ui, sans-serif; --font-body: 'IBM Plex Sans', system-ui, sans-serif;
   --bg-dim: 0.4; --bg-photo: none; --motion: 0.18s;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16181D; --fg: #F2F4F7; --muted: #A5ADB8; --line: #2B3038; --soft: #22262E; --accent: color-mix(in srgb, var(--accent-user) 70%, white); --accent-ink: color-mix(in srgb, var(--accent) 80%, white); --amber: #F0B36A; --amber-bg: #3A2A12; --green: #6CCB97; --green-bg: #12301F; --red: #F28B82; --red-bg: #3B1A17; } }
-:root[data-theme="dark"] { --bg: #16181D; --fg: #F2F4F7; --muted: #A5ADB8; --line: #2B3038; --soft: #22262E; --accent: color-mix(in srgb, var(--accent-user) 70%, white); --accent-ink: color-mix(in srgb, var(--accent) 80%, white); --amber: #F0B36A; --amber-bg: #3A2A12; --green: #6CCB97; --green-bg: #12301F; --red: #F28B82; --red-bg: #3B1A17; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16181D; --fg: #F2F4F7; --muted: #A5ADB8; --line: #2B3038; --soft: #22262E; --accent: color-mix(in srgb, var(--accent-user) 70%, white); --accent-ink: color-mix(in srgb, var(--accent) 80%, white); --me: #1E2A36; --amber: #F0B36A; --amber-bg: #3A2A12; --green: #6CCB97; --green-bg: #12301F; --red: #F28B82; --red-bg: #3B1A17; } }
+:root[data-theme="dark"] { --bg: #16181D; --fg: #F2F4F7; --muted: #A5ADB8; --line: #2B3038; --soft: #22262E; --accent: color-mix(in srgb, var(--accent-user) 70%, white); --accent-ink: color-mix(in srgb, var(--accent) 80%, white); --me: #1E2A36; --amber: #F0B36A; --amber-bg: #3A2A12; --green: #6CCB97; --green-bg: #12301F; --red: #F28B82; --red-bg: #3B1A17; }
 
 /* More page section colors. Blue follows the person's accent; the others are fixed hues, lighter in dark mode.
    Never red, amber or green: those mean problem, warning and ok everywhere else in the app. */
@@ -31,7 +32,7 @@
 
 @theme inline {
   --color-bg: var(--bg); --color-fg: var(--fg); --color-muted: var(--muted); --color-line: var(--line); --color-soft: var(--soft);
-  --color-accent: var(--accent); --color-accent-ink: var(--accent-ink); --color-amber: var(--amber); --color-amber-bg: var(--amber-bg);
+  --color-accent: var(--accent); --color-accent-ink: var(--accent-ink); --color-me: var(--me); --color-amber: var(--amber); --color-amber-bg: var(--amber-bg);
   --color-green: var(--green); --color-green-bg: var(--green-bg); --color-red: var(--red); --color-red-bg: var(--red-bg);
   --font-sans: var(--font-body); --font-display: var(--font-display);
   --radius-2xl: var(--radius); --radius-xl: calc(var(--radius) * 0.8); --radius-lg: calc(var(--radius) * 0.65);

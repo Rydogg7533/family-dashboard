@@ -285,7 +285,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
             request never looks like a button next to the card that answers it. */}
         {bubbles.map((b, i) => b.role === "user" ? (
           <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
-            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-soft text-fg border border-line"}`}>{b.text}</button>
+            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-me text-fg"}`}>{b.text}</button>
             {b.files?.length ? <div className="text-[11px] text-muted px-1">📎 {b.files.map((f) => f.name).join(", ")}</div> : null}
             {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
             {b.stopped && editing !== i && <div className="text-[11px] text-muted px-1">Stopped · <button type="button" onClick={() => retry(i)} className="font-semibold text-accent">retry</button> · <button type="button" onClick={() => edit(i)} className="font-semibold text-accent">edit</button></div>}
@@ -431,7 +431,7 @@ function AnswerText({ text, muted }: { text: string; muted?: boolean }) {
   const [open, setOpen] = useState(false);
   const { head, more } = splitAnswer(text);
   return (
-    <div className={`card text-sm whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${muted ? "text-muted" : ""}`}>
+    <div className={`px-1 py-1 text-[15px] leading-snug whitespace-pre-wrap min-w-0 [overflow-wrap:anywhere] ${muted ? "text-muted" : ""}`}>
       {open ? `${head} ${more ?? ""}`.trim() : head}
       {more && <button type="button" onClick={() => setOpen((v) => !v)} className="block mt-1 text-xs font-semibold text-accent">{open ? "Less" : "More"}</button>}
     </div>
