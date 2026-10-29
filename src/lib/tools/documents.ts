@@ -36,18 +36,32 @@ async function shareLinks(c: Parameters<Tool["run"]>[1]): Promise<Record<string,
 // as themselves. Email waits on per-person Gmail sending; until then the tool says so instead of pretending.
 const sendTool: Tool = {
   name: "document.send", title: "Send by text", kind: "write", tier: 2,
-  description: "Send a document's public link to someone by text message, from the asker's own phone. First find the document with document.find (only a row with a share link can be sent) and the recipient with contact.find (take a mobile number; if two people match, ask which). Then call this with the link, the recipient's name and number: the confirm card is the question. On the tap, Messages opens on the phone with the text ready and the person sends it. Email is not available yet; say so if asked.",
+  description: "Send a document to someone by text message, from the asker's own phone. First find the document with document.find and the recipient with contact.find (take a mobile number; if two people match, ask which). Anything the app holds can be sent: pass the row's share link if it has one, otherwise the row's open field (a receipt, a capture); the app makes a link that works for 7 days. A row with only a fetch (the file is on the hub) must be fetched first; say so. A 1Password item cannot be sent from here (share it from 1Password). Nothing is sent by the app: the phone's Messages opens with the line filled in",
   input: {
     item: { type: "string", describe: "What is being sent, as the person would call it (e.g. 'StewardOS overview')", required: true },
-    link: { type: "string", describe: "The document's public https share link, from document.find's share field", required: true },
+    link: { type: "string", describe: "The document's public https share link, from document.find's share field, when it has one", required: false },
+    open: { type: "string", describe: "Otherwise the row's open field from document.find (like /api/receipt-file/<id>), for a file the app holds", required: false },
     to: { type: "string", describe: "Recipient's name, from contact.find", required: true },
     number: { type: "string", describe: "Recipient's mobile number, from contact.find", required: true },
     text: { type: "string", describe: "A short line to send before the link, in the person's own words; leave unset for just the item name and link", required: false },
   },
   async run(a, c) {
-    const link = str(a.link), to = str(a.to), item = str(a.item);
+    let link = str(a.link); const to = str(a.to), item = str(a.item);
     const number = str(a.number).replace(/\s*\(.*\)\s*$/, "").replace(/[^\d+]/g, "");
-    if (!/^https:\/\/\S+$/.test(link)) return { ok: false, error: "That document has no public link to send. Copy its link on the Work page or fetch the file instead." };
+    // A file the app holds (receipt, capture): a signed link that works for 7 days, made now, logged. The person is
+    // choosing to hand this file to someone, the same as attaching it; the link is private until they send it.
+    if (!/^https:\/\/\S+$/.test(link)) {
+      const m = /^\/api\/(receipt-file|capture)\/([0-9a-f-]{36})$/i.exec(str(a.open));
+      if (m) {
+        const table = m[1] === "receipt-file" ? "receipts" : "inbox_items";
+        const { data: row } = await c.sb.from(table).select("file_path").eq("id", m[2]).maybeSingle();
+        if (row?.file_path) {
+          const { data: signed } = await c.sb.storage.from("captures").createSignedUrl(String(row.file_path), 7 * 24 * 3600);
+          if (signed?.signedUrl) { link = signed.signedUrl; await c.sb.from("activity_log").insert({ actor: c.email, action: "document_link_made", subject: item || table, ref: m[2], undoable: false, detail: `7-day link for ${to}` }).then(() => {}, () => {}); }
+        }
+      }
+    }
+    if (!/^https:\/\/\S+$/.test(link)) return { ok: false, error: "The app does not hold that file, so there is nothing to send yet. If the row offers Fetch, fetch it first (about a minute), then send." };
     if (number.replace(/\D/g, "").length < 10) return { ok: false, error: `No usable mobile number for ${to || "that contact"}.` };
     if (!c.isOwner) {
       const { data: prof } = await c.sb.from("profiles").select("role").eq("id", c.userId).maybeSingle();
