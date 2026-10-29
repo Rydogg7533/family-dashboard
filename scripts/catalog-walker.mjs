@@ -253,3 +253,14 @@ try { pushed = await pushCloud(); } catch (e) { console.error(`cloud push failed
 q.run.run(MODE, t0, Date.now(), cat.seen, r.read, r.errors, `added ${cat.added}, changed ${cat.changed}, pushed ${pushed}`);
 const left = db.prepare("select count(*) n from documents where read_at is null and gone_at is null").get().n;
 console.log(`${new Date().toISOString()} ${MODE}: read ${r.read}, ${r.errors} errors, ${pushed} pushed to cloud, ${left} still to read, ${Math.round((Date.now() - t0) / 1000)}s`);
+// Heartbeat for System health (Ryan, 2026-10-29): one row says when the catalog last swept and how it stands. Red comes from
+// the page when this stops updating (the sweep is every 10 minutes under launchd), not from anything here.
+if (SB_URL && SB_KEY) {
+  try {
+    const tot = db.prepare("select count(*) n, sum(read_source='error') errors from documents where gone_at is null").get();
+    const when = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const body = { key: "catalog", state: left > 500 ? "warn" : "ok", summary: `Document catalog swept ${when} · ${Number(tot.n).toLocaleString()} documents${cat.added ? `, ${cat.added} new` : ""}${left ? `, ${left} still to read` : ""}`, detail: `${tot.errors} could not be read (password-protected or damaged files)`, value_num: Number(tot.n), updated_at: new Date().toISOString() };
+    const res = await fetch(`${SB_URL}/rest/v1/system_status?on_conflict=key`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify(body) });
+    if (!res.ok) console.error(`heartbeat → ${res.status}`);
+  } catch (e) { console.error(`heartbeat failed: ${String(e.message ?? e).slice(0, 120)}`); }
+}

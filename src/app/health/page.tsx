@@ -5,7 +5,7 @@ import IssueStatus from "@/components/IssueStatus";
 import { Fold } from "@/components/Fold";
 import { ReportIssueButton } from "@/components/ReportIssue";
 
-const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space", mail_suspicious: "Held as suspicious (iCloud Mail)", sync_contact_geo: "Contact addresses on the map" };
+const names: Record<string, string> = { heartbeat: "Mac mini heartbeat", mirror: "Nightly mirror", time_machine: "Time Machine", free_space_mini: "Mac mini free space", free_space_8tb: "Rossiter 8TB free space", mail_suspicious: "Held as suspicious (iCloud Mail)", sync_contact_geo: "Contact addresses on the map", catalog: "Document catalog (OCR)" };
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ const SEV_LABEL: Record<string, string> = { blocks: "blocks", annoying: "annoyin
 export default async function Health() {
   const [status, issues, owner] = await Promise.all([getStatus(), listIssues(), isOwner()]);
   const o = overall(status);
-  const order = ["heartbeat", "mirror", "time_machine", "free_space_mini", "free_space_8tb"];
+  const order = ["heartbeat", "mirror", "catalog", "time_machine", "free_space_mini", "free_space_8tb"];
   const rows = [...status].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   const renderIssue = (i: (typeof issues)[number]) => (
     <Card key={i.id}>
