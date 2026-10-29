@@ -16,10 +16,19 @@
 //   --receipts-from-handled   ALSO read receipts already filed under Dashboard/Handled, so subscriptions are still found after the filer has run.
 //                      Reads only receipt-like mail there; changes nothing. Slower on a big Handled label.
 //   --model-limit N    most messages to send in one run (default 300).
+//   --handle label     HANDLE what was placed (D24, 2026-10-28): every message the free rules placed (lists, bulk, codes,
+//                      confirmations, automated no-reply, your archive/record rules) and every message the model has judged
+//                      (task made, or "needs nothing") gets the Gmail label "Dashboard/Handled". `label` leaves it in the inbox
+//                      (the dry run); `--handle archive` also removes it from the inbox. Never: starred mail, senders in --keep,
+//                      receipts (the receipt filer moves those), calendar invites, shipping updates, unjudged mail. Undo file per
+//                      run in ~/_secrets_local_only/email-agent/undo/, same shape as email-apply.mjs. With --handle the default
+//                      search is "in:inbox -label:Dashboard/Handled", so a run only looks at mail it has not handled yet.
+//   --keep a.com,b@c   senders never handled (domain or address; subdomains match).
 //
 // Safety rules:
-//   - NEVER touches the mailbox. Gmail is opened with allowWrite:false (scripts/email-lib.mjs): any non-GET call throws.
-//     No label, archive, move, draft or send call exists in this file.
+//   - NEVER touches the mailbox unless --handle is given; without it Gmail is opened with allowWrite:false (any non-GET call
+//     throws). With --handle the only write is messages/batchModify adding one label (and, for `archive`, removing INBOX).
+//     No move, delete, draft or send call exists in this file.
 //   - NO MODEL unless --model-triage: then the only other call is to Anthropic's API (key from the same env file, never printed).
 //     Email text is untrusted: the model is told to ignore instructions in it, and its answer is only parsed as JSON into task text.
 //   - Safe to run twice: each task has a merge_key (email:<account>:<sender>:<subject pattern>). A group that already
@@ -28,16 +37,19 @@
 //   - Every task created gets an activity_log row (actor 'email-agent'), plus one summary row per run.
 // Secrets: ~/_secrets_local_only/family-dashboard.env (SUPABASE_URL, SUPABASE_SERVICE_KEY), same as the other agents.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { die, option, openGmail, readMessages, pattern, merchantKey, amountOf, cycleOf } from "./email-lib.mjs";
+import { die, option, openGmail, readMessages, pattern, merchantKey, amountOf, cycleOf, dir as secretsDir } from "./email-lib.mjs";
 import { loadKey, ask, loadCache, saveCache } from "./email-triage-lib.mjs";
 import { loadRules, recordHits } from "./email-rules-lib.mjs";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
-const query = option(args, "--q") || "in:inbox";
+const HANDLE = option(args, "--handle") || "";                      // "", "label" (dry run: label only) or "archive"
+if (HANDLE && !["label", "archive"].includes(HANDLE)) die("--handle takes label or archive");
+const KEEP = (option(args, "--keep") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+const query = option(args, "--q") || (HANDLE ? "in:inbox -label:Dashboard/Handled" : "in:inbox");
 const MAX = parseInt(option(args, "--max") || "10000", 10);
 const MIN = parseInt(option(args, "--min") || "3", 10);          // messages in a group before it becomes a task
 const MIN_RECEIPTS = parseInt(option(args, "--min-receipts") || "2", 10);
@@ -49,7 +61,7 @@ const INCLUDE_WHENEVER = args.includes("--include-whenever");
 const MODEL = option(args, "--model") || "claude-haiku-5-5";
 const API = option(args, "--anthropic-url") || "https://api.anthropic.com/v1/messages";
 const PRICE_IN = parseFloat(option(args, "--price-in") || "0.10"), PRICE_OUT = parseFloat(option(args, "--price-out") || "0.50");   // Haiku 5.5 per million tokens
-const { account, api } = openGmail(args, { allowWrite: false });
+const { account, api } = openGmail(args, { allowWrite: !!HANDLE });
 
 // ---------- Supabase (service key, same pattern as filing-agent.mjs) ----------
 let env = {};
@@ -216,8 +228,44 @@ async function main() {
     const body = [...byKey.values()].map((c) => ({ ...c, amount_hint: c.amount_hint ?? cands.get(c.merchant_key)?.amount_hint ?? null, cycle_hint: c.cycle_hint ?? cands.get(c.merchant_key)?.cycle_hint ?? null, updated_at: new Date().toISOString() }));
     await rest("POST", "subscription_candidates?on_conflict=merchant_key", body, { Prefer: "resolution=merge-duplicates,return=minimal" });
   }
+  // ---------- handle: label (dry run) or archive what was placed ----------
+  // Which messages count as placed: free-rule archive/record (and your archive/record rules), plus model-judged single
+  // messages and repeat-group members whose verdict is in the cache. Receipts, calendar invites, shipping, unjudged and
+  // kept/starred mail are left exactly where they are. One activity_log line per sender domain, never an address.
+  let handledN = 0, handledGroups = 0;
+  if (HANDLE) {
+    const isKept = (r) => KEEP.some((k) => r.address === k || r.domain === k || r.domain.endsWith("." + k));
+    const judged = TRIAGE ? loadCache(account) : {};
+    const inGroupTask = new Set(tasks.filter((t) => t.rep).flatMap((t) => t.origins.map((o) => o.id)));
+    const why = (r) => r.action === "archive" || r.action === "record" ? (r.rule ? `your rule: ${r.rule.action}` : r.reason)
+      : judged[r.id] ? (judged[r.id].needs_action ? "task made" : "model: needs nothing") : inGroupTask.has(r.id) ? "task made for the group" : null;
+    const todo = rows.filter((r) => !r.labels.includes("STARRED") && !isKept(r) && why(r));
+    if (todo.length) {
+      const labels = await api("/gmail/v1/users/me/labels");
+      let label = (labels.labels || []).find((l) => l.name === "Dashboard/Handled");
+      if (!label) label = await api("/gmail/v1/users/me/labels", { method: "POST", body: { name: "Dashboard/Handled", labelListVisibility: "labelShow", messageListVisibility: "show" } });
+      const undoDir = join(secretsDir, "undo"); mkdirSync(undoDir, { recursive: true });
+      const undoFile = join(undoDir, `${account}-${new Date().toISOString().replace(/[:.]/g, "-")}-${HANDLE}.jsonl`);
+      const ids = todo.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += 500) {
+        const slice = ids.slice(i, i + 500);
+        await api("/gmail/v1/users/me/messages/batchModify", { method: "POST", body: { ids: slice, addLabelIds: [label.id], removeLabelIds: HANDLE === "archive" ? ["INBOX"] : [] } });
+        appendFileSync(undoFile, JSON.stringify({ at: new Date().toISOString(), mode: HANDLE, ids: slice }) + "\n");
+        handledN += slice.length;
+      }
+      const byDomain = new Map();
+      for (const r of todo) { const k = `${r.domain}|${why(r)}`; byDomain.set(k, (byDomain.get(k) || 0) + 1); }
+      for (const [k, n] of byDomain) {
+        const [domain, reason] = k.split("|");
+        await rest("POST", "activity_log", { actor: "email-agent", action: HANDLE === "archive" ? "email_archived" : "email_labeled", subject: short(`${HANDLE === "archive" ? "Archived" : "Marked handled (still in inbox)"} ${n} from ${domain}: ${reason}`, 200), ref: account, undoable: false }).catch(() => {});
+        handledGroups++;
+      }
+      console.log(`\nHandled (${HANDLE}): ${handledN} messages across ${handledGroups} sender groups. Undo file: ${undoFile}`);
+    } else console.log("\nHandled: nothing to label this run.");
+  }
+
   const hitRules = await recordHits(rest, ruleSet.hits);
-  const line = `${account}: ${rows.length} emails read, ${ruled} placed by ${hitRules} of your rules, ${created} tasks suggested, ${updated} updated, ${skipped} left (already handled by you), no mailbox changes${TRIAGE ? ", model triage on" : ""}`;
+  const line = `${account}: ${rows.length} emails read, ${ruled} placed by ${hitRules} of your rules, ${created} tasks suggested, ${updated} updated, ${skipped} left (already handled by you), ${HANDLE ? `${handledN} ${HANDLE === "archive" ? "archived" : "labeled Handled (dry run, still in inbox)"}` : "no mailbox changes"}${TRIAGE ? ", model triage on" : ""}`;
   await rest("POST", "activity_log", { actor: "email-agent", action: "email_run", subject: line, ref: account, undoable: false });
   try { await rest("POST", "system_status?on_conflict=key", { key: "email_agent", state: "ok", summary: line, updated_at: new Date().toISOString() }, { Prefer: "resolution=merge-duplicates" }); } catch (e) { console.log(`  (health line not updated: ${e.message})`); }
 
