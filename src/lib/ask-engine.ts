@@ -22,6 +22,7 @@ export type AskReply = {
   move?: { calendarId: string; id: string; title: string; date: string; oldStart: string; oldEnd: string; newStart: string; newEnd: string };   // an existing event to move first                                   // an event waiting for the person's Add tap
   text: string;
   source?: { label: string; href: string };            // "Open in …"
+  card?: AskCard;                                       // the thing itself, when one document or 1Password item was asked for (D26)
   items?: AskItem[];                                    // things a read tool found, each with somewhere to go
   trace?: { name: string; args: Record<string, unknown>; ok: boolean; summary: string }[];   // every read the loop made, for the eval runner and for a thumbs-down report
   confirm?: { summary: string; target: string; tier: Tier; missing?: string };
@@ -32,7 +33,11 @@ export type AskReply = {
 };
 export type Turn = { role: "user" | "assistant"; text: string; kind?: AskReply["kind"]; files?: AskFile[] };
 // A row the person can act on. open delivers the thing itself (a file); href goes to its page in the app.
-export type AskItem = { name: string; detail: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null };
+export type AskItem = { name: string; detail: string | null; href: string; open: string | null; fetch?: { path: string; register: string; ref: string } | null; vault?: boolean };
+// The delivery card (D26, 2026-10-28): the reply IS the thing. file: the app holds it (open serves the bytes; shown as an
+// image, tap for full screen, share, record). vault: it lives in 1Password (open is the private link; the app shows the label
+// and a locked door, never the contents). record: a register row with no file here (name, detail, its page; fetch if the hub has it).
+export type AskCard = { kind: "file" | "vault" | "record"; name: string; detail: string | null; href: string; open: string | null; fetch?: AskItem["fetch"] };
 
 const FAMILY_WORDS = /\b(confirmation|reservation|hotel|flight|ticket|claim|warranty|return|record|today|tomorrow|week|schedule|calendar|appointment|dentist|doctor|school|practice|kid|child|son|daughter|ryan|melissa|tahoe|sienna|car|oil|registration|insurance|title|document|file|where|receipt|charge|paid|pay|cost|spent|spend|money|amex|visa|card|bill|subscription|statement|budget|medication|meds|melatonin|dose|device|laptop|serial|filter|furnace|home|house|yard|contact|grandma|birthday|task|email|reply|draft|inbox|setting|notification|rain|weather|trip|pack|checklist|shop|order|buy|need)\b/i;
 
@@ -78,6 +83,7 @@ export async function answerAsk(thread: Turn[], assistantApp = "claude", assista
 
 You have tools for the things this household's app can do. Today is ${ctx?.today ?? "unknown"} in ${ctx?.tz ?? "the household's time zone"}.
 - Look things up with the read tools before answering. Never guess a number, a date or a name you have not read.
+- When the person asks for one document or one 1Password item and you find exactly one, the app shows it as a card (the image itself, or an Open in 1Password button). Your text is then ONE short sentence ("Here it is." / "It's in 1Password."); do not describe what is on it, where it is stored, or its numbers.
 - Before adding anything, search for it first: say so if something close already exists, rather than making a second one.
 - A tool that changes something is not run by you; the person agrees to it by answering yes. When you call a write tool, ALWAYS write text with it: ONE sentence, in the person's words, that names the thing as you read it ("the furnace filter task", "Emma's visit Friday the 30th", "a text to Melissa: 'I'm running late'") and every value you are about to save (what, who, when, how much), ending with "OK?". Never an id, a field name or a date in YYYY-MM-DD; that sentence is all they see before they answer. Do not describe the change in prose without calling the tool, and do not call the tool and then ask again.
 - The records decide, not memory and not the person's say-so. Before changing anything, take the day, name and amount from what you READ this turn, never from an earlier guess. If what the person says disagrees with what the records show ("cancel the 31st" when the only visit is the 30th), do not adopt either silently: say both in one sentence and ask which ("The only sitter visit I have is Friday the 30th, 7 to 8:30; nothing on the 31st. Cancel the 30th?"). When the person corrects you and the records agree with them, say so and go on. A fact only they can know (a phone number, a nickname) is taken as given.
@@ -116,9 +122,10 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
     for (const d of data as Record<string, unknown>[]) {
       if (typeof d?.href !== "string" || typeof d?.name !== "string") continue;
       if (items.some((x) => x.href === d.href && x.name === d.name)) continue;
-      const detail = [d.date, typeof d.amount === "number" ? `$${d.amount.toFixed(2)}` : null, typeof d.where === "string" ? d.where : null].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
+      const vault = d.href === "/settings/vault";
+      const detail = vault && typeof d.detail === "string" ? d.detail : [d.date, typeof d.amount === "number" ? `$${d.amount.toFixed(2)}` : null, typeof d.where === "string" ? d.where : null].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
       const f = d.fetch as { path?: string; register?: string; ref?: string } | null | undefined;
-      items.push({ name: d.name, detail: detail || null, href: d.href, open: typeof d.open === "string" ? d.open : null, fetch: f && typeof f.path === "string" ? { path: f.path, register: String(f.register ?? ""), ref: String(f.ref ?? "") } : null });
+      items.push({ name: d.name, detail: detail || null, href: d.href, open: typeof d.open === "string" ? d.open : null, fetch: f && typeof f.path === "string" ? { path: f.path, register: String(f.register ?? ""), ref: String(f.ref ?? "") } : null, ...(vault ? { vault: true } : {}) });
     }
   };
   for (let round = 0; round < 4; round++) {
@@ -169,11 +176,18 @@ You have tools for the things this household's app can do. Today is ${ctx?.today
 }
 
 // D5: rows only when the person asked for a list; one thing found becomes one "Open" link; otherwise the sentence carries it.
+// D26: one document or 1Password item found becomes a delivery card (the thing itself), not a link under the sentence.
 const LIST_WORDS = /\b(list|show (me )?(them|all|everything)|what do we have|which ones|all (the|of)|what'?s on (my|the)|every|how many|what did we (buy|get|order)|pull up|receipts|invoices|bills|statements|orders|charges|tasks|events|subscriptions)\b/i;
-function rowsFor(q: string, items: AskItem[]): Pick<AskReply, "items" | "source"> {
+function rowsFor(q: string, items: AskItem[]): Pick<AskReply, "items" | "source" | "card"> {
   if (!items.length) return {};
   if (LIST_WORDS.test(q)) return { items: items.slice(0, 12) };
-  if (items.length === 1) return { source: { label: items[0].name, href: items[0].open ?? items[0].href } };
+  if (items.length === 1) {
+    const it = items[0];
+    if (it.vault) return { card: { kind: "vault", name: it.name, detail: it.detail, href: it.href, open: it.open } };
+    if (it.open) return { card: { kind: "file", name: it.name, detail: it.detail, href: it.href, open: it.open } };
+    if (it.fetch || /^\/(records|money\/receipts|inbox)/.test(it.href)) return { card: { kind: "record", name: it.name, detail: it.detail, href: it.href, open: null, fetch: it.fetch } };
+    return { source: { label: it.name, href: it.open ?? it.href } };
+  }
   return {};
 }
 

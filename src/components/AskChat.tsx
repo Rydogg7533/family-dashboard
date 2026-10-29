@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { askAction, confirmInstruction, confirmTool, parkThreadInInbox, flagAskReply, logVoiceSession } from "@/lib/ai-actions";
-import type { AskItem, AskReply, Turn } from "@/lib/ask-engine";
+import type { AskCard, AskItem, AskReply, Turn } from "@/lib/ask-engine";
 import { VoiceSession, type VoiceStatus } from "@/lib/voice-client";
 import { splitAnswer, ASK_FILE_BYTES, ASK_FILE_MAX, ASK_FILE_MIMES, type AskFile } from "@/lib/ask-shared";
 import { createClient } from "@/lib/supabase/client";
@@ -300,6 +300,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
                 ? <div className="card text-sm border-accent"><div className="text-[11px] font-bold tracking-wide text-accent">SAVED TO GOOGLE CALENDAR</div><div>{b.eventResult.text}</div><Link href={b.eventResult.href!} className="text-xs font-semibold text-accent">Open the event</Link></div>
                 : <div className="text-xs text-red px-1">{b.eventResult.text}</div>
             )}
+            {b.reply?.card && <DeliveryCard card={b.reply.card} onShare={() => { setInput(`Send the ${b.reply!.card!.name} to `); box.current?.focus(); }} />}
             {b.reply?.items && b.reply.items.length > 0 && (
               <div className="card flex flex-col text-sm p-0 overflow-hidden">
                 {b.reply.items.map((it) => (
@@ -319,7 +320,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending }: {
               ? <div className="text-xs font-semibold text-amber px-1"><button type="button" onClick={() => retry(i - 1)} className="underline">Retry</button></div>
               : b.reply?.kind === "inbox" && <div className="text-xs font-semibold text-amber px-1">Saved to Inbox · <Link href="/inbox" className="underline">open</Link></div>}
             <div className="text-[11px] text-muted px-1 flex flex-wrap gap-x-2">
-              {b.reply?.source && (b.reply.source.href.startsWith("copy:")
+              {b.reply?.source && !b.reply.card && (b.reply.source.href.startsWith("copy:")
                 ? <button type="button" onClick={() => { const q = b.reply!.source!.href.slice(5); navigator.clipboard?.writeText(q).then(() => setToast({ text: "Question copied. Paste it into your assistant." }), () => setToast({ text: q })); }} className="font-semibold text-accent">{b.reply.source.label}</button>
                 : <a href={b.reply.source.href} target={/^https?:/.test(b.reply.source.href) ? "_blank" : undefined} rel="noreferrer" className="font-semibold text-accent">{/^(Open|Show|See)\b/i.test(b.reply.source.label) ? b.reply.source.label : `Open ${b.reply.source.label}`}</a>)}
               {b.reply && b.reply.kind !== "deflect" && b.reply.kind !== "scope_check" && (
@@ -414,6 +415,59 @@ function AnswerText({ text, muted }: { text: string; muted?: boolean }) {
 }
 
 // A found thing: name and date up front; folder, amount and the rest under Details.
+// The delivery card (D26, 2026-10-28, approved from the mockup): the reply is the thing. A file the app holds shows as an
+// image, readable on the phone (tap for full screen); under it the name, one line of context, and three icons: full
+// screen, share (fills the Ask box with "Send … to" so F26 takes it from there), the record's page. A 1Password item
+// shows a locked placeholder and one big "Open in 1Password" button; Face ID and sharing happen there. A record with
+// no file here shows the name, detail and its page (and a Fetch button when the hub has the file).
+const LockIcon = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><circle cx="12" cy="15.5" r="1.3" /></svg>;
+const DocIcon = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>;
+function DeliveryCard({ card, onShare }: { card: AskCard; onShare: () => void }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const icon = "w-11 h-11 rounded-xl inline-flex items-center justify-center text-fg";
+  const isPdf = /\.pdf(\?|$)/i.test(card.open ?? "");
+  return (
+    <div className="card p-0 overflow-hidden flex flex-col">
+      {card.kind === "file" && card.open && (
+        imgFailed || isPdf
+          ? <a href={card.open} target="_blank" rel="noopener" className="h-32 bg-soft flex items-center justify-center gap-3 text-muted text-sm"><DocIcon />{isPdf ? "PDF · tap to open" : "Tap to open"}</a>
+          : <a href={card.open} target="_blank" rel="noopener" className="bg-soft flex items-center justify-center" aria-label={`${card.name}, full screen`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={card.open} alt={card.name} className="max-h-64 w-full object-contain" onError={() => setImgFailed(true)} />
+            </a>
+      )}
+      {card.kind === "vault" && <div className="h-28 bg-soft flex items-center justify-center gap-3 text-muted px-4"><LockIcon /><div className="text-sm leading-snug max-w-[200px]">Kept in 1Password. The app has the label, not the card.</div></div>}
+      <div className="px-3.5 pt-3 pb-3 flex flex-col gap-2.5">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-sm truncate">{card.name}</div>
+            {card.detail && <div className="text-xs text-muted truncate">{card.detail}</div>}
+          </div>
+          {card.kind === "file" && card.open && (
+            <div className="flex shrink-0 -mr-2">
+              <a href={card.open} target="_blank" rel="noopener" aria-label="Full screen" className={icon}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg></a>
+              <button type="button" onClick={onShare} aria-label="Share" className={icon}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3v13" /><path d="m7 8 5-5 5 5" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg></button>
+              <Link href={card.href} aria-label="Open the record" className={icon}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></Link>
+            </div>
+          )}
+          {card.kind === "record" && (
+            <div className="flex items-center gap-2 shrink-0">
+              {card.fetch && <FetchButton path={card.fetch.path} register={card.fetch.register} refId={card.fetch.ref} />}
+              <Link href={card.href} aria-label="Open the record" className={icon}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></Link>
+            </div>
+          )}
+        </div>
+        {card.kind === "vault" && (
+          card.open
+            ? <a href={card.open} className="min-h-12 rounded-xl bg-accent text-white font-semibold text-[15px] flex items-center justify-center gap-2">Open in 1Password</a>
+            : <div className="text-xs text-amber font-semibold">Listed, but its 1Password link has not been added yet (Settings › 1Password).</div>
+        )}
+        {card.kind === "vault" && <div className="text-[11px] text-muted leading-snug">Face ID happens in 1Password. Share from there; the app never holds a copy.</div>}
+      </div>
+    </div>
+  );
+}
+
 function ItemRow({ it }: { it: AskItem }) {
   const [open, setOpen] = useState(false);
   const parts = (it.detail ?? "").split(" · ").filter(Boolean);
