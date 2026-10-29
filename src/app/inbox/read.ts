@@ -177,19 +177,64 @@ export async function readCapture(inboxId: string) {
   await sb.from("inbox_items").update(update).eq("id", inboxId);
 
   // Already answered, so don't ask again (Ryan, 2026-10-29: 84 receipts from nine vendors, every one asking).
-  // A rule is the person having said where this vendor's receipts go. When one matches AND the read is confident
-  // AND the only question was "file it?", the answer is already known: file it and put a line in the Log. Anything
-  // short of all three still asks -- a statement that needs an account, a receipt that might be a duplicate, a
-  // vehicle document, a low-confidence read. Nothing is deleted and the filing is the same path a tap takes.
-  const asked = Array.isArray((update as { options?: unknown }).options) ? (update as { options: string[] }).options : [];
-  if (ruleLabel && conf >= 0.8 && asked.length === 2 && asked.includes(FILE_YES) && asked.includes(FILE_NO)) {
-    const filed = await fileCapture(inboxId, FILE_YES).catch(() => ({ ok: false, summary: "" }));
-    if (filed.ok) {
-      await sb.from("activity_log").insert({ actor: "filing rules", action: "inbox_auto_filed", subject: `Filed without asking, by your rule for ${ruleLabel}: ${name ?? row.title ?? "a document"}`.slice(0, 200), ref: inboxId, undoable: true }).then(() => {}, () => {});
-      return { ok: true, name, confidence: conf, autoFiled: ruleLabel };
-    }
+  // A rule is the person having said where this vendor's receipts go, so when one matches and the only thing left
+  // to ask was "file it?", the answer is already known: file it and put a line in the Log.
+  if (ruleLabel && onlyAsksToFile(parsed, (update as { options?: unknown }).options)) {
+    if (await fileByRule(sb, inboxId, ruleLabel, name ?? (row.title as string | null) ?? "a document")) return { ok: true, name, confidence: conf, autoFiled: ruleLabel };
   }
   return { ok: true, name, confidence: conf };
+}
+
+const RULE_CONF = 0.8;
+
+// Is the stored read one where a rule answers the whole question? Deliberately narrow. Everything with a third
+// option (a reimbursement claim, which vehicle, which account) is a different question; a possible duplicate or a
+// near match is about identity, not destination, and stays the person's call; a shaky read is not trusted at all.
+// A vehicle receipt never reaches here, because it always carries the claim option.
+function onlyAsksToFile(parsed: Record<string, unknown>, options: unknown): boolean {
+  const o = Array.isArray(options) ? (options as string[]) : [];
+  if (o.length !== 2 || !o.includes(FILE_YES) || !o.includes(FILE_NO)) return false;
+  if ((typeof parsed.confidence === "number" ? parsed.confidence : 0) < RULE_CONF) return false;
+  if (parsed.kind === "statement" || parsed.same_receipt || parsed.near_receipt) return false;
+  return typeof parsed.vendor === "string" && !!parsed.vendor;
+}
+
+// Filing it the way a tap does, and saying in the Log which rule did it. `kept` means the filing step asked
+// something back instead of filing, so nothing is claimed.
+async function fileByRule(sb: Sb, inboxId: string, label: string, name: string): Promise<boolean> {
+  const r = await fileCapture(inboxId, FILE_YES).catch(() => ({ ok: false, kept: true }));
+  if (!r.ok || (r as { kept?: boolean }).kept) return false;
+  await sb.from("activity_log").insert({ actor: "filing rules", action: "inbox_auto_filed", subject: `Filed without asking, by your rule for ${label}: ${name}`.slice(0, 200), ref: inboxId, undoable: true }).then(() => {}, () => {});
+  return true;
+}
+
+// A rule made at nine o'clock cannot reach back into a read from eight: the check above has already run and the
+// question is already on the card. This is the same check again, over items that are still open -- the pass the
+// Inbox makes whenever it opens. Nothing is read again, so there is no model call and no cost: only the stored
+// read and the rules are consulted. The destination is rewritten from the rule first, because the home on the
+// stored read was worked out before the rule existed and the filing agent copies to whatever home says.
+export async function sweepRuleAnswered(): Promise<{ filed: number }> {
+  if (!hasSupabaseEnv()) return { filed: 0 };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { filed: 0 };
+  const { data: rules } = await sb.from("filing_rules").select("vendor_key,vendor_label,folder_template");
+  if (!rules?.length) return { filed: 0 };
+  const byKey = new Map((rules as { vendor_key: string; vendor_label: string; folder_template: string }[]).map((r) => [String(r.vendor_key), r]));
+  const { data: rows } = await sb.from("inbox_items").select("id,title,suggested_name,read_result,options").eq("status", "open").not("read_at", "is", null).not("file_path", "is", null).limit(300);
+  let filed = 0;
+  for (const row of rows ?? []) {
+    const parsed = (row.read_result ?? {}) as Record<string, unknown>;
+    if (!onlyAsksToFile(parsed, row.options)) continue;
+    const rule = byKey.get(vendorKey(String(parsed.vendor)));
+    if (!rule?.folder_template) continue;
+    const yr = typeof parsed.date === "string" ? parsed.date.slice(0, 4) : String(new Date().getFullYear());
+    const home = fromTemplate(String(rule.folder_template), yr);
+    if (home && home !== parsed.home) await sb.from("inbox_items").update({ read_result: { ...parsed, home } }).eq("id", row.id as string);
+    if (await fileByRule(sb, row.id as string, rule.vendor_label, (row.suggested_name as string | null) ?? (row.title as string | null) ?? "a document")) filed++;
+  }
+  if (filed) revalidatePath("/inbox");
+  return { filed };
 }
 
 // A person corrects one field the reader got wrong (card redesign, decisions log (j) item 6). The plan and the question are rebuilt from the corrected facts

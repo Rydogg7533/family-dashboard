@@ -9,7 +9,7 @@ import { NOT_VEHICLE } from "@/lib/inbox-answers";
 import { NeededToContinue } from "@/components/c/NeededToContinue";
 import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
-import { readCapture } from "@/app/inbox/read";
+import { readCapture, sweepRuleAnswered } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
@@ -20,18 +20,27 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   useEffect(() => { setOpen(items); }, [items]);
   const router = useRouter();
   const healed = useRef(false);
-  // Self-heal: any stored file that was never read (a dropped or failed read) is read when the Inbox opens.
-  useEffect(() => {
-    if (healed.current) return; healed.current = true;
-    const todo = [...pendingIds, ...items.filter((i) => i.file_path && !i.read_at).map((i) => i.id)];
-    if (!todo.length) return;
-    void (async () => { for (const id of todo) { await readCapture(id).catch(() => null); } router.refresh(); })();
-  }, [items, pendingIds, router]);
   const [showAll, setShowAll] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const total = items.length + resolvedThisWeek;
   const done = total - open.length;
   const [filter, setFilter] = useState<string>("all");
+  // Self-heal, once per visit: any stored file that was never read (a dropped or failed read) is read, and then
+  // every item still asking "file it?" is checked against the filing rules. The second pass matters because a rule
+  // made after an item was read cannot reach back into that read -- so without it, a rule would only ever help the
+  // NEXT document from that vendor, and a morning's backlog would stay a morning's worth of taps.
+  useEffect(() => {
+    if (healed.current) return; healed.current = true;
+    const todo = [...pendingIds, ...items.filter((i) => i.file_path && !i.read_at).map((i) => i.id)];
+    void (async () => {
+      for (const id of todo) { await readCapture(id).catch(() => null); }
+      const swept = await sweepRuleAnswered().catch(() => ({ filed: 0 }));
+      // Deliberate: items vanishing from the list with no word for it is worse than one extra render. The Log has
+      // a line per item naming the rule, and Undo is the usual one.
+      if (swept.filed) setToast({ text: `Filed ${swept.filed} ${swept.filed === 1 ? "item" : "items"} your rules already answered.` });
+      if (todo.length || swept.filed) router.refresh();
+    })();
+  }, [items, pendingIds, router]);
   const ids = Object.keys(names);
   const sorted = [...open].sort((a, b) => Number(b.assigned_to === me) - Number(a.assigned_to === me));
   const handedToMe = sorted.filter((i) => me && i.assigned_to === me).length;
