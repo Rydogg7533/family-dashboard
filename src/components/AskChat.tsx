@@ -46,6 +46,17 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
   const box = useRef<HTMLTextAreaElement>(null);
   // The box grows with what is typed, up to a few lines, and shrinks back after sending.
   useBeforePaint(() => { const t = box.current; if (!t) return; t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, 160)}px`; }, [input]);
+  // The Ask tab's composer is fixed above the tab bar (it used to be sticky at a guessed 88px, which is less than the
+  // bar's real height on a phone with a home indicator, and far less than the page's bottom padding -- so it rested
+  // high at the end of the thread and snapped down 40px the moment you scrolled: Ryan's recording, 2026-10-29 11:48).
+  // Fixed never moves; the thread gets a spacer the composer's exact height so the last bubble is never under it.
+  const formRef = useRef<HTMLFormElement>(null);
+  const [composerH, setComposerH] = useState(132);
+  useEffect(() => {
+    const el = formRef.current; if (!el || embedded) return;
+    const ro = new ResizeObserver(() => setComposerH(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el); return () => ro.disconnect();
+  }, [embedded]);
   const endRef = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   const restored = useRef(false);
@@ -353,6 +364,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
           </div>
         ))}
         {busy && <div className="self-start card text-sm text-muted flex items-center gap-3"><span>Thinking…</span><button type="button" onClick={stop} className="min-h-9 px-3 rounded-full border border-line text-xs font-semibold text-fg">Stop</button></div>}
+        {!embedded && <div aria-hidden style={{ height: composerH }} />}
         <div ref={endRef} />
       </div>
 
@@ -361,7 +373,8 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
           keyboard rises into an empty gap instead of resizing the sheet underneath itself. The focus has to happen in
           the same task as the tap or iOS will not raise the keyboard at all, which is why it is this attribute and
           never a timer. */}
-      <form onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "py-2" : "sticky bottom-[88px] py-2 bg-bg"}>
+      <form ref={formRef} onSubmit={(e) => { e.preventDefault(); void send(input, editing ?? undefined); }} className={embedded ? "py-2" : "fixed inset-x-0 bottom-[var(--bar-bottom)] z-10 bg-bg"}>
+        <div className={embedded ? "" : "max-w-md mx-auto px-5 py-2"}>
         <div className={`rounded-3xl border bg-bg px-3 pt-3 pb-2 flex flex-col gap-1 ${editing != null ? "border-accent" : voice === "listening" ? "border-green" : "border-line focus-within:border-accent"}`}>
           {(files.length > 0 || uploading) && (
             <div className="flex flex-wrap gap-2 pb-1">
@@ -396,6 +409,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10 16V4M4.5 9.5 10 4l5.5 5.5" /></svg>
                 </button>}
           </div>
+        </div>
         </div>
       </form>
 
