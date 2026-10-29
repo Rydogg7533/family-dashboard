@@ -48,7 +48,7 @@ const toIso = (ns) => new Date((Number(ns) / 1e9 + APPLE_EPOCH) * 1000).toISOStr
 
 // Text on recent macOS lives in attributedBody (a typedstream blob); the string sits after the NSString marker.
 function bodyText(hex, text) {
-  if (text) return text;
+  if (text) return text.replace(/￼/g, "").trim(); // the attachment placeholder is not words
   if (!hex) return "";
   try {
     const b = Buffer.from(hex, "hex"); const i = b.indexOf("NSString"); if (i < 0) return "";

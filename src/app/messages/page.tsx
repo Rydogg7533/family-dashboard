@@ -36,10 +36,10 @@ export default async function Messages() {
       )}
       <div className="flex flex-col gap-1.5 mb-4">
         {threads.map((t) => (
-          <Link key={t.id} href={`/messages/${t.id}`} className={`card flex justify-between items-center gap-2 min-h-14 !py-2.5 ${t.kind === "group" ? "!border-accent !border-2" : ""}`}>
+          <Link key={t.id} href={`/messages/${t.id}`} className="card flex justify-between items-center gap-2 min-h-14 !py-2.5">
             <div className="min-w-0">
-              <div className="font-semibold">{t.name}{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold ml-1">· AI, by text</span>}</div>
-              <div className="text-xs text-muted truncate">{t.last_line}</div>
+              <div className={`flex items-center gap-1.5 ${t.unread > 0 ? "font-bold" : "font-semibold"}`}>{t.unread > 0 && <span aria-hidden className="w-2 h-2 rounded-full bg-accent shrink-0" />}<span className="truncate">{t.name}</span>{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold">· AI, by text</span>}{t.kind === "group" && <span className="text-[10px] font-bold uppercase tracking-wide text-accent bg-accent/12 rounded px-1.5 py-0.5 shrink-0">Group</span>}</div>
+              <div className={`text-xs truncate ${t.unread > 0 ? "text-fg" : "text-muted"}`}>{t.last_line}</div>
               <div className="text-[10px] text-muted">{t.kind === "assistant" ? "Assistant · AI · for you" : `${t.members.filter((m) => m !== viewer.name).join(", ")} · for ${t.kind === "group" ? "Family" : "you"}`} · from Messages (your Mac)</div>
             </div>
             {t.unread > 0 ? <span className="shrink-0 text-[11px] font-bold text-white bg-accent rounded-full px-2 py-0.5">{t.unread}</span> : <span className="shrink-0 text-[11px] text-muted">{clock(t.last_at)}</span>}

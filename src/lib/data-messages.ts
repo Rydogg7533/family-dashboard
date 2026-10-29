@@ -55,10 +55,17 @@ const sampleConfirmations: Confirmation[] = [
 export async function getThreads(): Promise<Thread[]> {
   if (!hasSupabaseEnv()) return sampleThreads;
   const sb = await createClient();
-  const { data } = await sb.from("messages_threads").select("*").order("last_at", { ascending: false });
+  // unread = replies not yet seen IN THE APP (notifications of type message with no dismissed_at), so the list pills
+  // and the tab badge always agree. Messages' own is_read count would say something different after reading on a phone.
+  const [{ data }, { data: fresh }] = await Promise.all([
+    sb.from("messages_threads").select("*").order("last_at", { ascending: false }),
+    sb.from("notifications").select("url").eq("type", "message").is("dismissed_at", null),
+  ]);
+  const unread = new Map<string, number>();
+  for (const n of fresh ?? []) { const id = String(n.url ?? "").replace(/^\/messages\//, ""); unread.set(id, (unread.get(id) ?? 0) + 1); }
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id), kind: r.kind as ThreadKind, name: String(r.name), members: (r.members as string[]) ?? [], last_line: String(r.last_line ?? ""), last_at: String(r.last_at),
-    unread: Number(r.unread ?? 0), pending_yn: Number(r.pending_yn ?? 0), mirrored: Boolean(r.mirrored),
+    unread: unread.get(String(r.id)) ?? 0, pending_yn: Number(r.pending_yn ?? 0), mirrored: Boolean(r.mirrored),
   }));
 }
 
