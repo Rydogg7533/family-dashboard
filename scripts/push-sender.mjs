@@ -2,7 +2,8 @@
 // Mac mini → phones: delivers queued rows of public.notifications as web push. One pass per run; launchd runs it every 30 seconds.
 //   node scripts/push-sender.mjs --dry     # look only: say what it would send, send and change nothing
 //   node scripts/push-sender.mjs           # what launchd runs
-// Rules (F23/F24, see scripts/push-sender.md): the same tag is never pushed twice in 24 h; quiet hours hold everything except
+// Rules (F23/F24, see scripts/push-sender.md): the same tag is never pushed twice in 24 h (except type=message: every new line in a
+// conversation pushes, and the shared thread tag makes the newest one replace the banner); quiet hours hold everything except
 // test, safety and system rows; every send is a row with sent_at; a retracted item sends {close: tag} to close the banner.
 // Keys: VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT and the service key come from ~/_secrets_local_only/family-dashboard.env.
 // Nothing is deleted except a push subscription the push service itself reports gone (404/410: the device unsubscribed).
@@ -72,7 +73,7 @@ async function main() {
   const rows = await rest("GET", "notifications?status=eq.queued&channel=eq.push&order=queued_at.asc&limit=50&select=id,person,type,title,body,url,tag,queued_at");
   for (const n of rows) {
     if (!BYPASS.has(n.type) && inQuiet()) { stats.held++; continue; }
-    if (n.tag && n.type !== "test") {
+    if (n.tag && n.type !== "test" && n.type !== "message") {
       const since = new Date(Date.now() - 24 * 3600e3).toISOString();
       const dup = await rest("GET", `notifications?person=eq.${n.person}&tag=eq.${q(n.tag)}&status=eq.sent&sent_at=gte.${since}&id=neq.${n.id}&select=id&limit=1`);
       if (dup.length) { stats.deduped++; if (!DRY) await rest("PATCH", `notifications?id=eq.${n.id}`, { status: "sent", sent_at: now(), error: "deduped" }, { Prefer: "return=minimal" }); continue; }

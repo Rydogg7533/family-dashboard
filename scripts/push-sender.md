@@ -29,6 +29,8 @@ npm init -y && npm install web-push @supabase/supabase-js
      and marked `sent` at once (nothing to deliver).
    - **Dedupe by tag**: if a `sent` row exists for the same `person` and `tag` in the last
      24 hours, mark this one `sent` with `error = 'deduped'` (the same fact is never pushed twice).
+     `type = message` rows are exempt: each new line in a conversation is a new fact, and the
+     shared `thread:<id>` tag means the newest push replaces the banner rather than stacking.
    - **Quiet hours**: if now is inside the person's quiet window and `type` is not `safety`
      or `system`, leave it queued (it goes out at the end of quiet hours). Morning summaries
      are queued by the agent at the person's `morningTime`, so they never hit quiet hours.
