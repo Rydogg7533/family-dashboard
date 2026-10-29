@@ -281,9 +281,11 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
         {bubbles.length === 0 && (
           <div className="card text-sm text-muted">Ask or tell me anything about the family&apos;s records: schedules, documents, money, people, vehicles, home, your own health. For example: {SUGGESTED.map((x) => `“${x}”`).join(", ")}.</div>
         )}
+        {/* The accent colour is for things you can tap (Ryan, 2026-10-28): your own words are a quiet bubble on the right, so a
+            request never looks like a button next to the card that answers it. */}
         {bubbles.map((b, i) => b.role === "user" ? (
           <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
-            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-accent text-white"}`}>{b.text}</button>
+            <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-soft text-fg border border-line"}`}>{b.text}</button>
             {b.files?.length ? <div className="text-[11px] text-muted px-1">📎 {b.files.map((f) => f.name).join(", ")}</div> : null}
             {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
             {b.stopped && editing !== i && <div className="text-[11px] text-muted px-1">Stopped · <button type="button" onClick={() => retry(i)} className="font-semibold text-accent">retry</button> · <button type="button" onClick={() => edit(i)} className="font-semibold text-accent">edit</button></div>}
