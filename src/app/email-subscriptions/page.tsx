@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section } from "@/components/money";
+import { Fold } from "@/components/Fold";
 import { getEmailSubs, getEmailSubsScan, getFinishLinks, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
 import { getNewsletters, type MailRow } from "@/lib/data-mail";
 import { EmailSubscriptionList, CancelRequest, AutoRefresh, CheckActions, TryAgain, ArchivedSenders } from "@/components/EmailSubscriptionList";
@@ -96,7 +97,7 @@ export default async function EmailSubscriptions() {
       </Section>
 
       {done.length > 0 && (
-        <Section title="Unsubscribed" right={`${done.length}`}>
+        <Fold id="email-subs-done" title="Unsubscribed" summary={`${done.length}`}>
           <div className="card flex flex-col">
             {done.map((s) => (
               <div key={s.id} className="py-2.5 border-b border-line last:border-0">
@@ -107,7 +108,7 @@ export default async function EmailSubscriptions() {
               </div>
             ))}
           </div>
-        </Section>
+        </Fold>
       )}
 
       <ArchivedSenders subs={archived} />
