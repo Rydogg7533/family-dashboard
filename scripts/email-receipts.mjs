@@ -28,7 +28,8 @@ import { emailPdf } from "./lib/text-pdf.mjs";
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
-let skippedSus = 0;   // money-looking mail that failed the phishing screen: no sighting, no attachment copied
+let skippedSus = 0;
+let unreadable = 0;   // messages Gmail refuses to return (400 failedPrecondition / 404); skipped, counted   // money-looking mail that failed the phishing screen: no sighting, no attachment copied
 const account = option(args, "--account"); if (!account) { console.error("STOP: pass --account <address>"); process.exit(2); }
 const MONTHS = parseInt(option(args, "--months") || "12", 10);
 const MIN_KB = parseInt(option(args, "--min-kb") || "20", 10);
@@ -108,8 +109,12 @@ async function* moneyMail() {
     const WORKERS = 6;
     let n = 0;
     for (let i = 0; i < ids.length; i += WORKERS) {
-      const batch = await Promise.all(ids.slice(i, i + WORKERS).map((id) => api(`/gmail/v1/users/me/messages/${id}?format=full`).then((full) => ({ id, full }))));
+      // Gmail answers 400 failedPrecondition for a few odd messages (old Chat/Hangouts rows, some drafts): skip those
+      // one at a time instead of ending a 26,000-message scan at the first one (Melissa's account, 2026-10-29).
+      const batch = await Promise.all(ids.slice(i, i + WORKERS).map((id) => api(`/gmail/v1/users/me/messages/${id}?format=full`).then((full) => ({ id, full }))
+        .catch((e) => { if (/failedPrecondition|404/.test(String(e.message))) { unreadable++; return { id, full: null }; } throw e; })));
       for (const { id, full } of batch) {
+      if (!full) continue;
       if (++n % 200 === 0) process.stdout.write(`\r  checked ${n}/${ids.length}`);
       const e = parse(full); const d = decide(e); if (d.action !== "money") continue;
       const files = [];
@@ -203,7 +208,7 @@ async function main() {
         options: ["Receipt", "Bill", "Statement", "Form", "Something else"], file_path: key, mime: f.mime, size_bytes: buf.length, sha256: hash, created_by: person, for_person: "Ryan" }], { Prefer: "return=minimal" });
     }
   }
-  console.log(`\n${APPLY ? "APPLIED" : "DRY RUN"} ${account}: ${stats.money} receipt/statement emails, ${WIN_TXT}`);
+  console.log(`\n${APPLY ? "APPLIED" : "DRY RUN"} ${account}: ${stats.money} receipt/statement emails, ${WIN_TXT}${unreadable ? ` (${unreadable} Gmail could not return, skipped)` : ""}`);
   console.log(`  sightings: ${stats.sightings} new${stats.seen ? `, ${stats.seen} already recorded` : ""}`);
   console.log(`  documents to the Inbox: ${stats.docs} attached${stats.dupes ? `, ${stats.dupes} already there` : ""}; ${stats.skipped} tiny images/logos skipped`);
   console.log(`  body-only receipts: ${stats.bodyOnly}, of which ${stats.rendered} rendered to PDF${stats.bodyThin ? ` and ${stats.bodyThin} had nothing to render` : ""}`);
