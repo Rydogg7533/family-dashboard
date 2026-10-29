@@ -3,11 +3,13 @@
 //   node scripts/messages-mirror.mjs --list-chats     # one-time: shows your chats (identifier, message count) so you can pick the family ones
 //   node scripts/messages-mirror.mjs --dry            # reads and reports; writes nothing, sends nothing
 //   node scripts/messages-mirror.mjs                  # one pass
-//   node scripts/messages-mirror.mjs --watch          # what launchd runs: stays up, mirrors within ~2 s of a change, sends within ~3 s
+//   node scripts/messages-mirror.mjs --watch          # what launchd runs: stays up, mirrors within ~0.5 s of a change, sends the instant a line is queued
 // Each run: 1) copies ~/Library/Messages/chat.db to a private temp copy (read-only; the live database is never opened for writing),
 //           2) mirrors FAMILY THREADS ONLY (chats whose members are all in MIRROR_FAMILY_HANDLES) for the last MIRROR_DAYS days into
 //              messages_threads / messages for MIRROR_PERSON_ID, 3) sends lines queued in messages_outbox through the Messages app
-//              as the signed-in account (they then appear on every device like a typed message), 4) writes system_status sync_messages.
+//              as the signed-in account (they then appear on every device like a typed message), 4) queues one notification
+//              (type=message) per new inbound line so the app can show a bubble and a push, 5) writes system_status sync_messages.
+// --watch also holds a Supabase Realtime subscription on messages_outbox: a queued line is sent immediately, before any mirror pass.
 // Never reads a non-family chat past its handle list; mirrors attachments as {kind,label} only; never deletes anything in Messages.
 // Mirror rows older than the window are removed from the database (they are a copy; Messages and iCloud keep the history).
 // Secrets and settings: ~/_secrets_local_only/family-dashboard.env  (SUPABASE_URL, SUPABASE_SERVICE_KEY, MIRROR_PERSON_ID,
@@ -17,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { createClient } from "@supabase/supabase-js";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry"), LIST = args.includes("--list-chats"), WATCH = args.includes("--watch");
@@ -79,6 +82,44 @@ function sendViaMessages(chatGuid, text) {
   if (r.status !== 0) throw new Error((r.stderr || "").trim().slice(0, 200) || `osascript exited ${r.status} with no message (Automation permission for Messages may be denied: System Settings › Privacy & Security › Automation › node › Messages)`);
 }
 
+// The chat each thread sends into, from the latest pass; lets a queued line go out without waiting for a pass.
+const sendTargets = new Map(); // thread id -> chat guid
+let familyChats = [], threadGroups = new Map();
+const sending = new Set();
+async function sendOne(o) {
+  if (sending.has(o.id)) return false; sending.add(o.id);
+  try {
+    const guid = sendTargets.get(o.thread_id);
+    if (!guid) { await rest("PATCH", `messages_outbox?id=eq.${o.id}&status=eq.queued`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); return false; }
+    let err = null;
+    try { sendViaMessages(guid, o.text); } catch (e) { err = String(e.message).slice(0, 300); }
+    // Messages sometimes reports an error after the line has already gone out: believe the database, not the error.
+    if (err) { await new Promise((r) => setTimeout(r, 4000)); snapshot(); const esc = o.text.replace(/'/g, "''");
+      const chatIds = familyChats.filter((c) => guid === c.guid || threadGroups.get(o.thread_id)?.chats.some((x) => x.id === c.id)).map((c) => c.id).join(",") || 0;
+      const hit = q(`select count(*) as n from message m join chat_message_join cm on cm.message_id = m.ROWID where cm.chat_id in (${chatIds}) and m.is_from_me = 1 and m.text = '${esc}' and m.date > ${Math.floor((Date.now() / 1000 - 300 - APPLE_EPOCH) * 1e9)}`);
+      if (hit[0]?.n > 0) err = null; }
+    // status=eq.queued: if a pass and the realtime handler race, only the first writer changes the row
+    await rest("PATCH", `messages_outbox?id=eq.${o.id}&status=eq.queued`, err ? { status: "failed", error: err } : { status: "sent", sent_at: now() }, { Prefer: "return=minimal" });
+    if (err) console.error(`${now()} send failed for ${o.thread_id}: ${err}`);
+    return !err;
+  } finally { sending.delete(o.id); }
+}
+
+// Inbound lines seen so far (guid). Lines older than the watermark on the first pass are history, not news.
+let newsSince = Date.now() - 10 * 60e3; const notified = new Set();
+async function queueBubbles(msgRows, threadRows) {
+  const names = new Map(threadRows.map((t) => [t.id, t.name]));
+  const fresh = msgRows.filter((m) => !m.is_me && !notified.has(m.id) && Date.parse(m.at) > newsSince);
+  if (!fresh.length) return 0;
+  const rows = fresh.map((m) => ({ person: PERSON, type: "message", channel: "push", title: names.get(m.thread_id) || m.sender,
+    body: `${m.sender}: ${(m.text || `[${m.attachment?.kind || "attachment"}]`).slice(0, 160)}`, url: `/messages/${m.thread_id}`, tag: `thread:${m.thread_id}`,
+    item_kind: "message", item_id: m.id }));
+  // one notification per guid, ever: the (type,item_id) unique index drops repeats from a re-mirror
+  await rest("POST", "notifications?on_conflict=type,item_id", rows, { Prefer: "resolution=ignore-duplicates,return=minimal" });
+  for (const m of fresh) { notified.add(m.id); newsSince = Math.max(newsSince, Date.parse(m.at)); }
+  return fresh.length;
+}
+
 async function main() {
   if (!URL_ || !KEY) throw new Error(`SUPABASE_URL / SUPABASE_SERVICE_KEY missing in ${envPath}`);
   snapshot();
@@ -105,7 +146,7 @@ async function main() {
     if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [] });
     const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name;
   }
-  let msgCount = 0; const threadRows = [], msgRows = [], sendTarget = new Map();
+  let msgCount = 0; const threadRows = [], msgRows = [];
   for (const g of groups.values()) {
     const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes
@@ -123,7 +164,7 @@ async function main() {
     }
     // where a new line goes: the chat that spoke most recently, else the iMessage chat with the most messages
     const target = g.chats.find((c) => c.id === lastChat) || g.chats.filter((c) => c.guid.startsWith("iMessage")).sort((x, y) => y.n - x.n)[0] || g.chats[0];
-    sendTarget.set(g.id, target.guid);
+    sendTargets.set(g.id, target.guid);
     const unread = rows.filter((m) => !m.me && !m.read).length;
     threadRows.push({ id: g.id, person: PERSON, kind: g.kind, name: g.name || g.members.filter((x) => x !== ME).join(", "), members: [ME, ...g.members.filter((x) => x !== ME)],
       last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME });
@@ -131,6 +172,10 @@ async function main() {
   console.log(`${now()} ${threadRows.length} family threads (${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }
 
+  familyChats = family; threadGroups = groups;
+  // bubbles first: the app shows news the moment the row lands, before the slower mirror upserts
+  const bubbled = WATCH ? await queueBubbles(msgRows, threadRows) : 0;
+  if (bubbled) console.log(`${now()} ${bubbled} new inbound line(s) → notifications`);
   // write (upsert; a re-run changes nothing that is already the same)
   for (let i = 0; i < threadRows.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", threadRows.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
@@ -147,18 +192,7 @@ async function main() {
   // send what was typed on the dashboard
   const queued = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`);
   let sent = 0, failed = 0;
-  for (const o of queued) {
-    const guid = sendTarget.get(o.thread_id);
-    if (!guid) { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: "not a mirrored family thread" }, { Prefer: "return=minimal" }); continue; }
-    let err = null;
-    try { sendViaMessages(guid, o.text); } catch (e) { err = String(e.message).slice(0, 300); }
-    // Messages sometimes reports an error after the line has already gone out: believe the database, not the error.
-    if (err) { await new Promise((r) => setTimeout(r, 4000)); snapshot(); const esc = o.text.replace(/'/g, "''");
-      const hit = q(`select count(*) as n from message m join chat_message_join cm on cm.message_id = m.ROWID where cm.chat_id in (${family.filter((c) => sendTarget.get(o.thread_id) === c.guid || groups.get(o.thread_id)?.chats.some((x) => x.id === c.id)).map((c) => c.id).join(",") || 0}) and m.is_from_me = 1 and m.text = '${esc}' and m.date > ${Math.floor((Date.now() / 1000 - 300 - APPLE_EPOCH) * 1e9)}`);
-      if (hit[0]?.n > 0) err = null; }
-    if (!err) { sent++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "sent", sent_at: now() }, { Prefer: "return=minimal" }); }
-    else { failed++; await rest("PATCH", `messages_outbox?id=eq.${o.id}`, { status: "failed", error: err }, { Prefer: "return=minimal" }); }
-  }
+  for (const o of queued) { if (await sendOne(o)) sent++; else failed++; }
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "numeric", minute: "2-digit" }).format(new Date());
   const summary = `Messages: ${threadRows.length} family threads, ${msgCount} messages in ${DAYS} days${sent ? `, sent ${sent}` : ""}${failed ? `, ${failed} not sent` : ""} · ${time}`;
   await status(failed ? "warn" : "ok", summary);
@@ -167,12 +201,18 @@ async function main() {
 const fail = async (e) => { console.error(`${now()} messages-mirror: ${e.message}`); await status("error", `Messages mirror paused: ${String(e.message).slice(0, 200)}`); };
 if (!WATCH) main().catch(async (e) => { await fail(e); process.exit(1); });
 else {
-  // Always-on: a pass whenever Messages' database changes (checked every 2 s), whenever a line is waiting in the outbox
-  // (checked every 3 s), and at least once a minute. One pass at a time; an error pauses the mirror and is retried.
+  // Always-on: a pass whenever Messages' database changes (checked every 0.5 s) and at least once a minute. Lines queued on the
+  // dashboard arrive over Realtime and are sent at once; a 3 s outbox poll is the fallback if the socket is down.
+  // One pass at a time; an error pauses the mirror and is retried.
   const stamp = () => ["chat.db", "chat.db-wal"].map((f) => { try { return statSync(join(homedir(), "Library", "Messages", f)).mtimeMs; } catch { return 0; } }).join("|");
-  let lastStamp = "", lastPass = 0, busy = false;
-  const run = async (why) => { if (busy) return; busy = true; try { await main(); lastPass = Date.now(); lastStamp = stamp(); } catch (e) { await fail(e); } finally { busy = false; } };
+  let lastStamp = "", lastPass = 0, busy = false, again = false;
+  const run = async (why) => { if (busy) { again = true; return; } busy = true; try { do { again = false; await main(); lastPass = Date.now(); lastStamp = stamp(); } while (again); } catch (e) { await fail(e); } finally { busy = false; } };
   await run("start");
-  setInterval(() => { if (stamp() !== lastStamp) void run("messages changed"); else if (Date.now() - lastPass > 60000) void run("minute"); }, 2000);
-  setInterval(async () => { if (busy) return; try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&select=id&limit=1`); if (w.length) void run("outbox"); } catch { /* next tick */ } }, 3000);
+  setInterval(() => { if (stamp() !== lastStamp) void run("messages changed"); else if (Date.now() - lastPass > 60000) void run("minute"); }, 500);
+  const drain = async () => { try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,text`); for (const o of w) await sendOne(o); if (w.length) void run("outbox"); } catch { /* next tick */ } };
+  setInterval(drain, 3000);
+  const sb = createClient(URL_, KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 5 } } });
+  sb.channel("outbox").on("postgres_changes", { event: "INSERT", schema: "public", table: "messages_outbox", filter: `person=eq.${PERSON}` },
+    (p) => { const o = p.new; if (o?.status === "queued") void sendOne(o).then(() => run("outbox")); })
+    .subscribe((state, err) => { if (state === "SUBSCRIBED") console.log(`${now()} realtime: listening for queued lines`); if (err) console.error(`${now()} realtime: ${err.message}`); });
 }
