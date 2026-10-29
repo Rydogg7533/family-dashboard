@@ -75,7 +75,7 @@ export const MODULES = [
     extraArgs: () => ["--account", mailboxTokens[0].replace(/^google-/, "").replace(/\.json$/, ""), "--days", "3"] },
   { id: "messages-mirror", script: "messages-mirror.mjs", keepAlive: true, needs: () => supabase && has("MIRROR_PERSON_ID") && canRead(join(HOME, "Library", "Messages", "chat.db")), why: "needs MIRROR_PERSON_ID in the env file and Full Disk Access to Messages (advanced)", powers: "Messages mirror", extraArgs: () => ["--watch"] },
 ];
-const PERSONAL = ["com.ryan.dashboard-report", "com.ryan.nightly-mirror", "com.ryan.bookmark-evening"];
+const PERSONAL = ["com.ryan.dashboard-report", "com.ryan.nightly-mirror", "com.ryan.bookmark-evening", "com.ryan.publish-materials"];
 
 function canRead(p) { try { readFileSync(p, { flag: "r" }).length; return true; } catch { return false; } }
 function canRun(bin) { return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].some((d) => existsSync(join(d, bin))); }
@@ -130,7 +130,10 @@ function main() {
     if (state !== "load") writeFileSync(file, want, { mode: 0o644 });
     const domain = `gui/${uid()}`;
     spawnSync("launchctl", ["bootout", `${domain}/${label}`], { stdio: "ignore" });     // fine if it was not loaded
-    const b = spawnSync("launchctl", ["bootstrap", domain, file], { encoding: "utf8" });
+    // launchd answers "Input/output error" (5) when asked to load a job it is still tearing down -- seen on the always-on
+    // messages-mirror, 2026-10-29. Wait a moment and try once more before calling it a failure.
+    let b = spawnSync("launchctl", ["bootstrap", domain, file], { encoding: "utf8" });
+    if (b.status !== 0 && /Input\/output error|: 5:/.test(b.stderr || "")) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); b = spawnSync("launchctl", ["bootstrap", domain, file], { encoding: "utf8" }); }
     row.loaded = b.status === 0; row.state = b.status === 0 ? "ok" : "load-failed";
     report.changes.push(`${state === "install" ? "installed" : state === "load" ? "loaded" : "updated"} ${label}${b.status === 0 ? "" : ` (bootstrap failed: ${(b.stderr || "").trim()})`}`);
   }
