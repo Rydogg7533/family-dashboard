@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { requestUnsubscribe, cancelUnsubscribeRequest, trustAndRequest, retryLater } from "@/app/email-subscriptions/actions";
+import { requestUnsubscribe, cancelUnsubscribeRequest, trustAndRequest, retryLater, archiveSenders } from "@/app/email-subscriptions/actions";
 import type { EmailSub } from "@/lib/data-email-subs";
 import { CATEGORY_LABEL, CATEGORY_ORDER, frequencyLabel, type EmailSubCategory } from "@/lib/email-sub-format";
 
@@ -35,6 +35,15 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       else { setMsg(r.error); setConfirming(false); }
     } catch { setMsg("That took too long and may not have gone through. Nothing is shown as requested until it is saved; reload the page and try again."); setConfirming(false); }
   });
+  // Archive only (D16): hides the ticked senders here, Gmail untouched, no unsubscribe. One tap, no confirm, reversible from "Archived".
+  const archive = () => start(async () => {
+    setMsg(null); setConfirming(false);
+    try {
+      const r = await withTimeout(archiveSenders([...picked], true), 25000);
+      if (r.ok) { setMsg(`Archived ${r.count}. Hidden here only; Gmail is unchanged. Find them under Archived at the bottom.`); setPicked(new Set()); router.refresh(); }
+      else setMsg(r.error);
+    } catch { setMsg("That took too long and may not have gone through. Reload the page and look under Archived."); }
+  });
   const groups = CATEGORY_ORDER.map((c) => ({ c, rows: subs.filter((s) => (s.category ?? "unclear") === c) })).filter((g) => g.rows.length > 0);
   const tickedAccount = subs.filter((s) => picked.has(s.id) && s.category === "account");
   const tickedUnverified = subs.filter((s) => picked.has(s.id) && s.auth_ok === false && !s.trusted_at);
@@ -45,6 +54,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
       <span className="text-sm font-semibold" aria-live="polite">{n === 0 ? "Nothing ticked" : `${n} ticked`}</span>
       <div className="flex gap-2">
         {n > 0 && <button className="min-h-11 px-3 rounded-xl border border-line text-sm font-semibold" onClick={() => { setPicked(new Set()); setConfirming(false); }}>Clear</button>}
+        <button className="min-h-11 px-3 rounded-xl border border-line text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending} onClick={archive} title="Hide here only. Gmail is not changed.">Archive{n > 0 ? ` (${n})` : ""}</button>
         <button className="min-h-11 px-4 rounded-xl border border-accent bg-accent text-white text-sm font-semibold disabled:opacity-40" disabled={n === 0 || pending || !ready} onClick={() => setConfirming(true)}>{pending ? <><Spin />Working…</> : <>Unsubscribe{n > 0 ? ` (${n})` : ""}</>}</button>
       </div>
     </div>
@@ -65,7 +75,7 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
           <div className="text-sm font-semibold">Unsubscribe from {n} sender{n === 1 ? "" : "s"}?</div>
           {tickedAccount.length > 0 && <div className="text-xs text-amber font-semibold">{tickedAccount.length === 1 ? "One of these is an account notice" : `${tickedAccount.length} of these are account notices`} ({tickedAccount.slice(0, 3).map((s) => s.sender_name || s.address).join(", ")}{tickedAccount.length > 3 ? ", and more" : ""}). Those are often receipts, security alerts or bills. Make sure you want them gone.</div>}
           {tickedUnverified.length > 0 && <div className="text-xs text-amber font-semibold">{tickedUnverified.length === 1 ? "One of these could not be verified as a real sender" : `${tickedUnverified.length} of these could not be verified as real senders`}. Nothing will be sent to those; they will come back here under &ldquo;Check first&rdquo; for you to decide.</div>}
-          <div className="text-xs text-muted">Each sender is asked to stop. Your Mac mini sends the requests, and you can cancel until it starts. Once a sender has been told, it can&apos;t be undone from here.</div>
+          <div className="text-xs text-muted">Each sender is asked to stop. Your Mac mini sends the requests, and you can cancel until it starts. Once a sender has been told, it can&apos;t be undone from here. Senders that confirm are archived here automatically; nothing in Gmail changes.</div>
           <div className="flex gap-2">
             <button className="min-h-11 px-3 rounded-xl border border-accent bg-accent text-white font-semibold text-sm flex-1 disabled:opacity-50" disabled={pending} onClick={send}>{pending ? <><Spin />Working…</> : "Yes, unsubscribe"}</button>
             <button className="min-h-11 px-3 rounded-xl border border-line font-semibold text-sm flex-1" disabled={pending} onClick={() => setConfirming(false)}>Not now</button>
@@ -169,4 +179,35 @@ export function AutoRefresh({ active }: { active: boolean }) {
     return () => clearInterval(t);
   }, [active, router]);
   return null;
+}
+
+// "Archived" (D16): senders hidden from the dashboard by the person or by the agent after an unsubscribe. Gmail is never changed.
+// Collapsed by default; one tap brings a sender back.
+export function ArchivedSenders({ subs }: { subs: EmailSub[] }) {
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  if (subs.length === 0) return null;
+  const back = (ids: string[]) => start(async () => { setMsg(null); const r = await archiveSenders(ids, false); if (r.ok) router.refresh(); else setMsg(r.error); });
+  return (
+    <div className="card flex flex-col">
+      <button type="button" className="min-h-11 flex items-center justify-between gap-2 text-left" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="text-[11px] font-bold tracking-wide text-muted uppercase">Archived · {subs.length}</span>
+        <span aria-hidden className={`text-muted text-xs transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+      </button>
+      {open && (
+        <div className="flex flex-col">
+          <div className="text-xs text-muted pb-2">Hidden here only. These are still in Gmail exactly as before.</div>
+          {subs.map((s) => (
+            <div key={s.id} className="py-2 border-b border-line last:border-0 flex items-center justify-between gap-3">
+              <div className="min-w-0"><div className="font-semibold text-sm truncate">{s.sender_name || s.address}</div><div className="text-xs text-muted truncate">{s.status === "done" ? "Unsubscribed" : s.status === "stopped" ? "Stopped sending" : "Still subscribed"} · {s.mailbox}</div></div>
+              <button className="min-h-10 px-3 rounded-xl border border-line text-xs font-semibold shrink-0 disabled:opacity-50" disabled={pending} onClick={() => back([s.id])}>Bring back</button>
+            </div>
+          ))}
+          {msg && <div className="text-xs font-semibold text-amber pt-2" role="status">{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -95,7 +95,8 @@ async function main() {
     }
 
     const now = new Date().toISOString();
-    const patch = { status: plan.status, status_note: plan.note, updated_at: now, ...(plan.completed ? { completed_at: now } : {}) };
+    // A confirmed unsubscribe also archives the sender in the dashboard (D18, 2026-10-28): hidden there, Gmail untouched, reversible.
+    const patch = { status: plan.status, status_note: plan.note, updated_at: now, ...(plan.completed ? { completed_at: now, archived_at: now } : {}) };
     // Only if it is still 'requested': a cancel that arrived during the request wins the row (the request itself cannot be recalled).
     const wrote = await rest("PATCH", `email_subscriptions?id=eq.${row.id}&status=eq.requested`, patch, { Prefer: "return=representation" });
     if (!wrote?.length) { tally.cancelled++; console.log(`  ${hostOf(row.unsub_http)}: row changed while working; left as is`); continue; }
@@ -128,7 +129,7 @@ async function main() {
       : r.unsub_mailto ? { status: "needs_tap", note: `${r.messages_since_unsub} emails arrived after the sender said it had unsubscribed you. Send its unsubscribe email from your mail app.` }
       : { status: "failed", note: `${r.messages_since_unsub} emails arrived after the sender said it had unsubscribed you, and it offers no other way. Mark it as spam in Gmail.` };
     if (DRY) { console.log(`  would reopen (${plan.status}): ${label(r)} kept sending`); reopened++; continue; }
-    const w = await rest("PATCH", `email_subscriptions?id=eq.${r.id}&status=eq.done`, { ...plan, completed_at: null, messages_since_unsub: 0, requested_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { Prefer: "return=representation" });
+    const w = await rest("PATCH", `email_subscriptions?id=eq.${r.id}&status=eq.done`, { ...plan, completed_at: null, archived_at: null, messages_since_unsub: 0, requested_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { Prefer: "return=representation" });
     if (w?.length) { reopened++; await rest("POST", "activity_log", { actor: "email-unsubscriber", action: "email_unsubscribe_reopened", subject: `Asked by ${people[r.requested_by] || "a household member"}: ${label(r)} kept sending after saying it had unsubscribed; handed back`.slice(0, 200), ref: r.id, undoable: false }).catch(() => {}); }
   }
 

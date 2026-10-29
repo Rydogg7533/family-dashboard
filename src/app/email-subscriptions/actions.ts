@@ -80,3 +80,20 @@ export async function retryLater(ids: string[]) {
   if (!data?.length) return { ok: false as const, error: "Nothing changed." };
   return { ok: true as const, count: data.length };
 }
+
+// Archive / unarchive (decisions 2026-10-28 D16): hides the sender in the dashboard only. Gmail is never touched and the
+// unsubscribe status does not change. Goes through email_subscriptions_archive() (migration 0087), which can write nothing
+// but archived_at/archived_by on the caller's own rows.
+export async function archiveSenders(ids: string[], archive: boolean) {
+  const list = cleanIds(ids);
+  if (!list.length) return { ok: false as const, error: "Pick at least one sender." };
+  if (!hasSupabaseEnv()) return { ok: true as const, sample: true, count: list.length };
+  const me = await who();
+  if (!me) return { ok: false as const, error: "Sign in again." };
+  const { data, error } = await me.sb.rpc("email_subscriptions_archive", { ids: list, archive });
+  if (error) return { ok: false as const, error: archive ? "Could not archive." : "Could not bring that back." };
+  const count = typeof data === "number" ? data : 0;
+  if (!count) return { ok: false as const, error: "Nothing changed." };
+  await me.sb.from("activity_log").insert({ actor: me.name, action: archive ? "email_sender_archived" : "email_sender_unarchived", subject: `${me.name} ${archive ? "archived" : "brought back"} ${count} mailing list${count === 1 ? "" : "s"} (Gmail untouched)`, ref: list[0], undoable: false }).then(() => {}, () => {});
+  return { ok: true as const, count };
+}
