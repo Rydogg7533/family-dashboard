@@ -44,7 +44,8 @@ if (!SB_URL || !SB_KEY) { console.error("STOP: SUPABASE_URL / SUPABASE_SERVICE_K
 const sb = async (path, init = {}) => {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...init, headers: { apikey: SB_KEY, authorization: `Bearer ${SB_KEY}`, "content-type": "application/json", prefer: init.method === "PATCH" ? "return=representation" : "", ...(init.headers ?? {}) } });
   if (!r.ok) throw new Error(`${path}: ${r.status} ${(await r.text()).slice(0, 200)}`);
-  return r.json();
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;      // a return=minimal write answers with nothing, which is not an error
 };
 
 // ---------- 1Password ----------
