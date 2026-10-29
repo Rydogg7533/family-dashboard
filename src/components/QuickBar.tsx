@@ -4,11 +4,15 @@ import { isFrameless } from "@/lib/frameless";
 import { useEffect, useState } from "react";
 import { ReportIssueSheet } from "@/components/ReportIssue";
 import { AskSheet } from "@/components/AskSheet";
+import { Mic } from "lucide-react";
 
 // Floating "+" on every working page: the handful of things done often from anywhere. Frequency earns a slot here
 // (a calendar event is daily; adding a device is twice a year and stays a button on its own page). Ask itself is the Ask tab (one tap).
 export function QuickBar({ who = "You", sample = false }: { who?: string; sample?: boolean }) {
-  const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false); const [ask, setAsk] = useState(false); const [away, setAway] = useState(false);
+  const path = usePathname(); const router = useRouter(); const [plus, setPlus] = useState(false); const [report, setReport] = useState(false); const [ask, setAsk] = useState(false); const [askVoice, setAskVoice] = useState(false); const [away, setAway] = useState(false);
+  // The mic shows only when the server has a voice key (same check the Ask box makes); hidden until known.
+  const [voiceOn, setVoiceOn] = useState(false);
+  useEffect(() => { fetch("/api/voice/session", { method: "POST" }).then((r) => setVoiceOn(r.status !== 404)).catch(() => setVoiceOn(false)); }, []);
   useEffect(() => { setPlus(false); setAway(false); }, [path]);
   // Escape closes the menu too, for a keyboard; the transparent catcher below handles a tap outside it.
   useEffect(() => {
@@ -30,10 +34,18 @@ export function QuickBar({ who = "You", sample = false }: { who?: string; sample
   return (
     <>
     <ReportIssueSheet open={report} onClose={() => setReport(false)} />
-    <AskSheet open={ask} onClose={() => setAsk(false)} who={who} sample={sample} />
+    <AskSheet open={ask} onClose={() => { setAsk(false); setAskVoice(false); }} who={who} sample={sample} voice={askVoice} />
     {plus && <div aria-hidden="true" onClick={() => setPlus(false)} className="fixed inset-0 z-20" />}
     <div className={`fixed left-0 right-0 bottom-[calc(var(--bar-bottom)+12px)] pointer-events-none z-20 transition-transform duration-200 ${away && !plus ? "translate-y-24" : ""}`}>
-      <div className="max-w-md mx-auto px-5 flex justify-end pointer-events-auto">
+      <div className="max-w-md mx-auto px-5 flex flex-col items-end gap-3 pointer-events-auto">
+        {/* System-wide voice (ported from MedRepDesk's voice FAB): one tap from any screen opens Ask already listening.
+            Sits above the +, slightly quieter so the + stays the primary action. */}
+        {voiceOn && !ask && (
+          <button aria-label="Talk to the assistant" title="Talk to Ask (audio goes to OpenAI during a voice session)" onClick={() => { setPlus(false); setAskVoice(true); setAsk(true); }}
+            className="w-11 h-11 rounded-full bg-accent/85 text-white shadow-md ring-2 ring-bg flex items-center justify-center active:scale-95 transition-transform">
+            <Mic size={20} strokeWidth={2} />
+          </button>
+        )}
         <div className="relative">
           {plus && (
             <div className="absolute bottom-12 right-0 card shadow-lg flex flex-col gap-1 w-48 text-sm font-semibold">

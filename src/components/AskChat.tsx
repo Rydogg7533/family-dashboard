@@ -34,7 +34,7 @@ async function shrink(file: File): Promise<Blob | null> {
 // embedded: the same Ask, inside the sheet the + button opens on any page (one thread, two places to open it).
 // source names where it was asked from; onPending tells the sheet whether a confirm card is still waiting; onControls
 // hands the sheet the "New chat" action so it can sit in the sheet's own header row instead of a second row below it.
-export function AskChat({ prefill, sample, who, embedded, source, onPending, onControls }: { prefill: string; sample: boolean; who: string; embedded?: boolean; source?: string; onPending?: (pending: boolean) => void; onControls?: (c: { hasMessages: boolean; newChat: () => void }) => void }) {
+export function AskChat({ prefill, sample, who, embedded, source, onPending, onControls, autoVoice }: { prefill: string; sample: boolean; who: string; embedded?: boolean; source?: string; onPending?: (pending: boolean) => void; onControls?: (c: { hasMessages: boolean; newChat: () => void }) => void; autoVoice?: boolean }) {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState(prefill);
   const [busy, setBusy] = useState(false);
@@ -240,6 +240,9 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
     void s.connect();
   }
   useEffect(() => () => { voiceRef.current?.close(); }, []);
+  // Opened from the system-wide mic (QuickBar): start talking straight away, once we know voice is on.
+  const autoStarted = useRef(false);
+  useEffect(() => { if (autoVoice && voiceOn && !autoStarted.current && !voiceRef.current) { autoStarted.current = true; voiceToggle(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [autoVoice, voiceOn]);
 
   function stop() {
     if (!busy) return;

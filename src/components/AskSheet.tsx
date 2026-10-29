@@ -11,7 +11,7 @@ import { AskChat } from "@/components/AskChat";
 // What the keyboard measured last time, so the next open reserves exactly the right space.
 const KEYBOARD_KEY = "ask-keyboard-height";
 
-export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClose: () => void; who: string; sample: boolean }) {
+export function AskSheet({ open, onClose, who, sample, voice = false }: { open: boolean; onClose: () => void; who: string; sample: boolean; voice?: boolean }) {
   const path = usePathname();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -135,7 +135,7 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
             </div>
           </div>
         ) : (
-          <AskChat prefill="" sample={sample} who={who} embedded source={`page:${path}`} onPending={onPending} onControls={onControls} />
+          <AskChat prefill="" sample={sample} who={who} embedded source={`page:${path}`} onPending={onPending} onControls={onControls} autoVoice={voice} />
         )}
       </div>
     </div>
