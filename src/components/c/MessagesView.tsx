@@ -6,6 +6,7 @@ import type { Confirmation, Message, Suggestion, Thread } from "@/lib/data-messa
 import { clock } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
 import { Who } from "@/components/c/Who";
+import { createClient } from "@/lib/supabase/client";
 
 const btn = "min-h-9 px-2.5 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
 
@@ -56,6 +57,19 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
   // Lines queued here show as "sending…" until the Mac has sent them through Messages and the mirror has read them back.
   // Open at the latest line, like Messages.
   useEffect(() => { window.scrollTo({ top: document.documentElement.scrollHeight }); }, [thread.id]);
+  // New lines in this thread arrive over Realtime (owner-only rows): refresh the moment the mirror writes one, and
+  // clear the "Sending…" placeholder for a line of mine that has come back as a real message.
+  useEffect(() => {
+    let sb: ReturnType<typeof createClient> | null = null;
+    try { sb = createClient(); } catch { return; }
+    const ch = sb.channel(`thread-${thread.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `thread_id=eq.${thread.id}` }, (p) => {
+      const row = p.new as { is_me?: boolean; text?: string | null };
+      if (row.is_me) setWaiting((w) => w.filter((x) => x.text !== row.text));
+      router.refresh();
+      setTimeout(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }), 150);
+    }).subscribe();
+    return () => { sb?.removeChannel(ch); };
+  }, [thread.id, router]);
   useEffect(() => {
     let on = true;
     const tick = async () => { try { const w = await pendingLines(thread.id); if (on) setWaiting(w); } catch { /* keep the last state */ } };

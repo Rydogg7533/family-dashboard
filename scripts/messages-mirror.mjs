@@ -254,7 +254,14 @@ end tell`;
   if (r.status !== 0) throw new Error((r.stderr || "").trim().slice(0, 200) || `osascript exited ${r.status}`);
 }
 
-async function main() {
+// Incremental passes (every change in Messages) write only lines newer than the last full pass minus a margin and skip
+// the prunes; a full pass (start, then every FULL_EVERY_MS) rewrites everything and prunes. Keeps "your line shows up"
+// at a second or two with 80 threads and 10,000 lines in the window (2026-10-29: a full pass had grown to ~60 s).
+const FULL_EVERY_MS = 15 * 60e3;
+let lastFullAt = 0, lastWriteAt = 0;
+async function main(full = true) {
+  const INCR = WATCH && !full && lastWriteAt > 0;
+  const writeSince = lastWriteAt - 5 * 60e3; // margin: a line edited or received late still lands
   if (!URL_ || !KEY) throw new Error(`SUPABASE_URL / SUPABASE_SERVICE_KEY missing in ${envPath}`);
   snapshot();
   const chats = q(`select c.ROWID as id, c.guid, c.chat_identifier as ident, c.display_name as name, c.style,
@@ -291,7 +298,7 @@ async function main() {
   }
   let msgCount = 0, mediaCount = 0; const threadRows = [], msgRows = [];
   const P = await loadPeople();
-  if (!DRY) await loadMediaKnown();
+  if (!DRY && !INCR) await loadMediaKnown();
   for (const g of groups.values()) {
     const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes,
@@ -326,7 +333,7 @@ async function main() {
       last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME,
       is_family: g.isFamily, handles: g.handles, avatars: Object.fromEntries(g.members.filter((m) => P.photos.has(m)).map((m) => [m, P.photos.get(m)])) });
   }
-  console.log(`${now()} ${threadRows.length} threads (${threadRows.filter((t) => t.is_family).length} family, ${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${mediaCount ? `, ${mediaCount} media copied` : ""}${DRY ? " (dry: nothing written)" : ""}`);
+  if (!INCR) console.log(`${now()} ${threadRows.length} threads (${threadRows.filter((t) => t.is_family).length} family, ${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${mediaCount ? `, ${mediaCount} media copied` : ""}${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }
 
   familyChats = family; threadGroups = groups;
@@ -342,7 +349,11 @@ async function main() {
   const old_t = threadRows.filter((t) => known.has(t.id));
   for (let i = 0; i < fresh_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", fresh_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < old_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", old_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
-  for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
+  const toWrite = INCR ? msgRows.filter((m) => Date.parse(m.at) > writeSince || !mediaKnown.has(m.id) && m.attachment?.path) : msgRows;
+  for (let i = 0; i < toWrite.length; i += 200) await rest("POST", "messages?on_conflict=id", toWrite.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
+  lastWriteAt = Date.now();
+  if (!INCR) lastFullAt = Date.now();
+  if (!INCR) {
   // mirror copies only: a thread this pass did not touch has left the window (or Messages); its lines go with it (cascade).
   // Media copies for lines leaving the window are removed from the bucket first (they are copies; Messages keeps the originals).
   const staleThreads = (await rest("GET", `messages_threads?person=eq.${PERSON}&updated_at=lt.${encodeURIComponent(passStart)}&select=id`).catch(() => [])).map((t) => t.id);
@@ -358,6 +369,7 @@ async function main() {
     console.log(`${now()} ${expired.length} media copies released`);
   }
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
+  }
 
   // judge the new lines (after the upserts, so a chip always points at a line the app can show)
   threadRowsFamily = new Map(threadRows.map((t) => [t.id, t.is_family]));
@@ -371,7 +383,7 @@ async function main() {
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "numeric", minute: "2-digit" }).format(new Date());
   const summary = `Messages: ${threadRows.length} family threads, ${msgCount} messages in ${DAYS} days${sent ? `, sent ${sent}` : ""}${failed ? `, ${failed} not sent` : ""} · ${time}`;
   await status(failed ? "warn" : "ok", summary);
-  console.log(`${now()} ${summary}`);
+  if (!INCR || sent || failed) console.log(`${now()} ${summary}${INCR ? ` (incremental, ${toWrite.length} line(s) written)` : ""}`);
 }
 const fail = async (e) => { console.error(`${now()} messages-mirror: ${e.message}`); await status("error", `Messages mirror paused: ${String(e.message).slice(0, 200)}`); };
 if (!WATCH) main().catch(async (e) => { await fail(e); process.exit(1); });
@@ -381,7 +393,7 @@ else {
   // One pass at a time; an error pauses the mirror and is retried.
   const stamp = () => ["chat.db", "chat.db-wal"].map((f) => { try { return statSync(join(homedir(), "Library", "Messages", f)).mtimeMs; } catch { return 0; } }).join("|");
   let lastStamp = "", lastPass = 0, busy = false, again = false;
-  const run = async (why) => { if (busy) { again = true; return; } busy = true; try { do { again = false; await main(); lastPass = Date.now(); lastStamp = stamp(); } while (again); } catch (e) { await fail(e); } finally { busy = false; } };
+  const run = async (why) => { if (busy) { again = true; return; } busy = true; try { do { again = false; await main(why === "start" || why === "full" || Date.now() - lastFullAt > FULL_EVERY_MS); lastPass = Date.now(); lastStamp = stamp(); } while (again); } catch (e) { await fail(e); } finally { busy = false; } };
   await run("start");
   setInterval(() => { if (stamp() !== lastStamp) void run("messages changed"); else if (Date.now() - lastPass > 60000) void run("minute"); }, 500);
   const drain = async () => { try { const w = await rest("GET", `messages_outbox?person=eq.${PERSON}&status=eq.queued&order=queued_at.asc&limit=20&select=id,thread_id,to_handle,text`); for (const o of w) await sendOne(o); if (w.length) void run("outbox"); } catch { /* next tick */ } };
