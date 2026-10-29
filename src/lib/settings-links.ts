@@ -39,6 +39,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
   { title: "Look and feel", rows: [
     { href: "/settings/appearance", label: "Look and feel", sub: "Theme, accent, text size, fonts, background" },
     { href: "/settings/modules", label: "My dashboard", sub: "Modules on or off, presets, reset to recommended" },
+    { href: "/settings/tabs", label: "Tab bar", sub: "Which tabs sit at the bottom, and in what order" },
   ] },
   { title: "Data and privacy", rows: [
     { href: "/settings/privacy", label: "Data and privacy", sub: "What is stored, how long, who can see it" },

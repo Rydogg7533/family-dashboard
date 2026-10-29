@@ -9,6 +9,9 @@ import { RecentTracker } from "@/components/RecentPages";
 import { MainFrame } from "@/components/MainFrame";
 import { getDisplayName } from "@/lib/data";
 import { hasAiKey } from "@/lib/ai";
+import { getTabKeys } from "@/lib/tabs-server";
+import { DEFAULT_TABS } from "@/lib/tabs";
+import { hasSupabaseEnv } from "@/lib/supabase/server";
 
 
 export const metadata: Metadata = {
@@ -27,6 +30,7 @@ export const viewport: Viewport = { themeColor: "#1F6FA3", width: "device-width"
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // The + button's Ask sheet needs who is asking (the thread is kept per person) and whether a model is set.
   const who = (await getDisplayName().catch(() => "")) || "You";
+  const tabKeys = await getTabKeys().catch(() => DEFAULT_TABS);
   return (
     <html lang="en" className="h-full antialiased">
       <head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=Dancing+Script:wght@700&display=swap" /></head>
@@ -37,7 +41,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <MainFrame>{children}</MainFrame>
           <QuickBar who={who} sample={!hasAiKey()} />
           <RecentTracker />
-          <Nav />
+          <Nav tabKeys={tabKeys} live={hasSupabaseEnv()} />
         </AppearanceProvider>
       </body>
     </html>

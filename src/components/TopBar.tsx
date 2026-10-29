@@ -21,7 +21,7 @@ const moreTitles: Record<string, string> = {
 };
 const subTitles: Record<string, string> = {
   "/shop/orders": "Orders", "/shop/cases": "Support cases",
-  "/settings/household": "Household", "/settings/vault": "1Password", "/settings/people": "People and access", "/settings/privacy": "Data and privacy", "/settings/reference": "Reference", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/notifications": "Notifications", "/settings/connections": "Connections", "/settings/location": "Location", "/settings/capture": "Camera shortcut", "/settings/contacts": "Contacts source", "/settings/filing-rules": "Filing rules", "/vehicles/new": "Add a vehicle",
+  "/settings/household": "Household", "/settings/vault": "1Password", "/settings/people": "People and access", "/settings/privacy": "Data and privacy", "/settings/reference": "Reference", "/settings/appearance": "Look and feel", "/settings/modules": "My dashboard", "/settings/tabs": "Tab bar", "/settings/notifications": "Notifications", "/settings/connections": "Connections", "/settings/location": "Location", "/settings/capture": "Camera shortcut", "/settings/contacts": "Contacts source", "/settings/filing-rules": "Filing rules", "/vehicles/new": "Add a vehicle",
 };
 const moneyTitles: Record<string, string> = {
   "/money/receipts": "Receipts", "/money/recurring": "Bills and charges", "/money/subscriptions": "Subscriptions",

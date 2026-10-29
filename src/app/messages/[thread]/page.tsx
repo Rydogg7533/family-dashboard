@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getMessages, getThread, clock } from "@/lib/data-messages";
 import { getSyncStatus } from "@/lib/data-day";
 import { ThreadView } from "@/components/c/MessagesView";
+import { SeenMarker } from "@/components/c/SeenMarker";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function ThreadPage({ params }: PageProps<"/messages/[threa
       </div>
       <div className="text-xs text-muted mb-3">{thread.members.join(", ")} · <a href="messages://" className="font-semibold text-accent">Open in Messages</a></div>
       <ThreadView thread={thread} messages={messages} mirrorOk={mirror?.state === "ok"} />
+      <SeenMarker threadId={id} />
     </>
   );
 }
