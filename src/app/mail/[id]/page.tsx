@@ -13,10 +13,10 @@ export default async function MailMessage({ params }: PageProps<"/mail/[id]">) {
   const m = await getMailMessage(id);
   if (!m) notFound();
   const [sub, ready] = await Promise.all([m.folder === "inbox" ? getSubscriptionForAddress(m.from_addr) : Promise.resolve(null), getUnsubscribeAgentReady()]);
-  const back = m.folder === "draft" ? "/mail?box=drafts" : sub ? `/mail?box=newsletters&from=${encodeURIComponent(m.from_addr ?? "")}` : "/mail";
+  const back = m.folder === "draft" ? "/mail?box=drafts" : sub ? "/email-subscriptions" : "/mail";
   return (
     <>
-      <Link href={back} className="text-xs font-semibold text-accent">‹ {m.folder === "draft" ? "Drafts" : sub ? "Newsletter" : "Inbox"}</Link>
+      <Link href={back} className="text-xs font-semibold text-accent">‹ {m.folder === "draft" ? "Drafts" : sub ? "Mailing lists" : "Inbox"}</Link>
       <h1 className="text-xl font-bold mt-2 break-words">{m.subject || "(no subject)"}</h1>
       <div className="text-sm mt-2 flex flex-col gap-0.5 break-words">
         <div><span className="text-muted">From </span>{m.from_addr ? who({ name: m.from_name ?? "", addr: m.from_addr }) : "Unknown"}</div>

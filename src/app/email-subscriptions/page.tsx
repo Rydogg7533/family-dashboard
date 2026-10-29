@@ -2,6 +2,7 @@ import Link from "next/link";
 import { H1 } from "@/components/ui";
 import { Section } from "@/components/money";
 import { getEmailSubs, getEmailSubsScan, getFinishLinks, getUnsubscribeAgentReady, type EmailSub } from "@/lib/data-email-subs";
+import { getNewsletters, type MailRow } from "@/lib/data-mail";
 import { EmailSubscriptionList, CancelRequest, AutoRefresh, CheckActions, TryAgain, ArchivedSenders } from "@/components/EmailSubscriptionList";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,10 @@ const name = (s: EmailSub) => s.sender_name || s.address || "Unknown sender";
 const Box = ({ s }: { s: EmailSub }) => <div className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</div>;
 
 export default async function EmailSubscriptions() {
-  const [allSubs, scan, ready] = await Promise.all([getEmailSubs(), getEmailSubsScan(), getUnsubscribeAgentReady()]);
+  const [allSubs, scan, ready, news] = await Promise.all([getEmailSubs(), getEmailSubsScan(), getUnsubscribeAgentReady(), getNewsletters()]);
+  // Each sender's newsletters from the inbox copy (Mail), so they can be read here before deciding.
+  const mail: Record<string, MailRow[]> = {};
+  for (const r of news.rows) { const k = (r.from_addr ?? "").toLowerCase(); (mail[k] ??= []).push(r); }
   // Archived (D16): hidden from every section here; Gmail untouched. Rows waiting on the person are never hidden.
   const archived = allSubs.filter((s) => s.archived_at && !["requested", "needs_tap", "open_link", "failed", "check"].includes(s.status));
   const subs = allSubs.filter((s) => !archived.includes(s));
@@ -35,7 +39,7 @@ export default async function EmailSubscriptions() {
       <H1>Mailing lists</H1>
       <p className="text-xs text-muted mb-3">
         {scan.at ? `Mailing lists found in your Gmail, updated ${ago(scan.at)} and every few hours after that.` : "Mailing lists found in your Gmail."}{" "}
-        Only the sender, date and subject line are read, never the message itself. Tick the ones you are done with and tap Unsubscribe.
+        Only the sender, date and subject line are read, never the message itself. Tap a sender to read its recent newsletters here; tick the ones you are done with and tap Unsubscribe.
         {scan.state === "warn" && <span className="text-amber font-semibold"> The last scan had trouble reading some mail.</span>}
       </p>
 
@@ -87,7 +91,7 @@ export default async function EmailSubscriptions() {
       )}
 
       <Section title="Your mailing lists" right={`${active.length}`}>
-        <EmailSubscriptionList subs={active} quietBefore={quietBefore} ready={ready} />
+        <EmailSubscriptionList subs={active} quietBefore={quietBefore} ready={ready} mail={mail} />
         <div className="mt-2"><a href="https://mail.google.com/" className="text-xs font-semibold text-accent">Open in Gmail</a></div>
       </Section>
 

@@ -2,7 +2,9 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestUnsubscribe, cancelUnsubscribeRequest, trustAndRequest, retryLater, archiveSenders } from "@/app/email-subscriptions/actions";
+import Link from "next/link";
 import type { EmailSub } from "@/lib/data-email-subs";
+import type { MailRow } from "@/lib/data-mail";
 import { CATEGORY_LABEL, CATEGORY_ORDER, frequencyLabel, type EmailSubCategory } from "@/lib/email-sub-format";
 
 const Spin = () => <span aria-hidden className="inline-block w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin align-[-3px] mr-2" />;
@@ -15,7 +17,10 @@ const day = (iso: string | null) => {
 };
 
 // Tick the senders you are done with, tap Unsubscribe, confirm once. Nothing is ticked for you.
-export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { subs: EmailSub[]; quietBefore: string; ready: boolean }) {
+// `mail`: that sender's newsletters from the inbox copy (Mail), keyed by lower-cased address. Tapping a sender's name opens
+// its messages right here (Ryan, 2026-10-28 19:31: read a sender's newsletters in place, decide, then unsubscribe or archive).
+export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready, mail = {} }: { subs: EmailSub[]; quietBefore: string; ready: boolean; mail?: Record<string, MailRow[]> }) {
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
   const [box, setBox] = useState<string>("all");
   const boxes = [...new Set(allSubs.map((s) => s.mailbox))].sort();
   const subs = box === "all" ? allSubs : allSubs.filter((s) => s.mailbox === box);
@@ -100,7 +105,24 @@ export function EmailSubscriptionList({ subs: allSubs, quietBefore, ready }: { s
                     <div className="flex flex-col pl-11 pb-3 min-w-0">
                       <span className="text-xs text-muted truncate">{s.address}</span>
                       <span className="text-[11px] font-semibold text-accent truncate">To: {s.mailbox}</span>
-                      {s.recent_subjects.slice(0, 3).map((t, i) => <span key={i} className="text-xs truncate">&ldquo;{t}&rdquo;</span>)}
+                      {(() => {
+                        const msgs = mail[(s.address ?? "").toLowerCase()] ?? [];
+                        if (!msgs.length) return s.recent_subjects.slice(0, 3).map((t, i) => <span key={i} className="text-xs truncate">&ldquo;{t}&rdquo;</span>);
+                        const all = showAll.has(s.id);
+                        const list = all ? msgs : msgs.slice(0, 5);
+                        return (
+                          <div className="flex flex-col my-1 rounded-xl border border-line divide-y divide-line overflow-hidden">
+                            {list.map((m) => (
+                              <Link key={m.id} href={`/mail/${m.id}`} prefetch={false} className="flex items-center gap-2 px-3 min-h-11 bg-bg">
+                                {m.unread && <span aria-label="Unread" className="shrink-0 w-2 h-2 rounded-full bg-accent" />}
+                                <span className={`min-w-0 flex-1 truncate text-sm ${m.unread ? "font-semibold" : ""}`}>{m.subject || "(no subject)"}</span>
+                                <span className="shrink-0 text-xs text-muted">{day(m.sent_at ? m.sent_at.slice(0, 10) : null)}</span>
+                              </Link>
+                            ))}
+                            {msgs.length > 5 && <button type="button" className="min-h-10 px-3 text-left text-xs font-semibold text-accent bg-bg" onClick={() => setShowAll((e) => { const q = new Set(e); if (q.has(s.id)) q.delete(s.id); else q.add(s.id); return q; })}>{all ? "Show fewer" : `Show all ${msgs.length}`}</button>}
+                          </div>
+                        );
+                      })()}
                       <span className="text-xs text-muted">{frequencyLabel(s.message_count, s.first_seen, s.last_seen)} · last {day(s.last_seen)}{(s.last_seen ?? "") < quietBefore ? " · quiet for 3+ months" : ""}{s.method !== "one_click" ? " · may need a tap from you" : ""}</span>
                       {s.auth_ok === false && !s.trusted_at && <span className="text-xs text-amber font-semibold">Unverified sender: {s.auth_note || "could not be confirmed."}</span>}
                     </div>
