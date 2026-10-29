@@ -46,7 +46,18 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
     // pan is visible through the scrim at the top of the screen -- which is the shake (Ryan's recording, 2026-10-28:
     // the top 290px, which the sheet never reaches, changes across eleven frames as the keyboard arrives).
     h.overflow = "hidden";
-    return () => { b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; h.overflow = prev.htmlOverflow; window.scrollTo(0, y); };
+    // Pinning still left the page visible through the scrim while iPhone Safari panned it for the keyboard (Ryan's
+    // second recording, 2026-10-28 23:12: the Today page behind the sheet drops by ~50px for a few frames as the
+    // keyboard rises, and jumps back when it goes). So the page behind is not shown at all while the sheet is up:
+    // everything that is not the sheet is hidden, and the scrim is solid. A pan of something invisible is not a shake.
+    // Hide every sibling on the way up from the overlay to the body (the overlay sits inside the app's wrappers).
+    const hidden: HTMLElement[] = [];
+    for (let node: HTMLElement | null = overlayRef.current; node && node !== document.body && node.parentElement; node = node.parentElement) {
+      for (const sib of Array.from(node.parentElement.children)) if (sib !== node && sib instanceof HTMLElement && sib.tagName !== "SCRIPT" && sib.tagName !== "STYLE") hidden.push(sib);
+    }
+    const prevVis = hidden.map((el) => el.style.visibility);
+    for (const el of hidden) el.style.visibility = "hidden";
+    return () => { hidden.forEach((el, i) => { el.style.visibility = prevVis[i]; }); b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; h.overflow = prev.htmlOverflow; window.scrollTo(0, y); };
   }, [open]);
   // With the keyboard up, iPhone Safari shrinks the visual viewport but not the layout one, so a plain fixed
   // overlay leaves a strip of page showing between the input and the keyboard. The overlay follows the visual
@@ -101,7 +112,7 @@ export function AskSheet({ open, onClose, who, sample }: { open: boolean; onClos
   if (!open) return null;
   return (
     <div ref={overlayRef} className="fixed left-0 right-0 top-0 bottom-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Ask">
-      <button aria-label="Close" className="ask-scrim absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-black/95 touch-none" onClick={tryClose} />
+      <button aria-label="Close" className="ask-scrim absolute left-0 right-0 -top-[100vh] -bottom-[100vh] bg-bg touch-none" onClick={tryClose} />
       <div ref={sheetRef} className={`ask-sheet relative w-full max-w-md bg-bg rounded-t-2xl border-t-2 border-accent px-5 pt-2 pb-[max(16px,env(safe-area-inset-bottom))] flex flex-col gap-2 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] max-h-[85%] overscroll-contain ${drag ? "" : "transition-transform duration-150"}`} style={{ transform: drag?.dy ? `translateY(${drag.dy}px)` : undefined }}>
         <div className="flex items-center justify-between touch-none" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
           <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-line" />
