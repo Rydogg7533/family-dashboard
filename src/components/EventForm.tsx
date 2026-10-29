@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GCal, GEvent, Reminder } from "@/lib/google-calendar";
-import { saveEvent, removeEvent, type EventForm as Form } from "@/app/calendar/actions";
+import { saveEvent, type EventForm as Form } from "@/app/calendar/actions";
+import { Fold } from "@/components/Fold";
 
 const REMINDER_PRESETS: [string, number][] = [["At the time", 0], ["10 min before", 10], ["30 min before", 30], ["1 hour before", 60], ["2 hours before", 120], ["1 day before", 1440], ["2 days before", 2880], ["1 week before", 10080]];
 const REPEATS: [string, string | null][] = [["Does not repeat", null], ["Every day", "RRULE:FREQ=DAILY"], ["Every week", "RRULE:FREQ=WEEKLY"], ["Every 2 weeks", "RRULE:FREQ=WEEKLY;INTERVAL=2"], ["Every month", "RRULE:FREQ=MONTHLY"], ["Every year", "RRULE:FREQ=YEARLY"], ["Weekdays", "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]];
@@ -33,11 +34,6 @@ export function EventForm({ calendars, event, prefill }: { calendars: GCal[]; ev
     if (r.ok) router.push(`/calendar/e/${encodeURIComponent(r.event.calendarId)}/${encodeURIComponent(r.event.id)}?saved=1`);
     else setErr(r.error);
   };
-  const del = async () => {
-    if (!event || !confirm(`Delete “${event.title}” from Google Calendar?`)) return;
-    setBusy(true); const r = await removeEvent(event.calendarId, event.id, event.title); setBusy(false);
-    if (r.ok) router.push("/calendar?deleted=1"); else setErr(r.error ?? "Could not delete.");
-  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -61,11 +57,13 @@ export function EventForm({ calendars, event, prefill }: { calendars: GCal[]; ev
       </div>
       {!f.allDay && <div><div className={label}>ENDS ON A LATER DAY?</div><input type="date" className={field} value={f.endDate ?? ""} min={f.date} placeholder="Same day" onChange={(e) => set({ endDate: e.target.value || undefined })} /></div>}
 
+      <div><div className={label}>WHERE</div><input className={field} placeholder="Place or address" value={f.location ?? ""} onChange={(e) => set({ location: e.target.value })} /></div>
+      <div><div className={label}>NOTES</div><textarea className={`${field} min-h-20 py-2`} value={f.description ?? ""} onChange={(e) => set({ description: e.target.value })} /></div>
+      <Fold id="event-more" title="More" summary={[f.recurrence ? "repeats" : "", (f.attendees ?? []).length ? `${(f.attendees ?? []).length} guest${(f.attendees ?? []).length === 1 ? "" : "s"}` : "", f.reminders === null ? "default reminders" : `${rems.length} reminder${rems.length === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}>
+        <div className="flex flex-col gap-3">
       <div><div className={label}>REPEAT</div>
         <select className={field} value={f.recurrence?.[0] ?? ""} onChange={(e) => set({ recurrence: e.target.value ? [e.target.value] : null })}>{REPEATS.map(([l, v]) => <option key={l} value={v ?? ""}>{l}</option>)}</select>
       </div>
-      <div><div className={label}>WHERE</div><input className={field} placeholder="Place or address" value={f.location ?? ""} onChange={(e) => set({ location: e.target.value })} /></div>
-      <div><div className={label}>NOTES</div><textarea className={`${field} min-h-20 py-2`} value={f.description ?? ""} onChange={(e) => set({ description: e.target.value })} /></div>
       <div><div className={label}>GUESTS (EMAIL, COMMA-SEPARATED)</div><input className={field} inputMode="email" placeholder="Optional; they get Google's invitation" value={(f.attendees ?? []).join(", ")} onChange={(e) => set({ attendees: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></div>
 
       <div>
@@ -84,12 +82,13 @@ export function EventForm({ calendars, event, prefill }: { calendars: GCal[]; ev
         {f.reminders !== null && rems.length === 0 && <div className="text-xs text-muted mt-1">No reminders. Add one above, or leave it.</div>}
       </div>
 
+        </div>
+      </Fold>
       {err && <div className="text-sm text-red">{err}</div>}
       <div className="flex gap-2">
         <button type="button" disabled={busy} onClick={save} className="flex-1 min-h-12 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? "Saving to Google…" : event ? "Save changes" : "Add to Google Calendar"}</button>
         <button type="button" disabled={busy} onClick={() => router.back()} className="min-h-12 px-4 rounded-xl border border-line font-semibold">Cancel</button>
       </div>
-      {event && <button type="button" disabled={busy} onClick={del} className="min-h-10 text-sm font-semibold text-red">Delete this event</button>}
     </div>
   );
 }

@@ -59,4 +59,8 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
 
 /* No accidental zoom: double-tap zoom off, 16px form fields so iOS does not zoom in on focus, no sideways drift. Pinch zoom stays available on purpose (accessibility). */
 html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip; }
+/* Issue eaf9b3f6 (2026-10-28): the bottom tab bar "floats" while scrolling on iPhone. The bar is position:fixed; what moves
+   is the page rubber-banding past its ends, which drags fixed elements with it in Safari. Turning the bounce off keeps
+   the bar put; pull-to-refresh is our own (RefreshControls) and does not need the native bounce. */
+html { overscroll-behavior-y: none; }
 input:not([type="checkbox"]):not([type="radio"]), textarea, select { font-size: max(16px, 1em); }
