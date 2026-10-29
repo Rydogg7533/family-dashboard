@@ -12,7 +12,9 @@
 //              once (one Haiku call, scripts/message-suggest-lib.mjs) and records the judgment in message_suggestions,
 //              6) writes system_status sync_messages. Set MIRROR_SUGGEST=off in the env file to skip 5.
 // --watch also holds a Supabase Realtime subscription on messages_outbox: a queued line is sent immediately, before any mirror pass.
-// Never reads a non-family chat past its handle list; mirrors attachments as {kind,label} only; never deletes anything in Messages.
+// Photos, videos and GIFs are copied into the private message-media bucket (images resized to 1600 px JPEG via sips,
+// video/GIF as-is up to 50 MB) so the thread looks like Messages; copies are removed when the line leaves the window.
+// Never deletes anything in Messages.
 // Mirror rows older than the window are removed from the database (they are a copy; Messages and iCloud keep the history).
 // Secrets and settings: ~/_secrets_local_only/family-dashboard.env  (SUPABASE_URL, SUPABASE_SERVICE_KEY, MIRROR_PERSON_ID,
 //   MIRROR_FAMILY_HANDLES="Melissa=+18015551234,Melissa=melissa@icloud.com,Child=+1801...", MIRROR_DAYS=30). Never printed.
@@ -183,6 +185,48 @@ async function suggestFor(fresh, msgRows) {
   return n;
 }
 
+// ---- media: Messages keeps attachments under ~/Library/Messages/Attachments; chat.db holds the path. Each one is copied
+// once (keyed by message guid + index) into message-media/<person>/<guid>/<n>.<ext>. Images are resized to 1600 px JPEG
+// (HEIC does not show in most browsers); video and GIF go as they are, up to MEDIA_MAX bytes. ----
+const MEDIA_MAX = 50 * 1024 * 1024;
+const MEDIA_DIR = join(TMP, "media"); mkdirSync(MEDIA_DIR, { recursive: true, mode: 0o700 });
+const copied = new Set(); // "<guid>/<n>" already in the bucket this run (and re-checked on restart via the message row)
+function mediaKind(mime, name) {
+  const ext = (name || "").toLowerCase().split(".").pop();
+  if (/^image\/gif$/.test(mime) || ext === "gif") return "gif";
+  if (/^image\//.test(mime) || ["heic", "heif", "jpg", "jpeg", "png", "webp"].includes(ext)) return "photo";
+  if (/^video\//.test(mime) || ["mov", "mp4", "m4v"].includes(ext)) return "video";
+  if (/^audio\//.test(mime)) return "audio";
+  return "file";
+}
+async function putMedia(guid, n, att) {
+  const src = att.filename?.startsWith("~") ? join(homedir(), att.filename.slice(1)) : att.filename;
+  if (!src || !existsSync(src)) return null;
+  const kind = mediaKind(att.mime_type || "", src);
+  if (!["photo", "gif", "video"].includes(kind)) return null;
+  const st = statSync(src); if (st.size > MEDIA_MAX) return { kind, label: "too large", skipped: "size" };
+  let body, mime = att.mime_type || "", ext;
+  if (kind === "photo") {
+    const out = join(MEDIA_DIR, `${process.pid}-${n}.jpg`);
+    const r = spawnSync("sips", ["-s", "format", "jpeg", "-s", "formatOptions", "82", "--resampleHeightWidthMax", "1600", src, "--out", out], { encoding: "utf8", timeout: 60000 });
+    if (r.status !== 0 || !existsSync(out)) return null;
+    body = readFileSync(out); rmSync(out, { force: true }); mime = "image/jpeg"; ext = "jpg";
+  } else { body = readFileSync(src); ext = kind === "gif" ? "gif" : (src.toLowerCase().split(".").pop() || "mov"); if (!mime) mime = kind === "gif" ? "image/gif" : "video/quicktime"; }
+  const path = `${PERSON}/${encodeURIComponent(guid)}/${n}.${ext}`;
+  const u = await fetch(`${URL_}/storage/v1/object/message-media/${path}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": mime, "x-upsert": "true" }, body });
+  if (!u.ok) throw new Error(`media upload → ${u.status} ${(await u.text()).slice(0, 160)}`);
+  let w = null, h = null;
+  if (kind === "photo") { const d = spawnSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", src], { encoding: "utf8" }).stdout || ""; const mw = d.match(/pixelWidth: (\d+)/), mh = d.match(/pixelHeight: (\d+)/); if (mw && mh) { const s = Math.min(1, 1600 / Math.max(+mw[1], +mh[1])); w = Math.round(+mw[1] * s); h = Math.round(+mh[1] * s); } }
+  return { kind, label: kind, mime, path, bytes: body.length, w, h };
+}
+async function pruneMedia(rows) {
+  for (const r of rows) { const path = r.attachment?.path; if (!path) continue;
+    await fetch(`${URL_}/storage/v1/object/message-media/${path}`, { method: "DELETE", headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } }).catch(() => {}); mediaKnown.delete(r.id); }
+}
+// Lines already holding a copied path are not copied again (survives restarts).
+let mediaKnown = new Map(); // guid -> attachment json
+async function loadMediaKnown() { mediaKnown = new Map((await rest("GET", `messages?person=eq.${PERSON}&attachment=not.is.null&select=id,attachment`).catch(() => [])).map((r) => [r.id, r.attachment])); }
+
 // A new conversation: address the person, not a chat. iMessage first; SMS when the handle is a number with no iMessage.
 function sendToHandle(handle, text) {
   const esc = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -238,20 +282,32 @@ async function main() {
     if (!groups.has(id)) groups.set(id, { id, kind, members, name: c.name || "", chats: [], isFamily, handles: [...new Set(handles)] });
     const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name; for (const h of handles) if (!g.handles.includes(h)) g.handles.push(h);
   }
-  let msgCount = 0; const threadRows = [], msgRows = [];
+  let msgCount = 0, mediaCount = 0; const threadRows = [], msgRows = [];
   const P = await loadPeople();
+  if (!DRY) await loadMediaKnown();
   for (const g of groups.values()) {
     const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
-        (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes
+        (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes,
+        (select group_concat(a.filename, char(10)) from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID and a.hide_attachment = 0 order by a.ROWID) as files
       from message m join chat_message_join cm on cm.message_id = m.ROWID left join handle h on h.ROWID = m.handle_id
       where cm.chat_id in (${g.chats.map((c) => c.id).join(",")}) and m.date > ${Math.floor(sinceNs)} and (m.item_type = 0 or m.item_type is null) order by m.date`);
     let last = null, lastChat = null;
     for (const m of rows) {
       const text = bodyText(m.body, m.text);
       const mime = (m.mimes || "").split(",")[0];
-      const attachment = m.att ? { kind: /^image\//.test(mime) ? "photo" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "file", label: mime ? mime.split("/")[1] : "attachment" } : null;
+      let attachment = m.att ? { kind: /^image\//.test(mime) ? "photo" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "file", label: mime ? mime.split("/")[1] : "attachment" } : null;
       lastChat = m.chat;
       if (!text && !attachment) continue;
+      // media: copy once; afterwards the stored attachment (with its path) is kept as it is
+      if (attachment && !DRY) {
+        const known = mediaKnown.get(m.guid);
+        if (known?.path || known?.skipped) attachment = known;
+        else if (m.files) {
+          const first = m.files.split("\n")[0]; const mimes = (m.mimes || "").split(",");
+          try { const media = await putMedia(m.guid, 0, { filename: first, mime_type: mimes[0] }); if (media) { attachment = media; mediaKnown.set(m.guid, media); mediaCount++; } }
+          catch (e) { console.error(`${now()} media ${m.guid}: ${String(e.message).slice(0, 120)}`); }
+        }
+      }
       const row = { id: m.guid, thread_id: g.id, person: PERSON, sender: m.me ? ME : nameOf(m.sender), is_me: !!m.me, at: toIso(m.date), text: text || null, attachment };
       msgRows.push(row); last = row; msgCount++;
     }
@@ -263,7 +319,7 @@ async function main() {
       last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME,
       is_family: g.isFamily, handles: g.handles, avatars: Object.fromEntries(g.members.filter((m) => P.photos.has(m)).map((m) => [m, P.photos.get(m)])) });
   }
-  console.log(`${now()} ${threadRows.length} threads (${threadRows.filter((t) => t.is_family).length} family, ${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
+  console.log(`${now()} ${threadRows.length} threads (${threadRows.filter((t) => t.is_family).length} family, ${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${mediaCount ? `, ${mediaCount} media copied` : ""}${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }
 
   familyChats = family; threadGroups = groups;
@@ -280,9 +336,13 @@ async function main() {
   for (let i = 0; i < fresh_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", fresh_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < old_t.length; i += 50) await rest("POST", "messages_threads?on_conflict=id", old_t.slice(i, i + 50), { Prefer: "resolution=merge-duplicates,return=minimal" });
   for (let i = 0; i < msgRows.length; i += 200) await rest("POST", "messages?on_conflict=id", msgRows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
-  // mirror copies only: a thread this pass did not touch has left the window (or Messages); its lines go with it (cascade)
+  // mirror copies only: a thread this pass did not touch has left the window (or Messages); its lines go with it (cascade).
+  // Media copies for lines leaving the window are removed from the bucket first (they are copies; Messages keeps the originals).
+  const staleThreads = (await rest("GET", `messages_threads?person=eq.${PERSON}&updated_at=lt.${encodeURIComponent(passStart)}&select=id`).catch(() => [])).map((t) => t.id);
+  for (const tid of staleThreads) await pruneMedia(await rest("GET", `messages?person=eq.${PERSON}&thread_id=eq.${encodeURIComponent(tid)}&attachment->>path=not.is.null&select=id,attachment`).catch(() => []));
   await rest("DELETE", `messages_threads?person=eq.${PERSON}&updated_at=lt.${encodeURIComponent(passStart)}`, undefined, { Prefer: "return=minimal" });
   const cutoff = new Date(Date.now() - DAYS * 86400e3).toISOString();
+  await pruneMedia(await rest("GET", `messages?person=eq.${PERSON}&attachment->>path=not.is.null&at=lt.${cutoff}&select=id,attachment`).catch(() => []));
   await rest("DELETE", `messages?person=eq.${PERSON}&at=lt.${cutoff}`, undefined, { Prefer: "return=minimal" });
 
   // judge the new lines (after the upserts, so a chip always points at a line the app can show)

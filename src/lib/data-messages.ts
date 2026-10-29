@@ -7,7 +7,7 @@ export type Thread = { id: string; kind: ThreadKind; name: string; members: stri
 export type MessageAction = { kind: "task_proposed" | "task_created" | "schedule_added"; label: string; status: "waiting" | "done"; requested_by: string; for_person: string };
 export type Message = {
   id: string; thread_id: string; sender: string; mine: boolean; at: string; text: string;
-  attachment?: { kind: "photo" | "link"; label: string } | null;
+  attachment?: { kind: "photo" | "gif" | "video" | "audio" | "file" | "link"; label: string; mime?: string; path?: string; bytes?: number; w?: number | null; h?: number | null; skipped?: string } | null;
   action?: MessageAction | null;                   // what the assistant did or proposed from this line
   assistant_kind?: "confirmation" | "command" | "answer" | "notice" | null; // F17 only
 };

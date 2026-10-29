@@ -101,10 +101,20 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
       {all.map((m) => (
         <div key={m.id} className={`flex flex-col gap-1 max-w-[82%] min-w-0 ${m.mine ? "self-end items-end" : "self-start"}`}>
           <div className="text-[11px] text-muted">{m.mine ? "You" : m.sender}{isAssistant && !m.mine ? " · AI" : ""} · {clock(m.at)}</div>
-          <div className={`px-3.5 py-2.5 text-sm max-w-full min-w-0 break-words [overflow-wrap:anywhere] whitespace-pre-wrap ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
-            {m.text}
-            {m.attachment && <div className={`text-xs mt-1 ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷 photo" : "🔗"} {m.attachment.label} · opens in Messages</div>}
-          </div>
+          {m.attachment?.path && (m.attachment.kind === "photo" || m.attachment.kind === "gif") && (
+            <a href={`/api/media/${m.attachment.path}`} target="_blank" rel="noreferrer" className={`block max-w-full overflow-hidden ${m.mine ? "rounded-[16px_16px_4px_16px]" : "rounded-[16px_16px_16px_4px]"} bg-soft`}>
+              <img src={`/api/media/${m.attachment.path}`} alt={m.attachment.kind === "gif" ? "GIF" : "Photo"} loading="lazy" width={m.attachment.w ?? undefined} height={m.attachment.h ?? undefined} className="block max-h-[360px] w-auto max-w-full object-contain" />
+            </a>
+          )}
+          {m.attachment?.path && m.attachment.kind === "video" && (
+            <video controls playsInline preload="metadata" src={`/api/media/${m.attachment.path}`} className={`block max-h-[360px] max-w-full bg-black ${m.mine ? "rounded-[16px_16px_4px_16px]" : "rounded-[16px_16px_16px_4px]"}`} />
+          )}
+          {(m.text || (m.attachment && !m.attachment.path)) && (
+            <div className={`px-3.5 py-2.5 text-sm max-w-full min-w-0 break-words [overflow-wrap:anywhere] whitespace-pre-wrap ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
+              {m.text}
+              {m.attachment && !m.attachment.path && <div className={`text-xs ${m.text ? "mt-1" : ""} ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷" : m.attachment.kind === "video" ? "🎬" : m.attachment.kind === "audio" ? "🎤" : "📎"} {m.attachment.skipped === "size" ? "large file" : m.attachment.label} · <a href="messages://" className="underline">open in Messages</a></div>}
+            </div>
+          )}
           {!m.mine && chipsFor(m.id).length > 0 && (
             <div className="flex flex-col gap-1.5 w-full">
               <button aria-label={open === m.id ? "Hide suggestions" : "Suggestions"} aria-expanded={open === m.id} onClick={() => setOpen(open === m.id ? null : m.id)}
