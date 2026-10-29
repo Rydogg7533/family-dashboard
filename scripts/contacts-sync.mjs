@@ -13,6 +13,7 @@
 // Passwords. It can be revoked there at any time, which stops the sync. Nothing here ever leaves the mini
 // except the cards themselves, posted to the household's own Supabase project.
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -125,7 +126,7 @@ function labelFrom(params, groupLabel) {
 }
 function parseVcard(text) {
   const lines = unfold(text).split("\n").filter(Boolean);
-  const card = { uid: null, full_name: "", first_name: null, last_name: null, nickname: null, org: null, phones: [], emails: [], addresses: [], birthday: null, notes: null };
+  const card = { uid: null, full_name: "", first_name: null, last_name: null, nickname: null, org: null, phones: [], emails: [], addresses: [], birthday: null, notes: null, photo: null };
   const groupLabels = {}; const pending = [];
   for (const line of lines) {
     const idx = line.indexOf(":"); if (idx < 0) continue;
@@ -143,6 +144,9 @@ function parseVcard(text) {
       case "BDAY": { const v = decodeValue(value, params).replace(/T.*$/, ""); card.birthday = /^\d{4}-?\d{2}-?\d{2}$/.test(v) ? v.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : (/^--?\d{2}-?\d{2}$/.test(v) ? v.replace(/^-?-?(\d{2})-?(\d{2})$/, "--$1-$2") : null); break; }
       case "TEL": { const number = decodeValue(value, params).replace(/^tel:/i, ""); pending.push({ kind: "phones", group, params, item: { number, digits: number.replace(/\D/g, "") } }); break; }
       case "EMAIL": pending.push({ kind: "emails", group, params, item: { address: decodeValue(value, params).toLowerCase() } }); break;
+      case "PHOTO": { // inline base64 (vCard 3: ENCODING=b / vCard 4: data: URI); a URL photo is left alone
+        const m = value.match(/^data:image\/\w+;base64,(.+)$/i); const b64 = m ? m[1] : (/ENCODING=b/i.test(params) ? value : null);
+        if (b64) card.photo = Buffer.from(b64.replace(/\s+/g, ""), "base64"); break; }
       case "ADR": { const [, , street, city, state, zip, country] = splitSemi(value); pending.push({ kind: "addresses", group, params, item: { street: street || "", city: city || "", state: state || "", zip: zip || "", country: country || "" } }); break; }
       default: break;
     }
@@ -150,6 +154,14 @@ function parseVcard(text) {
   for (const p of pending) card[p.kind].push({ label: labelFrom(p.params, p.group ? groupLabels[p.group] : null), ...p.item });
   if (!card.full_name) card.full_name = [card.first_name, card.last_name].filter(Boolean).join(" ") || card.org || "(no name)";
   return card;
+}
+
+// ---------- photos → private bucket avatars/<person>/<uid>.jpg ----------
+async function putPhoto(personId, uid, bytes) {
+  const path = `${personId}/${encodeURIComponent(uid)}.jpg`;
+  const r = await fetch(`${URL}/storage/v1/object/avatars/${path}`, { method: "POST", headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "image/jpeg", "x-upsert": "true" }, body: bytes });
+  if (!r.ok) throw new Error(`photo upload → ${r.status} ${(await r.text()).slice(0, 200)}`);
+  return path;
 }
 
 // ---------- per-person sync ----------
@@ -163,7 +175,7 @@ async function syncPerson(cfg, log) {
   const books = await findAddressbooks(cfg.user, cfg.pass);
   const existing = new Map();
   for (let from = 0; ; from += 1000) {
-    const page = await rest("GET", `contact_cards?person=eq.${person.id}&provider=eq.icloud&select=id,uid,etag,deleted_at`, undefined, { Range: `${from}-${from + 999}` });
+    const page = await rest("GET", `contact_cards?person=eq.${person.id}&provider=eq.icloud&select=id,uid,etag,deleted_at,photo_path,photo_hash`, undefined, { Range: `${from}-${from + 999}` });
     for (const r of page) existing.set(r.uid, r);
     if (page.length < 1000) break;
   }
@@ -175,13 +187,22 @@ async function syncPerson(cfg, log) {
     unchanged += listed.length - need.length;
     for (const e of existing.values()) if (listed.some((c) => c.etag === e.etag)) seen.add(e.uid);
     const fetched = need.length ? await fetchCards(book, need.map((c) => c.path), cfg.user, cfg.pass) : [];
-    const rows = [];
+    const rows = []; let photos = 0;
     for (const f of fetched) {
       const card = parseVcard(f.vcard);
       if (!card.uid) card.uid = f.path;
       seen.add(card.uid);
-      rows.push({ person: person.id, provider: "icloud", uid: card.uid, href: f.path, etag: f.etag, full_name: card.full_name, first_name: card.first_name, last_name: card.last_name, nickname: card.nickname, org: card.org, phones: card.phones, emails: card.emails, addresses: card.addresses, birthday: card.birthday, notes: card.notes, synced_at: new Date().toISOString(), deleted_at: null });
+      // photo: upload when new or changed (hash), keep the old path when the card lost its photo? no — a removed photo is removed here too
+      let photo_path = null, photo_hash = null;
+      if (card.photo) {
+        photo_hash = createHash("sha1").update(card.photo).digest("hex");
+        const prev = existing.get(card.uid);
+        if (prev?.photo_hash === photo_hash && prev.photo_path) photo_path = prev.photo_path;
+        else { try { photo_path = await putPhoto(person.id, card.uid, card.photo); photos++; } catch (e) { log.push(`photo for ${card.full_name}: ${e.message}`); photo_hash = null; } }
+      }
+      rows.push({ person: person.id, provider: "icloud", uid: card.uid, href: f.path, etag: f.etag, full_name: card.full_name, first_name: card.first_name, last_name: card.last_name, nickname: card.nickname, org: card.org, phones: card.phones, emails: card.emails, addresses: card.addresses, birthday: card.birthday, notes: card.notes, photo_path, photo_hash, synced_at: new Date().toISOString(), deleted_at: null });
     }
+    if (photos) log.push(`${person.display_name}: ${photos} photo(s) stored`);
     for (let i = 0; i < rows.length; i += 200) {
       await rest("POST", "contact_cards?on_conflict=person,uid", rows.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
       upserted += Math.min(200, rows.length - i);

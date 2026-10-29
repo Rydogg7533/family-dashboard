@@ -19,6 +19,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PERSON_FIELDS, personToCard, cardRow } from "./google-contacts-lib.mjs";
+import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry");
@@ -42,6 +43,18 @@ export async function rest(method, path, body, extra = {}) {
   return text ? JSON.parse(text) : null;
 }
 export const get = (p) => rest("GET", p);
+
+// Contact photos → the private avatars bucket (<person>/<uid>.jpg), same place the iCloud sync puts them.
+// Google's photo URL changes when the photo changes, so its hash is the change key; unchanged = no download.
+async function storePhoto(personId, uid, url) {
+  const r = await fetch(url.replace(/=s\d+(-c)?$/, "=s256-c"));
+  if (!r.ok) throw new Error(`photo download → ${r.status}`);
+  const bytes = Buffer.from(await r.arrayBuffer());
+  const path = `${personId}/${encodeURIComponent(uid)}.jpg`;
+  const u = await fetch(`${SUPABASE_URL}/storage/v1/object/avatars/${path}`, { method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": r.headers.get("content-type") || "image/jpeg", "x-upsert": "true" }, body: bytes });
+  if (!u.ok) throw new Error(`photo upload → ${u.status} ${(await u.text()).slice(0, 200)}`);
+  return path;
+}
 
 // ---------- Google People API ----------
 // One session for one person's saved contacts sign-in. A real answer from Google (4xx) is an error with .status and
@@ -112,7 +125,7 @@ async function syncPerson(conn, profile, log) {
   catch (e) { if (!isFull && isExpired(e)) { isFull = true; pulled = await pullConnections(api, null); } else throw e; }
   const existing = new Map();
   for (let from = 0; ; from += 1000) {
-    const page = await rest("GET", `contact_cards?person=eq.${conn.person}&provider=eq.google&select=id,uid,etag,deleted_at`, undefined, { Range: `${from}-${from + 999}` });
+    const page = await rest("GET", `contact_cards?person=eq.${conn.person}&provider=eq.google&select=id,uid,etag,deleted_at,photo_path,photo_hash`, undefined, { Range: `${from}-${from + 999}` });
     for (const r of page) existing.set(r.uid, r);
     if (page.length < 1000) break;
   }
@@ -123,6 +136,11 @@ async function syncPerson(conn, profile, log) {
     seen.add(p.resourceName);
     const card = personToCard(p); const e = existing.get(card.uid);
     if (e && !e.deleted_at && e.etag === card.etag) { unchanged++; continue; }
+    if (card.photo_url) {
+      card.photo_hash = createHash("sha1").update(card.photo_url).digest("hex");
+      if (e?.photo_hash === card.photo_hash && e.photo_path) card.photo_path = e.photo_path;
+      else if (!DRY) { try { card.photo_path = await storePhoto(conn.person, card.uid, card.photo_url); } catch (err) { log.push(`photo for ${card.full_name}: ${err.message}`); card.photo_hash = null; } }
+    }
     rows.push(cardRow(conn.person, card));
   }
   if (isFull) for (const e of existing.values()) if (!e.deleted_at && !seen.has(e.uid)) goneIds.push(e.id);

@@ -3,7 +3,7 @@
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export type ThreadKind = "assistant" | "group" | "direct";
-export type Thread = { id: string; kind: ThreadKind; name: string; members: string[]; last_line: string; last_at: string; unread: number; pending_yn: number; mirrored: boolean };
+export type Thread = { id: string; kind: ThreadKind; name: string; members: string[]; last_line: string; last_at: string; unread: number; pending_yn: number; mirrored: boolean; avatars?: Record<string, string> };
 export type MessageAction = { kind: "task_proposed" | "task_created" | "schedule_added"; label: string; status: "waiting" | "done"; requested_by: string; for_person: string };
 export type Message = {
   id: string; thread_id: string; sender: string; mine: boolean; at: string; text: string;
@@ -66,6 +66,7 @@ export async function getThreads(): Promise<Thread[]> {
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id), kind: r.kind as ThreadKind, name: String(r.name), members: (r.members as string[]) ?? [], last_line: String(r.last_line ?? ""), last_at: String(r.last_at),
     unread: unread.get(String(r.id)) ?? 0, pending_yn: Number(r.pending_yn ?? 0), mirrored: Boolean(r.mirrored),
+    avatars: Object.fromEntries(Object.entries((r.avatars as Record<string, string>) ?? {}).map(([k, v]) => [k, `/api/avatar/${v}`])),
   }));
 }
 

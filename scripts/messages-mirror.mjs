@@ -128,6 +128,23 @@ async function queueBubbles(msgRows, threadRows) {
   return fresh;
 }
 
+// ---- avatars: a family member's photo from the person's own Contacts (contact_cards.photo_path), matched by handle ----
+let avatarMap = null, avatarAt = 0; // name -> photo_path
+async function loadAvatars() {
+  if (avatarMap && Date.now() - avatarAt < 30 * 60e3) return avatarMap;
+  const map = {};
+  try {
+    const cards = await rest("GET", `contact_cards?person=eq.${PERSON}&deleted_at=is.null&photo_path=not.is.null&select=phones,emails,photo_path,provider`);
+    for (const [handle, name] of FAMILY) {
+      if (map[name]) continue;
+      const digits = handle.replace(/\D/g, ""), email = handle.includes("@") ? handle.toLowerCase() : null;
+      const hit = cards.find((c) => (email && (c.emails || []).some((e) => (e.address || "").toLowerCase() === email)) || (digits.length >= 7 && (c.phones || []).some((p) => (p.digits || "").endsWith(digits.slice(-10)))));
+      if (hit) map[name] = hit.photo_path;
+    }
+  } catch (e) { console.error(`${now()} avatars: ${String(e.message).slice(0, 120)}`); }
+  avatarMap = map; avatarAt = Date.now(); return map;
+}
+
 // ---- suggestion engine: one judgment per new inbound line, written to message_suggestions; the app shows the "shown" ones ----
 const AI_KEY = env.ANTHROPIC_API_KEY, SUGGEST = AI_KEY && (env.MIRROR_SUGGEST || "on") !== "off";
 const TZ = env.HOUSEHOLD_TZ || "America/Denver";
@@ -187,6 +204,7 @@ async function main() {
     const g = groups.get(id); g.chats.push(c); if (c.name && !g.name) g.name = c.name;
   }
   let msgCount = 0; const threadRows = [], msgRows = [];
+  const avatars = await loadAvatars();
   for (const g of groups.values()) {
     const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes
@@ -207,7 +225,8 @@ async function main() {
     sendTargets.set(g.id, target.guid);
     const unread = rows.filter((m) => !m.me && !m.read).length;
     threadRows.push({ id: g.id, person: PERSON, kind: g.kind, name: g.name || g.members.filter((x) => x !== ME).join(", "), members: [ME, ...g.members.filter((x) => x !== ME)],
-      last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME });
+      last_line: last ? (last.text || `[${last.attachment?.kind}]`).slice(0, 120) : null, last_at: last?.at ?? null, unread, pending_yn: 0, mirrored: true, updated_at: now(), for_person: ME,
+      avatars: Object.fromEntries(g.members.filter((m) => avatars[m]).map((m) => [m, avatars[m]])) });
   }
   console.log(`${now()} ${threadRows.length} family threads (${family.length} chats in Messages), ${msgCount} messages in ${DAYS} days${DRY ? " (dry: nothing written)" : ""}`);
   if (DRY) { for (const t of threadRows) console.log(`  ${t.kind.padEnd(6)} ${t.name}  (${t.members.join(", ")})  unread ${t.unread}`); return; }

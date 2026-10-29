@@ -42,7 +42,7 @@ export default async function Messages() {
             <li key={t.id}>
               <Link href={`/messages/${t.id}`} className="flex items-center gap-3 px-1 py-2.5 min-h-[68px] border-b border-line/60 hover:bg-soft/60 active:bg-soft">
                 <span className="relative shrink-0 w-3 flex justify-center">{t.unread > 0 && <span aria-label={`${t.unread} unread`} className="w-2.5 h-2.5 rounded-full bg-accent" />}</span>
-                <ThreadAvatar members={others} size={46} />
+                <ThreadAvatar members={others} photos={t.avatars} size={46} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className={`truncate text-[15px] ${t.unread > 0 ? "font-bold" : "font-semibold"}`}>{t.name}{t.kind === "assistant" && <span className="text-[11px] text-muted font-semibold ml-1">· AI</span>}</span>

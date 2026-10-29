@@ -5,7 +5,7 @@
 
 import { validate } from "./contacts-write-lib.mjs";
 
-export const PERSON_FIELDS = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,birthdays,biographies,metadata";
+export const PERSON_FIELDS = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,birthdays,biographies,metadata,photos";
 export const STANDARD_LABELS = ["mobile", "home", "work", "main", "other"];
 
 const WORDS_TO_TYPE = { "work mobile": "workMobile", "home fax": "homeFax", "work fax": "workFax", "other fax": "otherFax", "work pager": "workPager", "google voice": "googleVoice", pager: "pager" };
@@ -53,12 +53,14 @@ export function personToCard(p) {
     full_name: full, first_name: first, last_name: last,
     nickname: list(p.nicknames)[0]?.value || null, org, phones, emails, addresses,
     birthday: birthdayOf(p), notes: list(p.biographies)[0]?.value || null,
+    // the contact's own photo, not Google's letter placeholder; null when there is none
+    photo_url: list(p.photos).find((x) => x?.url && !x.default)?.url || null,
   };
 }
 
 // The row written to contact_cards. Every key is always present (PostgREST bulk upserts need uniform keys).
 export function cardRow(personId, c, now = new Date().toISOString()) {
-  return { person: personId, provider: "google", uid: c.uid, href: c.href, etag: c.etag, full_name: c.full_name, first_name: c.first_name, last_name: c.last_name, nickname: c.nickname, org: c.org, phones: c.phones, emails: c.emails, addresses: c.addresses, birthday: c.birthday, notes: c.notes, synced_at: now, deleted_at: null };
+  return { person: personId, provider: "google", uid: c.uid, href: c.href, etag: c.etag, full_name: c.full_name, first_name: c.first_name, last_name: c.last_name, nickname: c.nickname, org: c.org, phones: c.phones, emails: c.emails, addresses: c.addresses, birthday: c.birthday, notes: c.notes, photo_path: c.photo_path ?? null, photo_hash: c.photo_hash ?? null, synced_at: now, deleted_at: null };
 }
 
 // Existing entries are matched by label and value so a type Google already holds ("workMobile") is kept as it was.
