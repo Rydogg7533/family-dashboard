@@ -15,6 +15,9 @@ import { sampleTransactions, money, shortDate } from "@/lib/data-money";   // pr
 
 export type Tier = 1 | 2 | 3;
 export type EventDraft = { title: string | null; date: string | null; endDate: string | null; allDay: boolean; start: string | null; end: string | null; location: string | null; reminders: number[] | null; guests: string[] };
+// Any mention of a sitter. Used twice: to keep the ask off the calendar path, and to point the model at sitter.find.
+const SITTER_WORDS = /\b(baby)?sitters?\b|\bbabysit(ting)?\b|\bnanny\b/i;
+
 export type AskReply = {
   kind: "answer" | "instruction" | "clarify" | "scope_check" | "deflect" | "inbox" | "structured" | "event_clarify" | "event_confirm" | "event_conflict" | "event_move" | "tool_confirm";
   feedId?: string | null;                               // this proposal's row in the Assistant feed
@@ -70,7 +73,11 @@ export async function answerAsk(thread: Turn[], assistantApp = "claude", assista
   // 2) Haiku decides what kind of input this is (one small call).
   const cls = await callModel({ job: "classify", feature: "ask-intent", maxTokens: 60, messages: [{ role: "user", content: `Classify this input to a family-management assistant. Reply with one word: question, instruction, clarify_reply, offscope, or event. Use event only when the person wants something on the calendar AND names a day or time (an appointment, meeting, trip, "remind me at 3", "schedule for Friday", "put X on the 14th"). "Remind me to X" or "add X" with no day or time is an instruction (it becomes a task), not an event. Saving a confirmation number, receipt, record, bill or document is an instruction even when it mentions a date: the date belongs to the record, not the calendar. A medication with a dose time ("melatonin at 8"), a recurring bill, or a task with a due date is an instruction too. Event means the person wants an appointment, meeting, trip or timed reminder on the calendar. Anything about a sitter or babysitter (needing one, booking one, who is sitting, sitter instructions, adding a sitter) is an instruction or a question, never an event, even with a day and time. Input: """${q}"""` }], system: SCOPE_SYSTEM_PROMPT });
   const intent = cls.text.trim().toLowerCase();
-  if (intent.startsWith("event") && !last?.files?.length) return eventTurn(thread);
+  // A sitter ask never goes down the calendar path, whatever the classifier said. The prompt already tells it so,
+  // but a model call is a probability; "Create instructions for the Babysitter for Friday" still came back as an
+  // event and hit the overlap check (issue b7202c54). This is the deterministic half of that rule.
+  const aboutSitter = SITTER_WORDS.test(q);
+  if (intent.startsWith("event") && !last?.files?.length && !aboutSitter) return eventTurn(thread);
   if (intent.startsWith("offscope") && !last?.files?.length) return { ...deflect(assistantApp, q, assistantUrl), cost: cls.cost, costText: `this answer ~${formatCost(cls.cost)}`, model: cls.model };
 
   // 3) Sonnet, with the registry attached (D80). It reads with the read tools as often as it needs, and the
@@ -79,7 +86,10 @@ export async function answerAsk(thread: Turn[], assistantApp = "claude", assista
   // confirmed and dropped, which is what the old regex route did.
   const ctx = await toolCtx();
   const specs = TOOLS.map(toolSpec);
-  const system = SCOPE_SYSTEM_PROMPT + `
+  const sitterHint = aboutSitter ? `
+
+THIS INPUT IS ABOUT A SITTER. Read sitter.find first, before any calendar tool. A calendar event called "Babysitter" is a sitter visit: sitter.find gives who is sitting, her phone, and the event she was booked for (around); answer from those fields, never from the calendar event's location text. For instructions, use the sitter sheet tools (sitter.sheet, sitter.plan, sitter.addLine, sitter.confirm).` : "";
+  const system = SCOPE_SYSTEM_PROMPT + sitterHint + `
 
 You have tools for the things this household's app can do. Today is ${ctx?.today ?? "unknown"} in ${ctx?.tz ?? "the household's time zone"}.
 - Look things up with the read tools before answering. Never guess a number, a date or a name you have not read.

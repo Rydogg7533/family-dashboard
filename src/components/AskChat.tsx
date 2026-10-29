@@ -58,6 +58,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
     ro.observe(el); return () => ro.disconnect();
   }, [embedded]);
   const endRef = useRef<HTMLDivElement>(null);
+  const lastRef = useRef<HTMLDivElement>(null);     // the newest bubble: a reply taller than the screen is shown from its top
   const sent = useRef(false);
   const restored = useRef(false);
   // Stop / edit-and-rerun (Ryan, 2026-10-27 20:37). A request is a generation; Stop bumps it and the late reply is dropped.
@@ -91,9 +92,25 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
   // enough on a phone: the reply can grow after it lands (result line, link, card) and the keyboard closing resizes the
   // viewport a moment later. So scroll now, again over the next ~1.5 s, and whenever the visual viewport changes size
   // shortly after a change. The person scrolling up on purpose is not fought: the retries stop once their window ends.
+  // A reply that fits is shown with its end in view; one taller than the space between the header and the composer is
+  // shown from its START, so it reads top to bottom (Ryan, 2026-10-29 12:17: "I still have to scroll up sometimes when a
+  // request completes" -- scrolling to the end of a long answer put its first lines above the fold). The bubbles carry a
+  // scroll-margin for the fixed header so "start" is not hidden under it.
   const firstScroll = useRef(true);
   useBeforePaint(() => {
-    const toEnd = () => endRef.current?.scrollIntoView({ block: "end" });
+    const toEnd = () => {
+      const el = lastRef.current;
+      if (el) {
+        const scroller = embedded ? el.closest(".overflow-y-auto") : null;
+        const vv = typeof window !== "undefined" ? window.visualViewport : null;
+        const main = embedded ? null : document.querySelector("main");
+        const header = main ? parseFloat(getComputedStyle(main).paddingTop) || 0 : 0;   // the fixed top bar plus the safe area, as the page reserves it
+        const bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-bottom")) || 0;
+        const avail = scroller ? scroller.clientHeight : (vv?.height ?? window.innerHeight) - header - composerH - bar;
+        if (el.getBoundingClientRect().height > avail - 24) { el.scrollIntoView({ block: "start" }); return; }
+      }
+      endRef.current?.scrollIntoView({ block: "end" });
+    };
     // Opening: land at the bottom in the first frame and stop. The retries below are for a reply that is still
     // growing; on open they just made the thread jump for a second and a half.
     if (firstScroll.current) { firstScroll.current = false; toEnd(); return; }
@@ -104,7 +121,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
     const onResize = () => { if (Date.now() < until) toEnd(); };
     vv?.addEventListener("resize", onResize);
     return () => { timers.forEach(clearTimeout); vv?.removeEventListener("resize", onResize); };
-  }, [bubbles, busy]);
+  }, [bubbles, busy]);   // composerH and embedded are read, not watched: a composer resize must not re-scroll the thread
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 10_000); return () => clearTimeout(t); }, [toast]);
 
   // One tap files the miss with its trace; the maintainer reads the issue, fixes it, and the question joins the set.
@@ -295,7 +312,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
         {/* The accent colour is for things you can tap (Ryan, 2026-10-28): your own words are a quiet bubble on the right, so a
             request never looks like a button next to the card that answers it. */}
         {bubbles.map((b, i) => b.role === "user" ? (
-          <div key={i} className="self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5">
+          <div key={i} ref={i === bubbles.length - 1 ? lastRef : undefined} className={`self-end max-w-[85%] min-w-0 flex flex-col items-end gap-0.5 ${embedded ? "" : "scroll-mt-[calc(44px+env(safe-area-inset-top)+16px)]"}`}>
             <button type="button" onClick={() => edit(i)} title="Edit and resend" className={`text-left rounded-[22px] rounded-br-lg px-[18px] py-3 text-[17px] leading-[1.45] whitespace-pre-wrap [overflow-wrap:anywhere] ${editing === i ? "bg-soft text-fg border border-accent" : "bg-soft text-fg border border-line"}`}>{b.text}</button>
             {b.files?.length ? <div className="text-[11px] text-muted px-1">📎 {b.files.map((f) => f.name).join(", ")}</div> : null}
             {editing === i && <div className="text-[11px] text-muted px-1">Editing · Send replaces this and what followed · <button type="button" onClick={() => { setEditing(null); setInput(""); }} className="font-semibold text-accent">cancel</button></div>}
@@ -304,7 +321,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
         ) : (
           // min-w-0 and overflow-wrap:anywhere on the bubble: a folder path, an order number or a link has no
           // spaces to break at, and without these a flex child grows to fit it and the text runs past the card.
-          <div key={i} className="self-start w-full max-w-[92%] min-w-0 flex flex-col gap-1.5">
+          <div key={i} ref={i === bubbles.length - 1 ? lastRef : undefined} className={`self-start w-full max-w-[92%] min-w-0 flex flex-col gap-1.5 ${embedded ? "" : "scroll-mt-[calc(44px+env(safe-area-inset-top)+16px)]"}`}>
             <AnswerText text={b.text} muted={b.reply?.kind === "deflect"} />
             {b.reply?.kind === "tool_confirm" && b.reply.tool && b.reply.tool.tier === 3 && (
               b.toolResult
@@ -364,7 +381,8 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
           </div>
         ))}
         {busy && <div className="self-start card text-sm text-muted flex items-center gap-3"><span>Thinking…</span><button type="button" onClick={stop} className="min-h-9 px-3 rounded-full border border-line text-xs font-semibold text-fg">Stop</button></div>}
-        {!embedded && <div aria-hidden style={{ height: composerH }} />}
+        {/* Everything fixed at the bottom -- the composer and the tab bar under it -- so "scroll to the end" lands above both. */}
+        {!embedded && <div aria-hidden style={{ height: `calc(${composerH}px + var(--bar-bottom))` }} />}
         <div ref={endRef} />
       </div>
 
