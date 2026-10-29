@@ -35,8 +35,10 @@ export default async function Health() {
       <H1>System health</H1>
       <div className="mb-4"><Banner level={o.level} text={o.text} /></div>
       <div className="text-xs text-muted mb-4">Server region: <span className="font-semibold text-fg">{process.env.VERCEL_REGION ?? "local"}</span> (the database is in us-west-1; sfo1 is next to it) · version {(process.env.VERCEL_GIT_COMMIT_SHA ?? "dev").slice(0, 7)}</div>
+      {/* Healthy checks roll up into one fold; only what needs a look gets a card (Ryan, 2026-10-29). */}
+      {rows.filter((s) => s.state !== "ok").length === 0 && <Card className="text-sm text-muted">Everything is healthy.</Card>}
       <div className="flex flex-col gap-2">
-        {rows.map((s) => (
+        {rows.filter((s) => s.state !== "ok").map((s) => (
           <Card key={s.key}>
             <div className="flex justify-between items-center gap-2">
               <div className="font-semibold">{names[s.key] ?? (s.key.startsWith("location_gap_") ? "Location reporting" : s.key)}</div>
@@ -51,6 +53,25 @@ export default async function Health() {
           </Card>
         ))}
       </div>
+      {rows.some((s) => s.state === "ok") && (
+        <div className="mt-2">
+          <Fold id="health-ok" title="Healthy" summary={`${rows.filter((s) => s.state === "ok").length}`}>
+            <div className="flex flex-col gap-2">
+              {rows.filter((s) => s.state === "ok").map((s) => (
+                <Card key={s.key}>
+                  <div className="flex justify-between items-center gap-2">
+                    <div className="font-semibold">{names[s.key] ?? (s.key.startsWith("location_gap_") ? "Location reporting" : s.key)}</div>
+                    <Chip status={s.state} />
+                  </div>
+                  <div className="text-sm mt-1">{s.summary}</div>
+                  {s.detail && <div className="text-xs text-muted mt-1">{s.detail}</div>}
+                  <div className="text-xs text-muted mt-1">updated {ago(s.updated_at)}</div>
+                </Card>
+              ))}
+            </div>
+          </Fold>
+        </div>
+      )}
       <p className="text-xs text-muted mt-4">Red if the Mac mini has not reported in {HEARTBEAT_MAX_HOURS} hours (asleep, offline, or the 8TB unplugged).</p>
 
       <div className="flex justify-between items-center mt-8 mb-2">
