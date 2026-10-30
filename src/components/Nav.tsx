@@ -51,14 +51,28 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
   // Typing: the bar leaves while a text field has focus, so the compose box sits straight on the keyboard the way every
   // messaging app does, and nothing sits where thumbs reach for the top keyboard row. It returns the moment focus leaves.
   // A short delay on blur covers focus hopping between two fields without the bar bouncing.
+  // Issue 2026-10-30 (Ryan, in chat): after leaving the app and coming back, the bar would not tap or scroll. iPhone
+  // restores focus to the last field on return without raising the keyboard, so "a field has focus" alone left the bar
+  // slid away (pointer-events: none) under a stale paint of itself. Typing now means a field has focus AND the visual
+  // viewport has actually shrunk for a keyboard; the state is re-derived on every return (visibilitychange, pageshow).
   const [typing, setTyping] = useState(false);
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const isField = (el: EventTarget | null) => el instanceof HTMLElement && (el.matches("input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable='true']"));
-    const onIn = (e: FocusEvent) => { if (isField(e.target)) { clearTimeout(t); setTyping(true); } };
+    // Baseline is the tallest viewport seen with no field focused (layout.tsx sets interactiveWidget=resizes-content, so
+    // window.innerHeight shrinks with the keyboard too and cannot be the reference).
+    const vh = () => window.visualViewport?.height ?? window.innerHeight;
+    let tallest = vh();
+    const measure = () => { if (!isField(document.activeElement)) tallest = Math.max(tallest, vh()); };
+    const derive = () => { measure(); setTyping(isField(document.activeElement) && tallest - vh() > 120); };
+    const onIn = (e: FocusEvent) => { if (isField(e.target)) { clearTimeout(t); t = setTimeout(derive, 150); } };
     const onOut = (e: FocusEvent) => { if (isField(e.target)) { clearTimeout(t); t = setTimeout(() => setTyping(false), 120); } };
+    const onBack = () => { clearTimeout(t); derive(); };
+    const v = window.visualViewport;
     document.addEventListener("focusin", onIn); document.addEventListener("focusout", onOut);
-    return () => { clearTimeout(t); document.removeEventListener("focusin", onIn); document.removeEventListener("focusout", onOut); };
+    document.addEventListener("visibilitychange", onBack); window.addEventListener("pageshow", onBack);
+    v?.addEventListener("resize", derive);
+    return () => { clearTimeout(t); document.removeEventListener("focusin", onIn); document.removeEventListener("focusout", onOut); document.removeEventListener("visibilitychange", onBack); window.removeEventListener("pageshow", onBack); v?.removeEventListener("resize", derive); };
   }, []);
   useEffect(() => {
     // Keep fixed elements (compose bar, + button) flush with the real tab bar height — 0 while it is away.
@@ -111,7 +125,7 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
   // More is pinned at the right edge; the other tabs scroll behind it when there are more than fit.
   // .tabbar / .tabbar-wrap / .tabbar-pill are styled in globals.css and follow Look and feel (strip or floating island).
   return (
-    <nav ref={navRef} aria-hidden={typing || undefined} className={`tabbar-wrap fixed bottom-0 inset-x-0 transition-transform duration-200 ${typing ? "translate-y-full pointer-events-none" : ""}`}>
+    <nav ref={navRef} aria-hidden={typing || undefined} className={`tabbar-wrap fixed bottom-0 inset-x-0 z-30 transition-transform duration-200 ${typing ? "translate-y-full pointer-events-none" : ""}`}>
       <div className="tabbar max-w-md mx-auto">
         <div className="tabbar-row flex items-stretch px-2 pb-[max(16px,env(safe-area-inset-bottom))] text-[11px] font-semibold">
           <div ref={rowRef} className={`flex flex-1 min-w-0 ${scrolls ? "overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
