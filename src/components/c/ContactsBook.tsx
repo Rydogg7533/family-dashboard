@@ -1,4 +1,5 @@
 "use client";
+import { scrollTo, scrollY } from "@/lib/scroller";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ContactCard } from "@/lib/data-registers";
 import { groupLetter, matches, sortKey } from "@/lib/contact-search";
@@ -20,7 +21,7 @@ function IndexRail({ present, stickTop }: { present: string[]; stickTop: number 
     if (hit === last.current) return;
     last.current = hit; setCur(hit);
     const sec = document.getElementById(`g-${hit}`);
-    if (sec) window.scrollTo(0, Math.max(0, sec.getBoundingClientRect().top + window.scrollY - (stickTop - 1)));   // measured, not assumed: the letter lands flush under the pinned bar
+    if (sec) scrollTo(Math.max(0, sec.getBoundingClientRect().top + scrollY() - (stickTop - 1)));   // measured, not assumed: the letter lands flush under the pinned bar
   };
   const end = () => { last.current = null; setCur(null); };
   return (

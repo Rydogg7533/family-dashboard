@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ReportIssueSheet } from "@/components/ReportIssue";
 import { AskSheet } from "@/components/AskSheet";
 import { Mic } from "lucide-react";
+import { onScroll, scrollY } from "@/lib/scroller";
 
 // Floating "+" on every working page: the handful of things done often from anywhere. Frequency earns a slot here
 // (a calendar event is daily; adding a device is twice a year and stays a button on its own page). Ask itself is the Ask tab (one tap).
@@ -23,10 +24,9 @@ export function QuickBar({ who = "You", sample = false }: { who?: string; sample
   }, [plus]);
   // Slides out of the way when you scroll down (so it never covers a button); a little scroll up, or the top of the page, brings it back.
   useEffect(() => {
-    let last = window.scrollY;
-    const on = () => { const y = window.scrollY; if (y > last + 8 && y > 80) setAway(true); else if (y < last - 8 || y <= 80) setAway(false); last = y; };
-    window.addEventListener("scroll", on, { passive: true });
-    return () => window.removeEventListener("scroll", on);
+    let last = scrollY();
+    const on = () => { const y = scrollY(); if (y > last + 8 && y > 80) setAway(true); else if (y < last - 8 || y <= 80) setAway(false); last = y; };
+    return onScroll(on);
   }, []);
   // No + on a conversation: the compose bar owns the bottom edge there.
   if (isFrameless(path) || path.startsWith("/ask") || /^\/messages\/[^/]+$/.test(path)) return null;

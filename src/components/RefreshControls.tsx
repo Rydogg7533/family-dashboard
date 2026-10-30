@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { scrollY } from "@/lib/scroller";
 
 // Re-reads the current page from the server (and drops every preloaded page) so the newest data shows.
 export function useRefresh() {
@@ -29,8 +30,8 @@ export function PullToRefresh() {
   useEffect(() => {
     standalone.current = window.matchMedia?.("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
     if (!standalone.current) return;
-    const down = (e: TouchEvent) => { start.current = window.scrollY <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null; };
-    const move = (e: TouchEvent) => { if (start.current == null) return; const d = e.touches[0].clientY - start.current; if (d > 0 && window.scrollY <= 0) setPull(Math.min(d * 0.5, 70)); else if (d <= 0) setPull(0); };
+    const down = (e: TouchEvent) => { start.current = scrollY() <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null; };
+    const move = (e: TouchEvent) => { if (start.current == null) return; const d = e.touches[0].clientY - start.current; if (d > 0 && scrollY() <= 0) setPull(Math.min(d * 0.5, 70)); else if (d <= 0) setPull(0); };
     const up = () => { if (start.current != null && pull >= 55) refresh(); start.current = null; setPull(0); };
     document.addEventListener("touchstart", down, { passive: true });
     document.addEventListener("touchmove", move, { passive: true });

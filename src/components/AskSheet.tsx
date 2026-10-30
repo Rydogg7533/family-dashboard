@@ -1,4 +1,5 @@
 "use client";
+import { scrollTo, scrollY } from "@/lib/scroller";
 import { useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import { useBeforePaint } from "@/lib/use-before-paint";
 import { usePathname } from "next/navigation";
@@ -37,11 +38,12 @@ export function AskSheet({ open, onClose, who, sample, voice = false }: { open: 
   // body is pinned (position:fixed at its current scroll) and put back when the sheet closes.
   useBeforePaint(() => {
     if (!open) return;
-    const y = window.scrollY;
+    // The page column is the scroller now (src/lib/scroller.ts): remember its position; the body sits at 0 already.
+    const y = scrollY();
     const b = document.body.style;
     const h = document.documentElement.style;
     const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width, htmlOverflow: h.overflow };
-    b.position = "fixed"; b.top = `-${y}px`; b.left = "0"; b.right = "0"; b.width = "100%";
+    b.position = "fixed"; b.top = "0"; b.left = "0"; b.right = "0"; b.width = "100%";
     // The root too: pinning the body alone still let iPhone Safari pan the page when the keyboard opened, and that
     // pan is visible through the scrim at the top of the screen -- which is the shake (Ryan's recording, 2026-10-28:
     // the top 290px, which the sheet never reaches, changes across eleven frames as the keyboard arrives).
@@ -57,7 +59,7 @@ export function AskSheet({ open, onClose, who, sample, voice = false }: { open: 
     }
     const prevVis = hidden.map((el) => el.style.visibility);
     for (const el of hidden) el.style.visibility = "hidden";
-    return () => { hidden.forEach((el, i) => { el.style.visibility = prevVis[i]; }); b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; h.overflow = prev.htmlOverflow; window.scrollTo(0, y); };
+    return () => { hidden.forEach((el, i) => { el.style.visibility = prevVis[i]; }); b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width; h.overflow = prev.htmlOverflow; scrollTo(y); };
   }, [open]);
   // With the keyboard up, iPhone Safari shrinks the visual viewport but not the layout one, so a plain fixed
   // overlay leaves a strip of page showing between the input and the keyboard. The overlay follows the visual

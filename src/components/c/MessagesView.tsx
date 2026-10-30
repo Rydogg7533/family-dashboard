@@ -2,6 +2,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { pendingLines, sendLine, takeSuggestion, ignoreSuggestion, setThreadSwitch } from "@/app/messages/actions";
 import { useRouter } from "next/navigation";
+import { scrollHeight, scrollTo } from "@/lib/scroller";
 import type { Confirmation, Message, Suggestion, Thread } from "@/lib/data-messages";
 import { clock } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
@@ -57,7 +58,7 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
 
   // Lines queued here show as "sending…" until the Mac has sent them through Messages and the mirror has read them back.
   // Open at the latest line, like Messages.
-  useEffect(() => { window.scrollTo({ top: document.documentElement.scrollHeight }); }, [thread.id]);
+  useEffect(() => { scrollTo(scrollHeight()); }, [thread.id]);
   // New lines in this thread arrive over Realtime (owner-only rows): refresh the moment the mirror writes one, and
   // clear the "Sending…" placeholder for a line of mine that has come back as a real message.
   useEffect(() => {
@@ -67,7 +68,7 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
       const row = p.new as { is_me?: boolean; text?: string | null };
       if (row.is_me) setWaiting((w) => w.filter((x) => x.text !== row.text));
       router.refresh();
-      setTimeout(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }), 150);
+      setTimeout(() => scrollTo(scrollHeight(), "smooth"), 150);
     }).subscribe();
     return () => { sb?.removeChannel(ch); };
   }, [thread.id, router]);
