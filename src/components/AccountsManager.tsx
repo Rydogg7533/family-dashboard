@@ -8,6 +8,7 @@ const KINDS = [["credit", "Credit card"], ["checking", "Checking"], ["savings", 
 const DELIVERY = [["email_pdf", "Emailed with the PDF attached"], ["email_link", "Emailed, link only"], ["upload", "I download and upload it"]] as const;
 // The same rule saveAccount uses to name a new account (and so its statement folder).
 const folderFor = (institution: string, last4: string) => (`${institution.trim().slice(0, 40)}-${last4.replace(/\D/g, "").slice(-4)}`).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "name-and-last-four";
+const OTHER = "__other__";
 const blank: AccountInput = { kind: "credit", institution: "", last4: "", owner: "Joint", entity: "Personal", statement_arrival_day: null, statement_delivery: "email_pdf" };
 
 export function AccountsManager({ accounts, owners }: { accounts: Account[]; owners: string[] }) {
@@ -15,6 +16,8 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
   const [form, setForm] = useState<AccountInput | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const entityOptions = ["Personal", "Business"];
+  const entityChoice = form && entityOptions.includes(form.entity) ? form.entity : OTHER;   // any other saved entity shows under "Other…" with its name
   const edit = (a: Account) => setForm({ id: a.id, kind: a.kind, institution: a.institution, last4: a.last4, owner: a.owner, entity: a.entity, statement_arrival_day: a.statement_arrival_day ?? null, statement_delivery: a.statement_delivery ?? "email_pdf" });
   const save = async () => { if (!form) return; setBusy(true); setErr(null); const x = await saveAccount(form); setBusy(false); if (x.ok) { setForm(null); router.refresh(); } else setErr(x.error ?? "Could not save."); };
   const field = "min-h-10 rounded-lg border border-line bg-bg px-3 text-sm";
@@ -33,7 +36,7 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
       {!form && <button onClick={() => setForm({ ...blank })} className="min-h-11 rounded-xl border border-line font-semibold text-accent">+ Add an account</button>}
       {form && (
         <div className="card flex flex-col gap-2">
-          <div className="flex flex-wrap gap-1.5">{KINDS.map(([k, l]) => <button key={k} onClick={() => setForm({ ...form, kind: k })} className={`min-h-9 px-3 rounded-full text-sm font-semibold ${form.kind === k ? "bg-accent text-white" : "border border-line"}`}>{l}</button>)}</div>
+          <select aria-label="Account type" className={field} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as AccountInput["kind"] })}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <input className={field} placeholder="Name, e.g. Apple Card, Chase Sapphire, Wells Fargo checking" value={form.institution} onChange={(e) => setForm({ ...form, institution: e.target.value })} />
           <div className="flex gap-2">
             <input className={`${field} flex-1`} inputMode="numeric" maxLength={4} placeholder="Last four" value={form.last4} onChange={(e) => setForm({ ...form, last4: e.target.value.replace(/\D/g, "") })} />
@@ -41,8 +44,11 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
           </div>
           <div className="flex gap-2">
             <select className={`${field} flex-1`} value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}><option>Joint</option>{owners.map((o) => <option key={o}>{o}</option>)}</select>
-            <input className={`${field} flex-1`} placeholder="Entity (Personal, Veil Labs…)" value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })} />
+            <select aria-label="Entity" className={`${field} flex-1`} value={entityChoice} onChange={(e) => setForm({ ...form, entity: e.target.value === OTHER ? "" : e.target.value })}>
+              {entityOptions.map((o) => <option key={o}>{o}</option>)}<option value={OTHER}>Other…</option>
+            </select>
           </div>
+          {entityChoice === OTHER && <input className={field} placeholder="Name the entity, e.g. Veil Labs" value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })} />}
           <div className="flex flex-col gap-1">{DELIVERY.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" checked={form.statement_delivery === k} onChange={() => setForm({ ...form, statement_delivery: k })} />{l}</label>)}</div>
           <p className="text-xs text-muted">
             {form.id
