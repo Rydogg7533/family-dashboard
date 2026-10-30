@@ -12,7 +12,7 @@ import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
 import { vehicleLines, lineLabel, type Line } from "@/lib/receipt-lines";
-import { matchAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; vehicle_pick?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
@@ -44,7 +44,7 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   if (r.kind === "statement") {
     const { data: accts } = await sb.from("accounts").select("id,institution,last4,retired_at");
     const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
-    const acct = accountFromAnswer(list, answer) ?? matchAccount(list, r.card_last4);
+    const acct = accountFromAnswer(list, answer) ?? resolveAccount(list, r.card_last4, (r as { file_name_hint?: string }).file_name_hint ?? row.file_path)?.acct ?? null;
     if (!acct) {
       await sb.from("inbox_items").update({ missing: "Which account is this statement for?", options: [...list.map((a) => `${a.institution} ····${a.last4}`), "Something else"] }).eq("id", inboxId);
       return { ok: true, summary: "Which account is it for?", kept: true };

@@ -5,12 +5,12 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxItem, DecidedItem, PaidWithContext } from "@/lib/data-inbox";
 import { SKIP, CLEAR } from "@/lib/paid-with";
 import { destination, folderWarnings, isFiledByCard, type DestRead } from "@/lib/destination";
-import { NOT_VEHICLE } from "@/lib/inbox-answers";
+import { NOT_VEHICLE, FILE_YES } from "@/lib/inbox-answers";
 import { NeededToContinue } from "@/components/c/NeededToContinue";
 import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture, sweepRuleAnswered } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, fileMatchedStatements, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
@@ -72,6 +72,9 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
     });
   }
 
+  const matchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && i.options.length === 2 && i.options[0] === FILE_YES).length;
+  const [filingAll, setFilingAll] = useState(false);
+
   return (
     <>
       {capture && <CapturePanel kind={capture} claimId={claimId ?? null} onDone={(n) => setToast({ text: `${n} item${n === 1 ? "" : "s"} received. Saved. Anything unclear appears below as one question.` })} />}
@@ -83,6 +86,11 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
+        {matchedStatements > 1 && (
+          <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); router.refresh(); }); }} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold disabled:opacity-50">
+            {filingAll ? "Filing…" : `File all matched statements (${matchedStatements})`}
+          </button>
+        )}
         <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2" role="group" aria-label="Filter by status">
           {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["skipped", "Skipped"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || id === st || stCount[id] > 0).map(([id, label]) => (
             <button key={id} onClick={() => { setSt(id); setKd("all"); setShowAll(false); }} aria-pressed={st === id} className={`px-3 py-1.5 rounded-full min-h-9 ${st === id ? "bg-accent text-white" : "bg-soft"}`}>{label} <b>{stCount[id]}</b></button>

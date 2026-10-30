@@ -1,0 +1,22 @@
+// Matching a statement to an account: printed last four first, then a 4-digit group in the file name.
+import { accountFromFileName, resolveAccount } from "../src/lib/statement-match.ts";
+let bad = 0;
+const eq = (n, a, b) => { if (a !== b) { bad++; console.log(`FAIL ${n}: got ${a}, want ${b}`); } };
+const A = (id, last4, retired_at = null) => ({ id, institution: id, last4, retired_at });
+const accts = [A("sav-5761", "5761"), A("biz-1128", "1128"), A("biz-1295", "1295"), A("chk-0848", "0848"), A("visa-6006", "6006"), A("old-7777", "7777", "2026-01-01")];
+const id = (x) => x?.id ?? null;
+eq("name group", id(accountFromFileName(accts, "abc123-5761 - 123456 WellsFargo.pdf")), "sav-5761");
+eq("with folders", id(accountFromFileName(accts, "u/2026/x/ab-1128 - 000001 WellsFargo.pdf.pdf")), "biz-1128");
+eq("year ignored", id(accountFromFileName([A("y-2026", "2026")], "Statement 2026-10.pdf")), null);
+eq("two accounts = none", id(accountFromFileName(accts, "5761 and 1128.pdf")), null);
+eq("same account twice ok", id(accountFromFileName(accts, "5761 copy 5761.pdf")), "sav-5761");
+eq("retired ignored", id(accountFromFileName(accts, "x-7777 - 1.pdf")), null);
+eq("longer digit run ignored", id(accountFromFileName(accts, "x-157611.pdf")), null);
+eq("digits inside an id prefix ignored", id(accountFromFileName(accts, "ab5761cd-9999 - 1.pdf")), null);
+eq("no name", id(accountFromFileName(accts, null)), null);
+eq("printed wins", resolveAccount(accts, "6006", "x-5761 - 1.pdf")?.via, "printed");
+eq("printed acct", id(resolveAccount(accts, "6006", "x-5761 - 1.pdf")?.acct), "visa-6006");
+eq("falls back", resolveAccount(accts, null, "x-0848 - 1.pdf")?.via, "file name");
+eq("neither", resolveAccount(accts, null, "scan.pdf"), null);
+console.log(bad ? `${bad} FAILED` : "statement account match: all passed");
+process.exit(bad ? 1 : 0);

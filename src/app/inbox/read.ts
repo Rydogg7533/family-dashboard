@@ -5,7 +5,7 @@ import { cleanLines, effectiveCategory, vehicleLines } from "@/lib/receipt-lines
 import { categoryPromptBlock } from "@/lib/categories";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
-import { matchAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
 import { FILE_YES, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
@@ -68,7 +68,9 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
   if (parsed.kind === "statement") {
     const { data: accts } = await sb.from("accounts").select("id,institution,last4,retired_at");
     const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
-    const acct = matchAccount(list, parsed.card_last4);
+    const found = resolveAccount(list, parsed.card_last4, parsed.file_name_hint);
+    const acct = found?.acct ?? null;
+    parsed.statement_match = found ? found.via : null;
     const period = statementPeriod(parsed as { statement_period?: unknown; closing_date?: unknown; date?: unknown }) ?? new Date().toISOString().slice(0, 7);
     parsed.statement_period = period;
     parsed.statement_account = acct ? { id: acct.id, label: accountLabel(acct) } : null;
@@ -78,7 +80,7 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
     parsed.home = sHome;
     const bal = typeof parsed.statement_balance === "number" ? `, balance $${(parsed.statement_balance as number).toFixed(2)}` : "";
     const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
-    if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}. File it?`; update.options = [FILE_YES, FILE_NO]; }
+    if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}${found?.via === "file name" ? " (matched by the file name)" : ""}. File it?`; update.options = [FILE_YES, FILE_NO]; }
     else { update.missing = `Looks like a statement${bal}${parsed.card_last4 ? ` ending ····${String(parsed.card_last4).replace(/\D/g, "").slice(-4)}` : ""}, ${period}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
     return { update, name: sName as string | null, conf, ruleLabel: "" };
   }
@@ -172,6 +174,7 @@ export async function readCapture(inboxId: string) {
   } catch (e) { return { ok: false, reason: `read failed: ${(e as Error).message.slice(0, 80)}` }; }
   if (!parsed || !Object.keys(parsed).length) return giveUp(sb, inboxId, "nothing readable");
 
+  parsed.file_name_hint = String(row.file_path ?? "").split("/").pop() ?? null;   // second clue for matching a statement to its account
   Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
   const { update, name, conf, ruleLabel } = await planFromRead(sb, (row.claim_id as string | null) ?? null, parsed);
   await sb.from("inbox_items").update(update).eq("id", inboxId);

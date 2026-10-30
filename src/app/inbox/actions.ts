@@ -51,6 +51,20 @@ export async function resolveInboxItem(id: string, answer: string, _makeRule: bo
   return { ok: !error };
 }
 
+// "File all matched": files every open statement that is already matched to exactly one account (it asks only "File it?").
+// Same path as tapping Yes on each one, so each is filed, linked and logged exactly as a single tap would. Unmatched ones are left alone.
+export async function fileMatchedStatements(): Promise<{ ok: boolean; filed: number; left: number; summary: string }> {
+  if (!hasSupabaseEnv()) return { ok: true, filed: 0, left: 0, summary: "Sample mode." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, filed: 0, left: 0, summary: "Not signed in." };
+  const { data: rows } = await sb.from("inbox_items").select("id,options").eq("status", "open").eq("read_result->>kind", "statement").limit(60);
+  const ids = ((rows ?? []) as { id: string; options: string[] | null }[]).filter((r) => r.options?.[0] === FILE_YES && r.options.length === 2).map((r) => r.id);
+  let filed = 0;
+  for (const id of ids) { const r = await fileCapture(id, FILE_YES).catch(() => null); if (r?.ok && !r.kept) filed++; }
+  return { ok: true, filed, left: ids.length - filed, summary: `Filed ${filed} statement${filed === 1 ? "" : "s"}${ids.length - filed ? `; ${ids.length - filed} still need a look` : ""}.` };
+}
+
 export type CapturedFile = { name: string; path: string | null; mime: string; size: number; sha256: string | null; failed?: string };
 
 // Each captured file is already stored (private "captures" bucket) by the browser; this records the Inbox row that points at it.

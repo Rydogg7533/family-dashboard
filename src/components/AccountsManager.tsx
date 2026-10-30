@@ -6,6 +6,8 @@ import { saveAccount, retireAccount, type AccountInput } from "@/app/money/actio
 
 const KINDS = [["credit", "Credit card"], ["checking", "Checking"], ["savings", "Savings"], ["payment_app", "Payment app"], ["business", "Business account"]] as const;
 const DELIVERY = [["email_pdf", "Emailed with the PDF attached"], ["email_link", "Emailed, link only"], ["upload", "I download and upload it"]] as const;
+// The same rule saveAccount uses to name a new account (and so its statement folder).
+const folderFor = (institution: string, last4: string) => (`${institution.trim().slice(0, 40)}-${last4.replace(/\D/g, "").slice(-4)}`).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "name-and-last-four";
 const blank: AccountInput = { kind: "credit", institution: "", last4: "", owner: "Joint", entity: "Personal", statement_arrival_day: null, statement_delivery: "email_pdf" };
 
 export function AccountsManager({ accounts, owners }: { accounts: Account[]; owners: string[] }) {
@@ -42,6 +44,11 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
             <input className={`${field} flex-1`} placeholder="Entity (Personal, Veil Labs…)" value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })} />
           </div>
           <div className="flex flex-col gap-1">{DELIVERY.map(([k, l]) => <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" checked={form.statement_delivery === k} onChange={() => setForm({ ...form, statement_delivery: k })} />{l}</label>)}</div>
+          <p className="text-xs text-muted">
+            {form.id
+              ? <>Statements are filed in the folder <b className="text-fg">{form.id}</b>. The folder was named when this account was added and never changes, even if you rename the account here.</>
+              : <>When you save, statements for this account will be filed in a folder named <b className="text-fg">{folderFor(form.institution, form.last4)}</b>. The folder name is set once and never changes, so choose the name you want to keep.</>}
+          </p>
           {err && <div className="text-sm text-red font-semibold">{err}</div>}
           <div className="flex gap-2">
             <button disabled={busy} onClick={save} className="min-h-11 flex-1 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">Save</button>
