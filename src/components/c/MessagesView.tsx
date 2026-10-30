@@ -6,6 +6,7 @@ import type { Confirmation, Message, Suggestion, Thread } from "@/lib/data-messa
 import { clock } from "@/lib/c-shared";
 import { useToast } from "@/components/c/Toast";
 import { Who } from "@/components/c/Who";
+import { Linkify } from "@/components/c/Linkify";
 import { createClient } from "@/lib/supabase/client";
 
 const btn = "min-h-9 px-2.5 rounded-lg border border-line text-xs font-semibold hover:bg-soft";
@@ -125,7 +126,7 @@ export function ThreadView({ thread, messages, mirrorOk, suggestions = [] }: { t
           )}
           {(m.text || (m.attachment && !m.attachment.path)) && (
             <div className={`px-3.5 py-2.5 text-sm max-w-full min-w-0 break-words [overflow-wrap:anywhere] whitespace-pre-wrap ${m.mine ? "bg-accent text-white rounded-[16px_16px_4px_16px]" : "bg-soft rounded-[16px_16px_16px_4px]"} ${m.assistant_kind === "confirmation" ? "border-2 border-amber" : ""}`}>
-              {m.text}
+              {m.text && <Linkify text={m.text} mine={m.mine} />}
               {m.attachment && !m.attachment.path && <div className={`text-xs ${m.text ? "mt-1" : ""} ${m.mine ? "text-white/80" : "text-muted"}`}>{m.attachment.kind === "photo" ? "📷" : m.attachment.kind === "video" ? "🎬" : m.attachment.kind === "audio" ? "🎤" : "📎"} {m.attachment.skipped === "size" ? "large file" : m.attachment.label} · <a href="messages://" className="underline">open in Messages</a></div>}
             </div>
           )}
