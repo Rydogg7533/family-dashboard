@@ -45,7 +45,7 @@ export default async function Reconcile({ params }: PageProps<"/money/reconcile/
               </div>
             )}
             <ol className="text-xs text-muted flex flex-col gap-0.5 list-decimal pl-4">{steps(r).map((s, i) => <li key={s} className={i < Math.round((r.tied_lines / r.total_lines) * steps(r).length) ? "text-green" : ""}>{s}</li>)}</ol>
-            {r.statement_file ? <div className="text-xs text-muted">Statement: {r.statement_file} · <OpenIn label="Files" /></div> : <div className="text-xs text-amber font-semibold">Statement PDF not yet received. <Link href="/inbox?capture=file" className="underline">Upload it</Link> or wait for the email.</div>}
+            {r.statement_file ? <div className="text-xs text-muted">Statement: {r.statement_file} · <OpenIn label="Files" /></div> : <div className="text-xs text-amber font-semibold">Statement PDF not yet received. <Link href="/money/statements" className="underline">Upload it</Link> or wait for the email.</div>}
             <div className="flex gap-2 mt-1">
               <button disabled={!canClose} className="min-h-11 flex-1 rounded-xl bg-accent text-white font-semibold text-sm disabled:opacity-40">Mark close done</button>
               <button disabled={red.length > 0} className="min-h-11 px-3 rounded-xl border border-line font-semibold text-sm disabled:opacity-40">Close with exceptions</button>

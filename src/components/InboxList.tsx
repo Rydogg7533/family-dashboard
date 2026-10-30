@@ -220,7 +220,7 @@ function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string
   const [pageCount, setPageCount] = useState(0);
   const bulk = kind === "bulk";
   const title = kind === "photo" ? "Take a photo" : kind === "file" ? "Upload a file" : "Bulk drop";
-  const hint = kind === "photo" ? "One document per photo: a receipt, a label, a serial plate, a form. If it has more pages, add them after. You will get one question; most are a single tap." : kind === "file" ? "One document: a PDF or an image. A multi-page PDF is already one file; for photos of a longer receipt, add the other pages after." : "Drop a shoebox of scans, statements, photos. Each file is its own item and nothing is filed without your tap; pages that look like one document are offered as a set.";
+  const hint = kind === "photo" ? "One document per photo: a receipt, a label, a serial plate, a form. If it has more pages, add them after. You will get one question; most are a single tap." : kind === "file" ? "One document: a PDF or an image. A multi-page PDF is already one file; for photos of a longer receipt, add the other pages after." : "Drop a shoebox of scans and photos. Bank and card statements go on Money › Statements instead, never here. Each file is its own item and nothing is filed without your tap; pages that look like one document are offered as a set.";
 
   async function take(list: FileList | null) {
     if (!list || !list.length) return;
