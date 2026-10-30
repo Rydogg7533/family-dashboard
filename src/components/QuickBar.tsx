@@ -50,8 +50,9 @@ export function QuickBar({ who = "You", sample = false }: { who?: string; sample
           {plus && (
             <div className="absolute bottom-12 right-0 card shadow-lg flex flex-col gap-1 w-48 text-sm font-semibold">
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/calendar/new")}>Add to calendar</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=photo")}>Take photo</button>
-              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Upload photos or files</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=photo")}>Scan photo with AI</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/inbox?capture=file")}>Scan files with AI</button>
+              <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => go("/money/statements")}>Upload statement (private)</button>
               <div className="border-t border-line my-0.5" />
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft" onClick={() => { setPlus(false); setAsk(true); }}>Ask</button>
               <button className="text-left min-h-10 px-2 rounded-lg hover:bg-soft text-amber" onClick={() => { setPlus(false); setReport(true); }}>Report a problem or request a feature</button>
