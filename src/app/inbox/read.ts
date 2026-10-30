@@ -48,6 +48,15 @@ async function giveUp(sb: Awaited<ReturnType<typeof createClient>>, id: string, 
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
 
+// A statement is never read by a model (Ryan, 2026-10-30). Anything whose name says "statement" is held here before its file is opened, and the
+// person is pointed to Money › Statements, where the Mac mini reads it with local OCR. This goes by the name only: a statement saved as
+// IMG_0042.jpg is not caught, and the model's own "this is a statement" read cannot help, because by then the file has already been sent.
+const looksLikeStatement = (title: unknown, filePath: unknown) => /\bstatements?\b|\bstmt\b|e-?statement/i.test(`${title ?? ""} ${String(filePath ?? "").split("/").pop() ?? ""}`);
+async function holdStatement(sb: Sb, id: string) {
+  await sb.from("inbox_items").update({ read_at: new Date().toISOString(), read_result: { error: "statement held" }, missing: "This looks like a bank or card statement, so I did not read it (statements are never read by AI). Upload it on Money › Statements instead. If it is not a statement, what is it?", options: ["Receipt", "Bill", "Form", "Something else"] }).eq("id", id);
+  return { ok: false, reason: "statement held" };
+}
+
 // The planning half of reading: from the facts in `parsed` work out the plan, the one question and its answers. It touches no model and no file, so it can run
 // again after a person corrects a field (see correctRead). Returns the update to store; the caller applies it.
 async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<string, unknown>): Promise<{ update: Record<string, unknown>; name: string | null; conf: number; ruleLabel: string }> {
@@ -155,6 +164,7 @@ export async function readCapture(inboxId: string) {
   const { data: row } = await sb.from("inbox_items").select("id,file_path,mime,size_bytes,title,read_at,pages,claim_id").eq("id", inboxId).maybeSingle();
   if (!row?.file_path) return { ok: false, reason: "no stored file" };
   if (row.read_at) return { ok: true, already: true };
+  if (looksLikeStatement(row.title, row.file_path)) return holdStatement(sb, inboxId);
   // All pages of one document are read together, so the total and vendor come from the whole thing.
   const pages = (row.pages as { path: string; mime: string; size: number }[] | null) ?? [{ path: row.file_path, mime: row.mime ?? "", size: row.size_bytes ?? 0 }];
   const files: { mime: string; base64: string }[] = [];

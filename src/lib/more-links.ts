@@ -29,6 +29,7 @@ export const MORE_LINKS: MoreLink[] = [
   { href: "/recurring", label: "Due dates and renewals", group: "records", icon: "calendarClock", wide: true },
   { href: "/money/recurring", label: "Bills and charges", group: "records", icon: "repeat" },
   { href: "/money/routine", label: "Monthly routine", group: "records", icon: "repeat" },
+  { href: "/money/statements", label: "Statements", group: "records", icon: "files" },
   { href: "/money/subscriptions", label: "Subscriptions", group: "records", icon: "creditCard" },
   { href: "/warranties", label: "Warranties", group: "records", icon: "award" },
   { href: "/things", label: "Things (inventory)", group: "records", icon: "folder" },
