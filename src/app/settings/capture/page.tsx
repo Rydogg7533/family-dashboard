@@ -25,7 +25,7 @@ export default async function CaptureSettings() {
   return (
     <>
       <H1 right={<Link href="/settings" className="font-semibold text-accent">Settings ›</Link>}>Camera shortcut</H1>
-      <p className="text-xs text-muted mb-3">Take a photo of a receipt or a paper from your lock screen and it lands in the Inbox, read and filed like anything else. No need to open the app.</p>
+      <p className="text-xs text-muted mb-3">Take a photo of a receipt or a paper from your lock screen and it lands in the Inbox, read by AI (sent to Anthropic) and filed like anything else. Do not use it for statements or anything with account numbers. No need to open the app.</p>
       <CaptureSetup tokens={tokens} who={who} received={received} />
     </>
   );

@@ -219,8 +219,8 @@ function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string
   const [docId, setDocId] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const bulk = kind === "bulk";
-  const title = kind === "photo" ? "Take a photo" : kind === "file" ? "Upload a file" : "Bulk drop";
-  const hint = kind === "photo" ? "One document per photo: a receipt, a label, a serial plate, a form. If it has more pages, add them after. You will get one question; most are a single tap." : kind === "file" ? "One document: a PDF or an image. A multi-page PDF is already one file; for photos of a longer receipt, add the other pages after." : "Drop a shoebox of scans and photos. Bank and card statements go on Money › Statements instead, never here. Each file is its own item and nothing is filed without your tap; pages that look like one document are offered as a set.";
+  const title = kind === "photo" ? "Scan with AI: take a photo" : kind === "file" ? "Scan with AI: upload a file" : "Scan with AI: bulk drop";
+  const hint = kind === "photo" ? "One document per photo: a receipt, a label, a serial plate, a form. If it has more pages, add them after. You will get one question; most are a single tap." : kind === "file" ? "One document: a PDF or an image. A multi-page PDF is already one file; for photos of a longer receipt, add the other pages after." : "Drop a shoebox of scans and photos. Each file is its own item and nothing is filed without your tap; pages that look like one document are offered as a set.";
 
   async function take(list: FileList | null) {
     if (!list || !list.length) return;
@@ -258,13 +258,14 @@ function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string
       {kind !== "photo" ? (
         <div role="button" tabIndex={0} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); void take(e.dataTransfer.files); }} onClick={() => inputRef.current?.click()} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
           className={`${compact ? "min-h-16" : "min-h-32"} rounded-xl border-2 border-dashed flex items-center justify-center text-center px-3 text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
-          {bulk ? "Drop files here, or tap to choose" : compact ? "Drop or choose a photo or file to add" : "Drop a file or image here, or tap to choose from your Photos or Files"}
+          {bulk ? "Scan with AI: drop files here, or tap to choose" : compact ? "Scan with AI: drop or choose a photo or file" : "Drop a file or image here, or tap to choose from your Photos or Files"}
         </div>
       ) : (
         <button onClick={() => inputRef.current?.click()} className="min-h-12 rounded-xl bg-accent text-white font-semibold">Open camera</button>
       )}
       <input ref={inputRef} type="file" className="hidden" multiple accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void take(e.target.files); e.target.value = ""; }} />
       <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
+      <p className="text-[11px] text-muted">Read by AI (the file is sent to Anthropic), so it is not private. For bank or card statements, or anything with account numbers, use Money › Statements (private) instead.</p>
       {names.length > 0 && <div className="text-xs text-green font-semibold">{status || "Saving…"} ({names.join(", ")})</div>}
       {docId && <button onClick={() => pageRef.current?.click()} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add another page to this document{pageCount > 1 ? ` (${pageCount} so far)` : ""}</button>}
     </div>

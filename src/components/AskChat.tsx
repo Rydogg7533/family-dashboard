@@ -412,7 +412,7 @@ export function AskChat({ prefill, sample, who, embedded, source, onPending, onC
             aria-label="Ask" className="w-full resize-none bg-transparent px-1 py-1 text-[17px] leading-[1.45] outline-none max-h-40" />
           <div className="flex items-center gap-2">
             <input ref={picker} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void attach(e.target.files)} />
-            <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file" title="Take a photo, or pick one from your photos or files" className="min-h-11 min-w-11 rounded-full bg-soft text-fg flex items-center justify-center disabled:opacity-40">
+            <button type="button" onClick={() => picker.current?.click()} disabled={busy || uploading} aria-label="Attach a photo or file for the AI to read" title="Attach a photo or file. The AI reads it, so it is not private." className="min-h-11 min-w-11 rounded-full bg-soft text-fg flex items-center justify-center disabled:opacity-40">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M10 4v12M4 10h12" /></svg>
             </button>
             <div className="flex-1" />

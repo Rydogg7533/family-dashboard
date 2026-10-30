@@ -92,10 +92,11 @@ export function BulkDrop() {
     <div className="flex flex-col gap-2">
       <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); setNames(Array.from(e.dataTransfer.files).map((f) => f.name)); }} onClick={() => ref.current?.click()}
         className={`min-h-24 rounded-xl border-2 border-dashed flex items-center justify-center text-sm font-semibold cursor-pointer ${over ? "border-accent bg-soft" : "border-line"}`}>
-        Drop receipts, statements, invoices here (or tap)
+        Scan with AI: drop receipts and invoices here (or tap)
       </div>
       <input ref={ref} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => setNames(Array.from(e.target.files ?? []).map((f) => f.name))} />
-      {names.length > 0 && <div className="text-xs text-green font-semibold">{names.length} received. Each is read (local OCR), identified, matched to a charge and filed; anything unclear becomes one question above.</div>}
+      {names.length > 0 && <div className="text-xs text-green font-semibold">{names.length} received. Each is read by AI, identified, matched to a charge and filed; anything unclear becomes one question above.</div>}
+      <p className="text-[11px] text-muted">Read by AI (sent to Anthropic), so not private. Bank and card statements go on Statements (private) instead.</p>
     </div>
   );
 }
