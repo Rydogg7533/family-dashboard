@@ -13,8 +13,8 @@
 
 /* More page section colors. Blue follows the person's accent; the others are fixed hues, lighter in dark mode.
    Never red, amber or green: those mean problem, warning and ok everywhere else in the app. */
-/* Fixed bottom elements: the tab bar only. Page bottom padding leaves room for it, the floating + button and a gap. */
-:root { --bar-bottom: calc(66px + max(16px, env(safe-area-inset-bottom))); --page-bottom: calc(var(--bar-bottom) + 72px); }
+/* Fixed bottom elements: the tab bar only. Page bottom padding leaves room for it and a normal gutter; the floating + button overlaps content. */
+:root { --bar-bottom: calc(66px + max(16px, env(safe-area-inset-bottom))); --page-bottom: calc(var(--bar-bottom) + 16px); /* 2026-10-30: was +72px for the + button; the gap read as the page stopping short of the bar (Ryan's recording). The button floats over content, as in Messages. */ }
 :root { --sec-teal: #0F6E56; --sec-purple: #534AB7; --sec-slate: #5F6672; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sec-teal: #5DCAA5; --sec-purple: #AFA9EC; --sec-slate: #B4B8C0; } }
 :root[data-theme="dark"] { --sec-teal: #5DCAA5; --sec-purple: #AFA9EC; --sec-slate: #B4B8C0; }
