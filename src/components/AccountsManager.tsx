@@ -19,7 +19,7 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
   const entityOptions = ["Personal", "Business"];
   const entityChoice = form && entityOptions.includes(form.entity) ? form.entity : OTHER;   // any other saved entity shows under "Other…" with its name
   const edit = (a: Account) => setForm({ id: a.id, kind: a.kind, institution: a.institution, last4: a.last4, owner: a.owner, entity: a.entity, statement_arrival_day: a.statement_arrival_day ?? null, statement_delivery: a.statement_delivery ?? "email_pdf" });
-  const save = async () => { if (!form) return; setBusy(true); setErr(null); const x = await saveAccount(form); setBusy(false); if (x.ok) { setForm(null); router.refresh(); } else setErr(x.error ?? "Could not save."); };
+  const save = async () => { if (!form) return; if (entityChoice === OTHER && !form.entity.trim()) { setErr("Name the entity, or choose Personal or Business."); return; } setBusy(true); setErr(null); const x = await saveAccount(form); setBusy(false); if (x.ok) { setForm(null); router.refresh(); } else setErr(x.error ?? "Could not save."); };
   const field = "min-h-10 rounded-lg border border-line bg-bg px-3 text-sm";
   return (
     <div className="flex flex-col gap-2">
