@@ -363,6 +363,14 @@ async function main(full = true) {
   const toWrite = INCR ? msgRows.filter((m) => Date.parse(m.at) > writeSince || !mediaKnown.has(m.id) && m.attachment?.path) : msgRows;
   for (let i = 0; i < toWrite.length; i += 200) await rest("POST", "messages?on_conflict=id", toWrite.slice(i, i + 200), { Prefer: "resolution=merge-duplicates,return=minimal" });
   lastWriteAt = Date.now();
+  // Replying from any device reads the thread (as Messages does): a line of mine clears that thread's older unread
+  // bubbles in the app (Ryan, 2026-10-30: "new messages are marked new when they are coming from me").
+  const mineBy = new Map();
+  for (const m of toWrite) if (m.is_me && Date.parse(m.at) > Date.now() - 2 * 86400e3) mineBy.set(m.thread_id, Math.max(mineBy.get(m.thread_id) || 0, Date.parse(m.at)));
+  for (const [tid, atMs] of mineBy) {
+    await rest("PATCH", `notifications?person=eq.${PERSON}&type=eq.message&dismissed_at=is.null&url=eq.${encodeURIComponent(`/messages/${tid}`)}&queued_at=lte.${encodeURIComponent(new Date(atMs).toISOString())}`,
+      { dismissed_at: now() }, { Prefer: "return=minimal" }).catch((e) => console.error(`${now()} seen-by-reply ${tid}: ${String(e.message).slice(0, 120)}`));
+  }
   if (!INCR) lastFullAt = Date.now();
   if (!INCR) {
   // mirror copies only: a thread this pass did not touch has left the window (or Messages); its lines go with it (cascade).

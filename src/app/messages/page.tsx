@@ -8,6 +8,8 @@ import { SquarePen } from "lucide-react";
 import { getPeople, getViewer } from "@/lib/data-registers";
 import { SyncLine } from "@/components/c/SyncLine";
 import { ConfirmCards } from "@/components/c/MessagesView";
+import { ListRefresher } from "@/components/c/ListRefresher";
+import { hasSupabaseEnv } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ export default async function Messages() {
   const mirror = sync[0];
   return (
     <>
+      <ListRefresher live={hasSupabaseEnv()} />
       <H1 right={<span className="flex items-center gap-2">{mirror && <span className={`text-xs ${mirror.state === "ok" ? "text-green font-semibold" : "text-amber font-semibold"}`}>● {mirror.state === "ok" ? "live" : "paused"} · {clock(mirror.last_sync)}</span>}<Link href="/messages/new" aria-label="New message" className="min-w-9 min-h-9 flex items-center justify-center rounded-lg text-accent hover:bg-soft"><SquarePen size={20} strokeWidth={2} /></Link></span>}>Messages</H1>
       <MessagesSearch threads={threads} viewer={viewer.name}>
 
