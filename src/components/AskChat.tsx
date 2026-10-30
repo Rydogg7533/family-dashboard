@@ -495,7 +495,11 @@ function DeliveryCard({ card, onShare }: { card: AskCard; onShare: () => void })
               <img src={card.open} alt={card.name} className="max-h-64 w-full object-contain" onError={() => setImgFailed(true)} />
             </a>
       )}
-      {card.kind === "vault" && <div className="h-28 card-media flex items-center justify-center gap-3 text-muted px-4"><LockIcon /><div className="text-sm leading-snug max-w-[200px]">Kept in 1Password. The app has the label, not the card.</div></div>}
+      {/* No link yet: say so in the header, large and amber, not in small print (Ryan, 2026-10-30: "should be clear there is no link"). */}
+      {card.kind === "vault" && (card.open
+        ? <div className="h-28 card-media flex items-center justify-center gap-3 text-muted px-4"><LockIcon /><div className="text-sm leading-snug max-w-[200px]">Kept in 1Password. The app has the label, not the card.</div></div>
+        : <div className="h-28 card-media flex items-center justify-center gap-3 text-amber px-4"><LockIcon /><div className="leading-snug max-w-[220px]"><div className="font-bold text-base">No link yet</div><div className="text-sm">The app knows this item exists in 1Password, but has nothing to open.</div></div></div>
+      )}
       <div className="px-3.5 pt-3 pb-3 flex flex-col gap-2.5">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -519,7 +523,7 @@ function DeliveryCard({ card, onShare }: { card: AskCard; onShare: () => void })
         {card.kind === "vault" && (
           card.open
             ? <a href={card.open} className="min-h-12 rounded-xl bg-accent text-white font-semibold text-[15px] flex items-center justify-center gap-2">Open in 1Password</a>
-            : <div className="text-xs text-amber font-semibold">Listed, but its 1Password link has not been added yet (Settings › 1Password).</div>
+            : <Link href="/settings/vault" className="min-h-12 rounded-xl border-2 border-amber text-amber font-semibold text-[15px] flex items-center justify-center gap-2">Add the 1Password link</Link>
         )}
         {card.kind === "vault" && <div className="text-[11px] text-muted leading-snug">Face ID happens in 1Password. Share from there; the app never holds a copy.</div>}
       </div>
