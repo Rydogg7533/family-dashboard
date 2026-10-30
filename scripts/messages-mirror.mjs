@@ -64,6 +64,15 @@ function bodyText(hex, text) {
   } catch { return ""; }
 }
 
+// A shared link (Safari/1Password/X share sheet) is a "URL balloon": its preview is a hidden plugin attachment and the
+// URL is sometimes only in payload_data (a binary plist), not in text or attributedBody. 1Password shares arrived
+// as empty text + a dead "attachment" chip (Ryan, 2026-10-30). Pull the first http(s) string out of the plist.
+const URL_BALLOON = "com.apple.messages.URLBalloonProvider";
+function payloadUrl(hex) {
+  if (!hex) return "";
+  try { const m = Buffer.from(hex, "hex").toString("latin1").match(/https?:\/\/[^\x00-\x1f"'<>\\]+/); return m ? m[0] : ""; } catch { return ""; }
+}
+
 // ---- Supabase ----
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
 async function rest(method, path, body, extra = {}) {
@@ -300,16 +309,18 @@ async function main(full = true) {
   const P = await loadPeople();
   if (!DRY && !INCR) await loadMediaKnown();
   for (const g of groups.values()) {
-    const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
+    const rows = q(`select m.guid, hex(m.attributedBody) as body, m.text, m.balloon_bundle_id as balloon, hex(m.payload_data) as payload, m.is_from_me as me, m.is_read as read, m.date, m.cache_has_attachments as att, h.id as sender, cm.chat_id as chat,
         (select group_concat(a.mime_type, ',') from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID) as mimes,
         (select group_concat(a.filename, char(10)) from message_attachment_join ma join attachment a on a.ROWID = ma.attachment_id where ma.message_id = m.ROWID and a.hide_attachment = 0 order by a.ROWID) as files
       from message m join chat_message_join cm on cm.message_id = m.ROWID left join handle h on h.ROWID = m.handle_id
       where cm.chat_id in (${g.chats.map((c) => c.id).join(",")}) and m.date > ${Math.floor(sinceNs)} and (m.item_type = 0 or m.item_type is null) order by m.date`);
     let last = null, lastChat = null;
     for (const m of rows) {
-      const text = bodyText(m.body, m.text);
+      const link = m.balloon === URL_BALLOON;
+      const text = bodyText(m.body, m.text) || (link ? payloadUrl(m.payload) : "");
       const mime = (m.mimes || "").split(",")[0];
-      let attachment = m.att ? { kind: /^image\//.test(mime) ? "photo" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "file", label: mime ? mime.split("/")[1] : "attachment" } : null;
+      // a URL balloon's only "attachment" is its preview blob: the link card in the app covers that, so no chip
+      let attachment = link ? null : m.att ? { kind: /^image\//.test(mime) ? "photo" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "file", label: mime ? mime.split("/")[1] : "attachment" } : null;
       lastChat = m.chat;
       if (!text && !attachment) continue;
       // media: copy once; afterwards the stored attachment (with its path) is kept as it is
