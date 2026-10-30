@@ -164,7 +164,7 @@ export function SubjectPicker({ r, subjects, linked }: { r: Receipt; subjects: S
       </div>
       {adding && (
         <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap gap-1">{SUBJECT_KINDS.map((k) => <button key={k.kind} onClick={() => setKind(k.kind)} className={`min-h-8 px-2.5 rounded-full text-xs font-semibold ${kind === k.kind ? "bg-accent text-white" : "border border-line"}`}>{k.label}</button>)}</div>
+          <select aria-label="What it is" value={kind} onChange={(e) => setKind(e.target.value)} className="min-h-10 rounded-lg border border-line bg-bg px-3 text-sm">{SUBJECT_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}</select>
           <div className="flex gap-2">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Sienna, Kitchen remodel, Moab trip" className="min-h-10 flex-1 rounded-lg border border-line bg-bg px-3 text-sm" />
             <button disabled={busy || !name.trim()} onClick={() => add(kind, name)} className="min-h-10 px-3 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50">Add</button>

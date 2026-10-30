@@ -54,11 +54,11 @@ export function CardsManager({ cards, accounts, owners }: { cards: PaymentCard[]
       {form && (
         <div className="card flex flex-col gap-2">
           <div className="text-xs font-semibold text-muted">What is it?</div>
-          <div className="flex flex-wrap gap-1.5">{KINDS.map(([k, l]) => <button key={k} onClick={() => { setKind(k); setForm({ ...form, account_id: forKind.some((a) => a.id === form.account_id) ? form.account_id : "", twin_of: null }); }} className={`min-h-9 px-3 rounded-full text-sm font-semibold ${kind === k ? "bg-accent text-white" : "border border-line"}`}>{l}</button>)}</div>
+          <select aria-label="Card type" className={field} value={kind} onChange={(e) => { const k = e.target.value as (typeof KINDS)[number][0]; setKind(k); setForm({ ...form, account_id: forKind.some((a) => a.id === form.account_id) ? form.account_id : "", twin_of: null }); }}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <div className="text-xs font-semibold text-muted">Draws on {KINDS.find((x) => x[0] === kind)?.[2]}</div>
           {forKind.length === 0
             ? <div className="text-sm text-amber font-semibold">No {kind === "debit" ? "checking or savings" : kind === "credit" ? "credit" : "payment app"} account is listed yet. Add it above first.</div>
-            : <div className="flex flex-wrap gap-1.5">{forKind.map((a) => <button key={a.id} onClick={() => setForm({ ...form, account_id: a.id, twin_of: null })} className={`min-h-9 px-3 rounded-full text-sm font-semibold ${form.account_id === a.id ? "bg-accent text-white" : "border border-line"}`}>{a.institution} ••{a.last4}</button>)}</div>}
+            : <select aria-label="Account this card draws on" className={field} value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value, twin_of: null })}><option value="">Choose an account</option>{forKind.map((a) => <option key={a.id} value={a.id}>{a.institution} ••{a.last4}</option>)}</select>}
           <div className="flex gap-2">
             <button onClick={() => setForm({ ...form, form: "physical", twin_of: null })} className={`min-h-9 flex-1 rounded-full text-sm font-semibold ${form.form === "physical" ? "bg-accent text-white" : "border border-line"}`}>Physical card</button>
             <button onClick={() => setForm({ ...form, form: "virtual", twin_of: null })} className={`min-h-9 flex-1 rounded-full text-sm font-semibold ${form.form === "virtual" ? "bg-accent text-white" : "border border-line"}`}>Virtual (Wallet, browser)</button>

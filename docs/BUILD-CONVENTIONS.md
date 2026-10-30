@@ -23,3 +23,8 @@ Verification: `npx next build` must pass with zero errors before you finish. The
 - Record what the person did with the result in `ai_outcomes` through `src/lib/ai-outcomes.ts` (`recordOutcome`, `recordFilingOutcome`): accepted, edited (field names only) or rejected. Never update or delete outcome rows.
 - `model_scorecard` (view) is the per-job, per-model, per-prompt-version summary. Switch a job to a different or local model only after the new model is replayed against past results and matches or beats the current one; log the decision in the decisions log.
 - Telemetry that leaves a household is shape only and opt-in: counts, rates, latency, field names. Never values or documents.
+
+## Choosing a value: selector or chips (Ryan, 2026-10-30)
+- Picking one stored value from four or more choices, or from a list that grows (account type, entity, which account a card draws on, subject kind): use the plain native `<select>`. On iPhone it opens as the Apple wheel; on desktop it is a menu. No custom wheel or dropdown.
+- Chips stay for actions and views: one-tap answers (Inbox options), filters and tabs, quick actions, and two-way toggles (Physical / Virtual).
+- A selector whose last choice is "Other…" opens a text box; a blank Other is refused, never saved as a default.
