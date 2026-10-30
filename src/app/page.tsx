@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getViewer } from "@/lib/data-registers";
 import { getDisplayName, getOpenTasks, getPeopleNames, getStatus, overall } from "@/lib/data";
-import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
+import { createClient, hasSupabaseEnv, getRequestUser, getMyProfile } from "@/lib/supabase/server";
+import { after } from "next/server";
 import { splitTasks } from "@/lib/tasks-view";
 import { getReview } from "@/lib/data-review";
 import { Banner, Card } from "@/components/ui";
@@ -27,45 +28,61 @@ import { isOwnerViewer } from "@/lib/owner";
 export const dynamic = "force-dynamic";
 
 export default async function Today() {
-  // A child's login has one page: theirs.
+  const t0 = Date.now();
+  // A child's login has one page: theirs. (One profile read per request: getMyProfile feeds viewer, owner, name, tabs.)
   if ((await getViewer()).role === "child" && hasSupabaseEnv()) redirect("/kid");
-  // A parent gets one task per sensitive feature a child has just become old enough for.
-  if (hasSupabaseEnv() && (await isOwnerViewer())) { const u = await getRequestUser(); if (u) { const [kids, feats, ages] = await Promise.all([getChildRows(), getChildFeatures(), getFeatureAges()]); await syncChildUnlockTasks(await createClient(), u.id, kids, feats, ages).catch(() => null); } }
-  const [name, status, allTasks, names, user, setup, tz, review] = await Promise.all([getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getRequestUser(), getMyConnections(), householdTz(), getReview()]);
+  const [owner, user] = await Promise.all([isOwnerViewer(), getRequestUser()]);
+  const me = user?.id ?? null;
+  // Everything the page reads, in one batch (2026-10-30: this used to be ten serial awaits plus a Google Calendar call
+  // before the first paint; Ryan: "initial load on app open to Today tab is slow"). The nudges and sitter rows are
+  // fetched here too and only *shown* according to the same rules as before.
+  const [name, status, allTasks, names, setup, tz, review, inboxRes, catalog, sitterNudge, due, asks, up, people, deb, kidsRes] = await Promise.all([
+    getDisplayName(), getStatus(), getOpenTasks(), getPeopleNames(), getMyConnections(), householdTz(), getReview(),
+    me && hasSupabaseEnv() ? createClient().then((sb) => Promise.all([
+      sb.from("inbox_items").select("id,title,missing,captured_at,assigned_to,for_person,requested_by").eq("status", "open").order("captured_at", { ascending: false }).limit(50),
+      getMyProfile(),
+    ])) : null,
+    getCatalogNudge(), getSitterSheetNudge(),
+    me && hasSupabaseEnv() ? getNights(["awaiting_review"], 1) : [], me && hasSupabaseEnv() ? getNights(["proposed"], 1) : [],
+    me && hasSupabaseEnv() ? getNights(["needed", "scheduled", "confirmed"], 5) : [], me && hasSupabaseEnv() ? getSitters() : [],
+    me && hasSupabaseEnv() ? getDebriefNight() : null,
+    me && hasSupabaseEnv() ? createClient().then((sb) => sb.from("children").select("id, display_name").is("archived_at", null).order("birth_date")) : null,
+  ]);
+  const tRead = Date.now() - t0;
+  // Side effects run after the response is sent, never in front of the paint (next/server after()):
+  //  - a parent gets one task per sensitive feature a child has just become old enough for;
+  //  - the sitter detector looks at the next three days of the calendar for evening events with no kids on them
+  //    (that is a Google Calendar call: a night it finds shows on the next open of Today, not this one);
+  //  - opening Today marks the queue seen.
+  if (me && hasSupabaseEnv()) {
+    const uid = me;
+    after(async () => {
+      if (owner) { const [kids, feats, ages] = await Promise.all([getChildRows(), getChildFeatures(), getFeatureAges()]); await syncChildUnlockTasks(await createClient(), uid, kids, feats, ages).catch(() => null); }
+      await detectSitterNights(uid).catch(() => null);
+      const sb = await createClient();
+      await sb.from("profiles").update({ today_seen_at: new Date().toISOString() }).eq("id", uid).then(() => {}, () => {});
+    });
+  }
   // The weekly review card: whenever something is waiting, and every Sunday regardless (the one scheduled moment).
   const reviewOpen = review.stale.length + review.asking.length;
   const isSunday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(new Date()) === "Sun";
-  const me = user?.id ?? null;
   const tasks = splitTasks(allTasks, me).mine;
   // The one queue (D23, 2026-10-28): urgent tasks, Inbox items waiting on me, replies to send, then the rest. Items that
-  // arrived since I last opened Today are marked new; that count is the badge. Opening Today marks them all seen.
-  let inbox: QueueInboxItem[] = [], seenAt: string | null = null;
-  if (me && hasSupabaseEnv()) {
-    const sb = await createClient();
-    const [{ data: items }, { data: prof }] = await Promise.all([
-      sb.from("inbox_items").select("id,title,missing,captured_at,assigned_to,for_person,requested_by").eq("status", "open").order("captured_at", { ascending: false }).limit(50),
-      sb.from("profiles").select("today_seen_at").eq("id", me).maybeSingle(),
-    ]);
-    inbox = (items ?? []) as QueueInboxItem[];
-    seenAt = prof?.today_seen_at ?? null;
-    await sb.from("profiles").update({ today_seen_at: new Date().toISOString() }).eq("id", me).then(() => {}, () => {});
-  }
+  // arrived since I last opened Today are marked new; that count is the badge. Opening Today marks them all seen (above).
+  const inbox = ((inboxRes?.[0]?.data ?? []) as QueueInboxItem[]);
+  const seenAt: string | null = inboxRes?.[1]?.today_seen_at ?? null;
   const queue = buildQueue(tasks, inbox, { me, myName: name, tz, seenAt });
   const newCount = countNew(queue);
   // One set-up step at a time: the first connection that is not done and was not put off with "Not now".
   const nextStep = setup.conns.find((c) => (c.state === "todo" || c.state === "needs") && !setup.dismissed.has(c.step));
-  const catalog = nextStep ? null : await getCatalogNudge();
-  const sitterNudge = nextStep || catalog?.show ? null : await getSitterSheetNudge();
+  const showCatalog = nextStep ? null : catalog;
+  const showSitterNudge = nextStep || showCatalog?.show ? null : sitterNudge;
   // Sitter nights: the app looks for evening events with no kids on them (and asks), and surfaces a night that is due for review.
-  let sitterReview = null as Awaited<ReturnType<typeof getNights>>[number] | null, sitterProposal = null as typeof sitterReview;
-  let sitterUpcoming: Awaited<ReturnType<typeof getNights>> = [], sitterList: { id: string; name: string }[] = [], sitterDebrief: Awaited<ReturnType<typeof getDebriefNight>> = null, kidList: { id: string; name: string }[] = [];
-  if (me && hasSupabaseEnv()) {
-    await detectSitterNights(me);
-    const sb = await createClient();
-    const [due, asks, up, people, deb, { data: kids }] = await Promise.all([getNights(["awaiting_review"], 1), getNights(["proposed"], 1), getNights(["needed", "scheduled", "confirmed"], 5), getSitters(), getDebriefNight(), sb.from("children").select("id, display_name").is("archived_at", null).order("birth_date")]);
-    sitterReview = due[0] ?? null; sitterProposal = asks[0] ?? null; sitterDebrief = deb; kidList = (kids ?? []).map((k) => ({ id: k.id, name: k.display_name }));
-    sitterUpcoming = up.filter((n) => new Date(n.endsAt) > new Date()); sitterList = people.filter((p) => p.approvedAt).map((p) => ({ id: p.id, name: p.name }));
-  }
+  const sitterReview = due[0] ?? null, sitterProposal = asks[0] ?? null, sitterDebrief = deb;
+  const kidList = (kidsRes?.data ?? []).map((k) => ({ id: k.id, name: k.display_name }));
+  const sitterUpcoming = up.filter((n) => new Date(n.endsAt) > new Date());
+  const sitterList = people.filter((p) => p.approvedAt).map((p) => ({ id: p.id, name: p.name }));
+  console.log(`[today] reads ${tRead} ms, total ${Date.now() - t0} ms`);
   const connDone = setup.conns.filter((c) => c.state === "connected" || c.state === "off").length;
   const o = overall(status);
   const top = queue.slice(0, 7);
@@ -80,9 +97,9 @@ export default async function Today() {
 
       {(reviewOpen > 0 || isSunday) && <Link href="/review" className="block mb-3"><Card className="flex justify-between items-center gap-3"><div><div className="font-semibold">Weekly review</div><div className="text-xs text-muted">{reviewOpen > 0 ? `${reviewOpen} thing${reviewOpen === 1 ? "" : "s"} to settle` : "Nothing waiting. Confirm the week."}</div></div><span className="text-accent font-semibold text-sm flex-none">Open ›</span></Card></Link>}
       {nextStep && <SetupCard step={nextStep.step} label={nextStep.label} detail={nextStep.detail} href={nextStep.href} state={nextStep.state as "todo" | "needs"} done={connDone} total={setup.conns.length} />}
-      {catalog?.show && <GuidedCard step="catalog" title={catalog.started ? "Keep cataloging what you own" : "Next: catalog what you own"} progress={catalog.started && catalog.total > 0 ? `${catalog.done} of ${catalog.total} areas done` : undefined}
-        body={catalog.started ? (catalog.next ? `Next area: ${catalog.next}. A few minutes at a time is fine; it keeps your place.` : "Every area is marked done. Run the final check to finish.") : "Pick the rooms, then photograph things one room at a time. It takes a few minutes per room, over as many days as you like, and it keeps your place."} href="/things/catalog" startLabel={catalog.started ? "Continue" : "Start"} />}
-      {sitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${sitterNudge.done} of ${sitterNudge.total} sections done`} body={`What a babysitter needs, written once.${sitterNudge.next ? ` Next: ${sitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter?tab=house" startLabel="Continue" />}
+      {showCatalog?.show && <GuidedCard step="catalog" title={showCatalog.started ? "Keep cataloging what you own" : "Next: showCatalog what you own"} progress={showCatalog.started && showCatalog.total > 0 ? `${showCatalog.done} of ${showCatalog.total} areas done` : undefined}
+        body={showCatalog.started ? (showCatalog.next ? `Next area: ${showCatalog.next}. A few minutes at a time is fine; it keeps your place.` : "Every area is marked done. Run the final check to finish.") : "Pick the rooms, then photograph things one room at a time. It takes a few minutes per room, over as many days as you like, and it keeps your place."} href="/things/showCatalog" startLabel={showCatalog.started ? "Continue" : "Start"} />}
+      {showSitterNudge?.show && <GuidedCard step="sitter_sheet" title="Set up your sitter sheet" progress={`${showSitterNudge.done} of ${showSitterNudge.total} sections done`} body={`What a babysitter needs, written once.${showSitterNudge.next ? ` Next: ${showSitterNudge.next}.` : ""} It shows on the kitchen tablet on sitter nights.`} href="/settings/sitter?tab=house" startLabel="Continue" />}
       {sitterDebrief && <SitterDebrief night={sitterDebrief} kids={kidList} />}
       <SitterToday review={sitterReview} proposal={sitterProposal} tz={tz} upcoming={sitterUpcoming} sitters={sitterList} />
       <TodaySeen />

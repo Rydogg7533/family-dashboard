@@ -1,4 +1,4 @@
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
 import { missingFields, type SitterPerson, type SitterTemplate, type TemplateLine } from "@/lib/sitter-shared";
 import { startsOn, type Night, type NightStatus, type SectionId, type SheetItem, type TemplateItem } from "@/lib/sitter-shared";
 
@@ -65,8 +65,8 @@ export async function getSitterSheetNudge(): Promise<{ show: boolean; done: numb
   const none = { show: false, done: 0, total: 0, next: null as string | null };
   if (!hasSupabaseEnv()) return none;
   try {
+    const user = await getRequestUser(); if (!user) return none;
     const sb = await createClient();
-    const { data: { user } } = await sb.auth.getUser(); if (!user) return none;
     const [{ count: kids }, { data: task }, { data: dis }, states] = await Promise.all([
       sb.from("children").select("id", { count: "exact", head: true }).is("archived_at", null),
       sb.from("guided_tasks").select("completed_at").eq("key", "sitter_sheet").maybeSingle(),

@@ -38,3 +38,15 @@ export const getRequestUser = cache(async (): Promise<{ id: string; email: strin
   const c = data?.claims;
   return c?.sub ? { id: String(c.sub), email: typeof c.email === "string" ? c.email : null } : null;
 });
+
+// The signed-in person's own profile row, once per request. Today, the layout and the badge route each used to read
+// profiles separately (display_name, tab_bar, role, today_seen_at: four round trips, two of them serial) before the
+// page could paint. One read, shared by everyone in the request through React's cache (2026-10-30, Today slow).
+export type MyProfile = { id: string; display_name: string | null; role: string | null; tab_bar: string[] | null; today_seen_at: string | null };
+export const getMyProfile = cache(async (): Promise<MyProfile | null> => {
+  const user = await getRequestUser();
+  if (!user) return null;
+  const sb = await createClient();
+  const { data } = await sb.from("profiles").select("id, display_name, role, tab_bar, today_seen_at").eq("id", user.id).maybeSingle();
+  return (data as MyProfile | null) ?? null;
+});

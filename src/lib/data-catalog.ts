@@ -1,4 +1,4 @@
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createClient, hasSupabaseEnv, getRequestUser } from "@/lib/supabase/server";
 import type { CatalogView, AreaView } from "@/lib/catalog-shared";
 
 type Ph = { removed_at: string | null };
@@ -27,8 +27,8 @@ export async function getCatalogNudge(): Promise<{ show: boolean; started: boole
   const none = { show: false, started: false, done: 0, total: 0, next: null as string | null };
   if (!hasSupabaseEnv()) return none;
   try {
+    const user = await getRequestUser(); if (!user) return none;
     const sb = await createClient();
-    const { data: { user } } = await sb.auth.getUser(); if (!user) return none;
     const [v, { data: dis }] = await Promise.all([getCatalog(), sb.from("setup_dismissals").select("until").eq("person", user.id).eq("step", "catalog").gt("until", new Date().toISOString()).maybeSingle()]);
     if (v.completedAt || dis) return { ...none, started: v.started };
     const open = v.areas.filter((a) => !a.done);

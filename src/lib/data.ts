@@ -1,4 +1,4 @@
-import { createClient, getRequestUser, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createClient, getRequestUser, getMyProfile, hasSupabaseEnv } from "@/lib/supabase/server";
 
 export type Status = { key: string; state: "ok" | "warn" | "error" | "unknown"; summary: string; detail: string | null; value_num: number | null; updated_at: string };
 export type RegisterRow = { id: string; source: string; kind: string | null; status: "DONE" | "RUNNING" | "TODO" | "WAIT" | "OUT"; landed_at: string | null; route: string | null; backup: string | null; last_verified: string | null; open_items: string | null; owner: string | null; sort_order: number };
@@ -110,11 +110,10 @@ export async function getLog(limit = 50): Promise<LogRow[]> {
 
 export async function getDisplayName(): Promise<string> {
   if (!hasSupabaseEnv()) return "Ryan";
-  const sb = await createClient();
   const user = await getRequestUser();
   if (!user) return "";
-  const { data } = await sb.from("profiles").select("display_name").eq("id", user.id).single();
-  return data?.display_name ?? user.email ?? "";
+  const prof = await getMyProfile();
+  return prof?.display_name ?? user.email ?? "";
 }
 
 // ---- derived ----

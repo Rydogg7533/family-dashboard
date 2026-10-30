@@ -16,11 +16,16 @@ const NONE: Badges = { inboxHanded: 0, todayNew: 0, messages: 0 };
 // Badges: Today's new count, Inbox items handed to me, and unread replies in Messages, which also refresh the
 // moment a notification row changes (Realtime) so a reply shows within a second of the mirror writing it.
 export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolean }) {
-  const path = usePathname();
+  const realPath = usePathname();
+  // The tapped tab lights up at once, before the page arrives (Ryan, 2026-10-30: "doesn't switch on first tap" — the
+  // page was simply still rendering on the server with nothing on screen to show the tap had taken).
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => { setPending(null); }, [realPath]);
+  const path = pending ?? realPath;
   const [badges, setBadges] = useState<Badges>(NONE);
   const navRef = useRef<HTMLElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
-  const hidden = isFrameless(path);
+  const hidden = isFrameless(realPath);
   const tabs = resolveTabs(tabKeys);
   // tabs the person chose that are not on the bar are reached through More; More is active for anything not on the bar
   const onBar = new Set(tabs.map((t) => t.href));
@@ -30,7 +35,7 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
     fetch("/api/badges", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (j) setBadges({ inboxHanded: Number(j.inboxHanded) || 0, todayNew: Number(j.todayNew) || 0, messages: Number(j.messages) || 0 }); }).catch(() => {});
   }, []);
-  useEffect(() => { if (!hidden) refresh(); }, [path, hidden, refresh]);
+  useEffect(() => { if (!hidden) refresh(); }, [realPath, hidden, refresh]);
   useEffect(() => {
     // a thread page marks its replies seen and asks the bar to recount
     const onSeen = () => refresh();
@@ -111,7 +116,7 @@ export function Nav({ tabKeys, live = true }: { tabKeys: TabKey[]; live?: boolea
   const tab = (t: Tab) => {
     const active = isActive(t), n = count(t);
     return (
-      <Link key={t.key} href={t.href} prefetch={t.href === "/ask" ? undefined : true} data-active={active}
+      <Link key={t.key} href={t.href} prefetch={t.href === "/ask" ? undefined : true} data-active={active} onClick={() => setPending(t.href)}
         aria-label={n ? `${t.label}, ${n} new` : t.label} aria-current={active ? "page" : undefined}
         className={`shrink-0 snap-start pt-3 pb-0.5 flex flex-col items-center justify-end gap-1 ${scrolls ? "w-[25%] min-w-[64px]" : "flex-1 min-w-[60px]"} ${active ? "text-accent" : "text-muted"}`}>
         <span data-active={active} className="tabbar-pill relative flex items-center justify-center w-16 h-8">
