@@ -95,7 +95,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           </button>
         )}
         {matchedStatements > 1 && (
-          <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); router.refresh(); }); }} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold disabled:opacity-50">
+          <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was confirmed. Check the Inbox before tapping again." }); setFilingAll(false); router.refresh(); }); }} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold disabled:opacity-50">
             {filingAll ? "Filing…" : `File all matched statements (${matchedStatements})`}
           </button>
         )}

@@ -71,11 +71,25 @@ export async function fileMatchedStatements(): Promise<{ ok: boolean; filed: num
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, filed: 0, left: 0, summary: "Not signed in." };
-  const { data: rows } = await sb.from("inbox_items").select("id,options").eq("status", "open").eq("read_result->>kind", "statement").limit(60);
-  const ids = ((rows ?? []) as { id: string; options: string[] | null }[]).filter((r) => r.options?.[0] === FILE_YES && r.options.length === 2).map((r) => r.id);
+  const { data: rows } = await sb.from("inbox_items").select("id,title,options,read_result").eq("status", "open").eq("read_result->>kind", "statement").limit(60);
+  const picked = ((rows ?? []) as { id: string; title: string; options: string[] | null; read_result: { statement_name?: string } | null }[]).filter((r) => r.options?.[0] === FILE_YES && r.options.length === 2);
+  if (!picked.length) return { ok: true, filed: 0, left: 0, summary: "Nothing to file: no statement is matched to an account yet." };
   let filed = 0;
-  for (const id of ids) { const r = await fileCapture(id, FILE_YES).catch(() => null); if (r?.ok && !r.kept) filed++; }
-  return { ok: true, filed, left: ids.length - filed, summary: `Filed ${filed} statement${filed === 1 ? "" : "s"}${ids.length - filed ? `; ${ids.length - filed} still need a look` : ""}.` };
+  const why: string[] = [];
+  for (const it of picked) {
+    const label = it.read_result?.statement_name || it.title;
+    try {
+      const r = await fileCapture(it.id, FILE_YES);
+      if (r.ok && !r.kept) filed++;
+      else why.push(`${label}: ${r.summary}`);
+    } catch (e) {
+      why.push(`${label}: filing failed (${e instanceof Error ? e.message : "unknown error"}). Nothing was changed for it.`);
+    }
+  }
+  const left = picked.length - filed;
+  // Every statement that was not filed is named with its reason. A bare count would be a silent failure.
+  const detail = why.slice(0, 3).join(" ") + (why.length > 3 ? ` (+${why.length - 3} more)` : "");
+  return { ok: left === 0, filed, left, summary: `Filed ${filed} of ${picked.length} statement${picked.length === 1 ? "" : "s"}.${left ? ` Not filed: ${detail}` : ""}` };
 }
 
 export type CapturedFile = { name: string; path: string | null; mime: string; size: number; sha256: string | null; failed?: string };
