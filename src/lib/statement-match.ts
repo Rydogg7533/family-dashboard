@@ -39,3 +39,15 @@ export function resolveAccount(accounts: AccountRow[], printedLast4: unknown, fi
   const b = accountFromFileName(accounts, fileName);
   return b ? { acct: b, via: "file name" } : null;
 }
+
+// Why a statement could not be matched, in one plain sentence for the top of the question. Null when it can be matched.
+export function whyNoMatch(accounts: AccountRow[], printedLast4: unknown, fileName: unknown, confidence?: number | null): string | null {
+  if (resolveAccount(accounts, printedLast4, fileName)) return typeof confidence === "number" && confidence < 0.6 ? "Not matched on my own: I was not sure enough of the read." : null;
+  const l4 = last4Of(printedLast4);
+  if (l4.length === 4) return `Not filed: the page shows ····${l4}, but none of your accounts ends in that. Add it in Settings, or pick one.`;
+  const base = String(fileName ?? "").split("/").pop() ?? "";
+  const groups = [...base.matchAll(/(?<![A-Za-z0-9])([0-9]{4})(?![A-Za-z0-9])/g)].map((m) => m[1]).filter((g) => !/^(19|20)[0-9]{2}$/.test(g));
+  const hits = new Set(accounts.filter((a) => !a.retired_at && groups.includes(a.last4)).map((a) => a.id));
+  if (hits.size > 1) return "Not filed: the file name points at more than one of your accounts.";
+  return "Not filed: no account number was found on the page, and the file name matches none of your accounts.";
+}

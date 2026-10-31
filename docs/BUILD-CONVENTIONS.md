@@ -28,3 +28,11 @@ Verification: `npx next build` must pass with zero errors before you finish. The
 - Picking one stored value from four or more choices, or from a list that grows (account type, entity, which account a card draws on, subject kind): use the plain native `<select>`. On iPhone it opens as the Apple wheel; on desktop it is a menu. No custom wheel or dropdown.
 - Chips stay for actions and views: one-tap answers (Inbox options), filters and tabs, quick actions, and two-way toggles (Physical / Virtual).
 - A selector whose last choice is "Other…" opens a text box; a blank Other is refused, never saved as a default.
+
+## Text stays inside its box (Ryan, 2026-10-30)
+- Text never runs past a border, behind it, or over another element, on any screen. `body { overflow-wrap: anywhere }` is the safety net; long text wraps, or is cut with "…" and opens in full on tap.
+- A full file path is never shown on a card by default. Show the place by its plain name ("Wells Fargo ····6006 statements"); the path sits behind a closed "Where it goes" link.
+- `scripts/overflow-check.mjs` opens the key pages at 390px in sample mode and fails on anything wider than its box. Run it before every merge.
+
+## No silent actions (Ryan, 2026-10-30)
+- Anything the app does on its own says what it did and why: a notice on screen and a line in the activity log. Anything it refuses or will not file says the reason, in plain words, at the top of the question.

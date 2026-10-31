@@ -5,7 +5,7 @@ import { cleanLines, effectiveCategory, vehicleLines } from "@/lib/receipt-lines
 import { categoryPromptBlock } from "@/lib/categories";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
-import { resolveAccount, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, whyNoMatch, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
 import { FILE_YES, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
@@ -85,12 +85,13 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
     parsed.statement_account = acct ? { id: acct.id, label: accountLabel(acct) } : null;
     const sName = acct ? statementName(period, acct) : (name ?? `${period} statement`);
     const sHome = acct ? statementHome(period, acct) : `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/`;
-    parsed.plan = [{ t: "file", text: `${sName} → kept in the app; a copy goes to ${sHome} when the Mac mini filing agent is running` }, { t: "link", text: acct ? `Money › ${accountLabel(acct)}: statement for ${period} on the account; the monthly routine step ticks itself` : "Not linked to an account until you say which" }];
+    parsed.statement_name = sName;
+    parsed.plan = [{ t: "file", text: `Will be named ${sName}; a copy is placed in the account's statements folder (shown below)` }, { t: "link", text: acct ? `Money › ${accountLabel(acct)}: ${period} is ticked off` : "Not linked to an account until you say which" }];
     parsed.home = sHome;
     const bal = typeof parsed.statement_balance === "number" ? `, balance $${(parsed.statement_balance as number).toFixed(2)}` : "";
     const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
     if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}${found?.via === "file name" ? " (matched by the file name)" : ""}. File it?`; update.options = [FILE_YES, FILE_NO]; }
-    else { update.missing = `Looks like a statement${bal}${parsed.card_last4 ? ` ending ····${String(parsed.card_last4).replace(/\D/g, "").slice(-4)}` : ""}, ${period}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
+    else { update.missing = `${whyNoMatch(list, parsed.card_last4, parsed.file_name_hint, conf) ?? "Not matched on my own."} Statement ${period}${bal}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
     return { update, name: sName as string | null, conf, ruleLabel: "" };
   }
 

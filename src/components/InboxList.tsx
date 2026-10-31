@@ -10,7 +10,7 @@ import { NeededToContinue } from "@/components/c/NeededToContinue";
 import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture, sweepRuleAnswered } from "@/app/inbox/read";
-import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, fileMatchedStatements, type CapturedFile } from "@/app/inbox/actions";
+import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, fileMatchedStatements, recheckStatements, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
@@ -74,6 +74,8 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
 
   const matchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && i.options.length === 2 && i.options[0] === FILE_YES).length;
   const [filingAll, setFilingAll] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const unmatchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && !(i.options.length === 2 && i.options[0] === FILE_YES)).length;
 
   return (
     <>
@@ -86,6 +88,11 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
+        {unmatchedStatements > 0 && (
+          <button type="button" disabled={checking} onClick={() => { setChecking(true); void recheckStatements().then((r) => { setToast({ text: r.summary }); setChecking(false); router.refresh(); }); }} className="w-full min-h-11 mb-2 rounded-xl border border-line text-sm font-semibold disabled:opacity-50">
+            {checking ? "Checking…" : `Check ${unmatchedStatements} waiting statement${unmatchedStatements === 1 ? "" : "s"} against my accounts`}
+          </button>
+        )}
         {matchedStatements > 1 && (
           <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); router.refresh(); }); }} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold disabled:opacity-50">
             {filingAll ? "Filing…" : `File all matched statements (${matchedStatements})`}
@@ -141,10 +148,14 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
   const [thread, setThread] = useState(false);
   const router = useRouter();
   const [handBusy, setHandBusy] = useState(false);
+  const [where, setWhere] = useState(false);
   const otherId = Object.keys(names).find((x) => x !== me) ?? null;
   const assignedName = item.assigned_to ? names[item.assigned_to] : null;
   const by = item.created_by && names[item.created_by] ? names[item.created_by] : item.requested_by;
   const rrk = item.read_result as { kind?: string; error?: string } | null;
+  const isStatement = rrk?.kind === "statement";
+  const stRead = item.read_result as { statement_name?: string; statement_period?: string } | null;
+  const shownTitle = isStatement ? (stRead?.statement_name ?? (stRead?.statement_period ? `${stRead.statement_period} statement` : item.title)) : item.title;
   const showRead = !!item.file_path && !!rrk && !("error" in rrk) && ["receipt", "bill", "warranty", "service_report", "form", "other"].includes(String(rrk.kind ?? ""));
   const vehicleMissing = showRead && inboxStatus(item) === "missing_info" && item.options.includes(NOT_VEHICLE);
   async function hand(to: string | null) { setHandBusy(true); await assignInboxItem(item.id, to).catch(() => null); setHandBusy(false); router.refresh(); }
@@ -157,7 +168,7 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
             ? <span className="text-[11px] font-bold tracking-wide rounded-full bg-soft text-accent px-2 py-0.5">NEEDS YOUR ANSWER</span>
             : <span className="text-[11px] font-bold tracking-wide rounded-full border border-amber text-amber px-2 py-0.5">MISSING: {missingNote(item).toUpperCase()}</span>}
         </div>
-        <div className="font-semibold">{item.title}</div>
+        <div className="font-semibold">{shownTitle}</div>
         <div className="text-xs text-muted mt-0.5">{by === "System" ? "System" : by.includes("@") ? "Uploaded" : `${by} asked`}{item.for_person ? ` · for ${item.for_person}` : ""} · {item.origin} · {item.file_path ? <a href={`/api/capture/${item.id}`} target="_blank" rel="noreferrer" className="font-semibold text-accent">View the file</a> : <a href={item.origin_href} className="font-semibold text-accent">Open in {item.origin_label}</a>}</div>
       </div>
       {item.thread && (
@@ -169,13 +180,17 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
       {showRead && <ReadFields id={item.id} rr={item.read_result as ReadShape} />}
       {item.read_result?.plan && item.read_result.plan.length > 0 && (
         <div className="rounded-xl bg-soft px-3 py-2 text-xs">
-          <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>
+          {isStatement
+            ? <button type="button" onClick={() => setWhere((v) => !v)} aria-expanded={where} className="font-semibold text-accent min-h-8">{where ? "Hide where it goes" : "Where it goes ›"}</button>
+            : <div className="font-bold tracking-wide text-muted mb-1">IF YOU SAY YES</div>}
+          {(!isStatement || where) && <>
           <ul className="flex flex-col gap-1">{item.read_result.plan.map((p, i) => { const o = typeof p === "string" ? { t: "link" as const, text: p } : p; return (<li key={i} className="flex gap-2"><span className={`shrink-0 rounded px-1.5 text-[10px] font-bold leading-5 ${o.t === "file" ? "bg-accent text-white" : "bg-line text-muted"}`}>{o.t === "file" ? "FILED" : "LINK"}</span><span>{o.text}</span></li>); })}</ul>
           {(() => { const d = destination(item.read_result as DestRead | null); const w = folderWarnings(item.read_result as DestRead | null); return (<>
             {d && <div className="mt-1.5"><span className="font-bold tracking-wide text-muted">FOLDER </span>{d.text}</div>}
-            {w.length > 0 && <div className="mt-1 font-semibold text-amber">Check the folder: {w.join(" ")}</div>}
+            {!isStatement && w.length > 0 && <div className="mt-1 font-semibold text-amber">Check the folder: {w.join(" ")}</div>}
           </>); })()}
           {item.options.includes("File it and open a reimbursement claim") && item.read_result.claim_plan && <div className="mt-1 text-muted">With a claim, also: {item.read_result.claim_plan.replace("LINK ", "link: ")}</div>}
+          </>}
         </div>
       )}
       {me && otherId && (
@@ -186,17 +201,17 @@ function InboxCard({ item, me, names, paid, onAnswer }: { item: InboxItem; me: s
         </div>
       )}
       {inboxStatus(item) === "needs_answer" && isFiledByCard(item.read_result as DestRead) && <PaidWith item={item} known={paid.known} suggestion={paid.suggestions[item.id] ?? null} />}
-      {item.read_result?.home && !isFiledByCard(item.read_result as DestRead) && <FolderFix item={item} />}
+      {item.read_result?.home && !isStatement && !isFiledByCard(item.read_result as DestRead) && <FolderFix item={item} />}
       <div className="text-sm font-semibold text-amber">{item.missing}</div>
       {vehicleMissing
         ? <NeededToContinue id={item.id} vehicles={item.options.filter((o) => o !== NOT_VEHICLE)} onNotVehicle={() => onAnswer(NOT_VEHICLE)} notVehicleLabel={NOT_VEHICLE} />
         : <div className="flex flex-wrap gap-1.5">
         {item.options.map((o) => <button key={o} onClick={() => onAnswer(o)} className="min-h-10 px-3 rounded-full border border-line text-sm font-semibold">{o}</button>)}
       </div>}
-      <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) onAnswer(text.trim()); }} className="flex gap-2">
+      {!isStatement && <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) onAnswer(text.trim()); }} className="flex gap-2">
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Or answer in words…" className="flex-1 min-h-10 rounded-xl border border-line bg-bg px-3 text-sm" />
         <button type="submit" disabled={!text.trim()} className="min-h-10 px-3 rounded-xl bg-soft text-sm font-semibold disabled:opacity-40">Answer</button>
-      </form>
+      </form>}
     </div>
   );
 }

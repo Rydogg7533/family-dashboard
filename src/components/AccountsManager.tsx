@@ -16,10 +16,11 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
   const [form, setForm] = useState<AccountInput | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const entityOptions = ["Personal", "Business"];
   const entityChoice = form && entityOptions.includes(form.entity) ? form.entity : OTHER;   // any other saved entity shows under "Other…" with its name
   const edit = (a: Account) => setForm({ id: a.id, kind: a.kind, institution: a.institution, last4: a.last4, owner: a.owner, entity: a.entity, statement_arrival_day: a.statement_arrival_day ?? null, statement_delivery: a.statement_delivery ?? "email_pdf" });
-  const save = async () => { if (!form) return; if (entityChoice === OTHER && !form.entity.trim()) { setErr("Name the entity, or choose Personal or Business."); return; } setBusy(true); setErr(null); const x = await saveAccount(form); setBusy(false); if (x.ok) { setForm(null); router.refresh(); } else setErr(x.error ?? "Could not save."); };
+  const save = async () => { if (!form) return; if (entityChoice === OTHER && !form.entity.trim()) { setErr("Name the entity, or choose Personal or Business."); return; } setBusy(true); setErr(null); const x = await saveAccount(form); setBusy(false); if (x.ok) { setForm(null); setNotice(x.notice ?? null); router.refresh(); } else setErr(x.error ?? "Could not save."); };
   const field = "min-h-10 rounded-lg border border-line bg-bg px-3 text-sm";
   return (
     <div className="flex flex-col gap-2">
@@ -33,6 +34,7 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
         </div>
       ))}
       {accounts.filter((a) => !a.retired_at).length === 0 && <div className="card text-sm text-muted">No accounts yet. Add every card and bank account that sends a monthly statement.</div>}
+      {notice && <div role="status" className="card text-sm font-semibold text-accent">{notice} <a href="/inbox" className="underline">Open the Inbox ›</a></div>}
       {!form && <button onClick={() => setForm({ ...blank })} className="min-h-11 rounded-xl border border-line font-semibold text-accent">+ Add an account</button>}
       {form && (
         <div className="card flex flex-col gap-2">
@@ -59,7 +61,7 @@ export function AccountsManager({ accounts, owners }: { accounts: Account[]; own
           <div className="flex gap-2">
             <button disabled={busy} onClick={save} className="min-h-11 flex-1 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">Save</button>
             <button onClick={() => { setForm(null); setErr(null); }} className="min-h-11 px-4 rounded-xl border border-line font-semibold">Cancel</button>
-            {form.id && <button onClick={async () => { await retireAccount(form.id!); setForm(null); router.refresh(); }} className="min-h-11 px-4 rounded-xl border border-line text-sm text-muted">Retire</button>}
+            {form.id && <button onClick={async () => { const x = await retireAccount(form.id!); setNotice(x.notice ?? null); setForm(null); router.refresh(); }} className="min-h-11 px-4 rounded-xl border border-line text-sm text-muted">Retire</button>}
           </div>
         </div>
       )}

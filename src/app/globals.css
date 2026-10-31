@@ -81,6 +81,11 @@ h1, h2, h3, .display { font-family: var(--font-display); font-weight: 800; }
 .ok { color: var(--green); } .warn { color: var(--amber); } .err { color: var(--red); }
 
 /* No accidental zoom: double-tap zoom off, 16px form fields so iOS does not zoom in on focus, no sideways drift. Pinch zoom stays available on purpose (accessibility). */
+/* Text never runs past its box, behind a border or over another element (Ryan, 2026-10-30). A long unbroken string such as a file path
+   wraps anywhere instead of overflowing; "anywhere" (not break-word) also lets flex children shrink below the string's width.
+   Text meant to be cut with "…" keeps its own truncate; tables keep normal wrapping so figures are not split. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
 html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip; }
 /* Issue eaf9b3f6 (2026-10-28): the bottom tab bar "floated" while scrolling on iPhone — a window rubber band drags fixed
    elements with it in Safari. 2026-10-30: the window no longer scrolls at all (html/body pinned to the viewport); the page

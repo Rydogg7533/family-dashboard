@@ -6,6 +6,7 @@ import { FILE_YES, FILE_CLAIM, FILE_NO } from "@/lib/inbox-answers";
 import { SKIP, CLEAR } from "@/lib/paid-with";
 import { filingFolders, vendorKey, toTemplate } from "@/lib/filing-folders";
 import { callModel, jsonObjectValid } from "@/lib/ai";
+import { refreshOpenStatements } from "@/lib/statement-rematch";
 
 // "Paid with" chosen on the card before the Yes tap: stored on the read, applied when the receipt is filed. SKIP = not now.
 export async function setInboxPaidWith(id: string, value: string): Promise<{ ok: boolean }> {
@@ -49,6 +50,18 @@ export async function resolveInboxItem(id: string, answer: string, _makeRule: bo
     await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "inbox_resolved", subject: `${id}: ${answer}`, ref: id, undoable: true }).then(() => {}, () => {});
   }
   return { ok: !error };
+}
+
+// "Check against my accounts": the same re-match that runs when an account is saved, on request. Says what it changed; files nothing.
+export async function recheckStatements(): Promise<{ ok: boolean; summary: string }> {
+  if (!hasSupabaseEnv()) return { ok: true, summary: "Sample mode." };
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return { ok: false, summary: "Not signed in." };
+  const r = await refreshOpenStatements(sb).catch(() => null);
+  if (!r) return { ok: false, summary: "Could not check the statements. Nothing was changed." };
+  if (r.notice) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "statements_rematched", subject: r.notice.slice(0, 200), ref: null, undoable: false }).then(() => {}, () => {});
+  return { ok: true, summary: r.notice ?? "Checked: nothing changed. Every waiting statement already matches your accounts, or still needs one you have not added." };
 }
 
 // "File all matched": files every open statement that is already matched to exactly one account (it asks only "File it?").

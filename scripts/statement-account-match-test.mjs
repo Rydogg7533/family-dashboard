@@ -1,5 +1,5 @@
 // Matching a statement to an account: printed last four first, then a 4-digit group in the file name.
-import { accountFromFileName, resolveAccount } from "../src/lib/statement-match.ts";
+import { accountFromFileName, resolveAccount, whyNoMatch } from "../src/lib/statement-match.ts";
 let bad = 0;
 const eq = (n, a, b) => { if (a !== b) { bad++; console.log(`FAIL ${n}: got ${a}, want ${b}`); } };
 const A = (id, last4, retired_at = null) => ({ id, institution: id, last4, retired_at });
@@ -18,5 +18,10 @@ eq("printed wins", resolveAccount(accts, "6006", "x-5761 - 1.pdf")?.via, "printe
 eq("printed acct", id(resolveAccount(accts, "6006", "x-5761 - 1.pdf")?.acct), "visa-6006");
 eq("falls back", resolveAccount(accts, null, "x-0848 - 1.pdf")?.via, "file name");
 eq("neither", resolveAccount(accts, null, "scan.pdf"), null);
+eq("why: matched", whyNoMatch(accts, "6006", "x.pdf", 0.9), null);
+eq("why: low confidence", /not sure enough/.test(whyNoMatch(accts, "6006", "x.pdf", 0.3) ?? ""), true);
+eq("why: printed number not an account", /shows ····4444.*none of your accounts/.test(whyNoMatch(accts, "4444", "x.pdf") ?? ""), true);
+eq("why: nothing found", /no account number was found.*matches none/.test(whyNoMatch(accts, null, "scan.pdf") ?? ""), true);
+eq("why: two accounts in the name", /more than one/.test(whyNoMatch(accts, null, "5761 and 1128.pdf") ?? ""), true);
 console.log(bad ? `${bad} FAILED` : "statement account match: all passed");
 process.exit(bad ? 1 : 0);

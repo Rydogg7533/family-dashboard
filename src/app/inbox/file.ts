@@ -12,7 +12,7 @@ import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
 import { vehicleLines, lineLabel, type Line } from "@/lib/receipt-lines";
-import { resolveAccount, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, whyNoMatch, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; vehicle_pick?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
@@ -41,13 +41,19 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
   const wantClaim = answer === FILE_CLAIM;
 
   // 0. A statement: linked to its account for the period, filed under Statements, never turned into a receipt.
+  if (r.kind === "statement" && answer === "Something else") {
+    // Not a statement after all: nothing is filed; the item goes back to a plain "what is this?" with the reason stated.
+    await sb.from("inbox_items").update({ missing: "Not filed as a statement. What is this? A receipt, a bill, a form, or something else?", options: ["Receipt", "Bill", "Form", "Something else"], read_result: null }).eq("id", inboxId);
+    await recordOutcome(sb, { kind: "inbox_item", id: inboxId, feature: "capture-read", outcome: "rejected" });
+    return { ok: true, summary: "Okay, not a statement. Nothing was filed.", kept: true };
+  }
   if (r.kind === "statement") {
     const { data: accts } = await sb.from("accounts").select("id,institution,last4,retired_at");
     const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
     const acct = accountFromAnswer(list, answer) ?? resolveAccount(list, r.card_last4, (r as { file_name_hint?: string }).file_name_hint ?? row.file_path)?.acct ?? null;
     if (!acct) {
-      await sb.from("inbox_items").update({ missing: "Which account is this statement for?", options: [...list.map((a) => `${a.institution} ····${a.last4}`), "Something else"] }).eq("id", inboxId);
-      return { ok: true, summary: "Which account is it for?", kept: true };
+      await sb.from("inbox_items").update({ missing: `${whyNoMatch(list, r.card_last4, (r as { file_name_hint?: string }).file_name_hint ?? row.file_path, null) ?? "Not matched on my own."} Which account is this statement for?`, options: [...list.map((a) => `${a.institution} ····${a.last4}`), "Something else"] }).eq("id", inboxId);
+      return { ok: true, summary: "Not filed yet: I still need to know which account it is for.", kept: true };
     }
     const period = (r.statement_period && /^\d{4}-\d{2}$/.test(r.statement_period) ? r.statement_period : null) ?? (r.closing_date ?? r.date ?? new Date().toISOString()).slice(0, 7);
     const sName = statementName(period, acct);
