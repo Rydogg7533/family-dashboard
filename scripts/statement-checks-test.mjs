@@ -70,6 +70,19 @@ eq("month-end closers: no warns", [r.byItem.a.warns.length, r.byItem.b.warns.len
 r = checkStatements([it("a", "chk", "2026-07-31"), it("c", "chk", "2026-09-30")], [], today);
 eq("missing August", r.gaps, { chk: ["2026-08"] });
 
+// The same file under two different accounts is held; the same file twice under one account is the duplicate-month rule's job.
+const sh = (id, acct, closing, sha) => ({ ...it(id, acct, closing), sha });
+r = checkStatements([sh("a", "chk", "2026-07-31", "H1"), sh("b", "sav", "2026-07-31", "H1")], [], today);
+eq("same file, two accounts: both held", [r.byItem.a.blocks.length, r.byItem.b.blocks.length], [1, 1]);
+r = checkStatements([sh("a", "chk", "2026-07-31", "H1"), sh("b", "sav", "2026-07-31", "H2")], [], today);
+eq("different files: fine", [r.byItem.a.blocks.length, r.byItem.b.blocks.length], [0, 0]);
+r = checkStatements([sh("a", "sav", "2026-07-31", "H1")], [{ acct: "chk", acctLabel: "Wells Fargo ····0848", period: "2026-07", closing: "2026-07-31", inboxId: "z", name: "2026-07 statement", sha: "H1" }], today);
+eq("same file already filed elsewhere: held, names it", [r.byItem.a.blocks.length, r.byItem.a.blocks[0].includes("Wells Fargo ····0848")], [1, true]);
+r = checkStatements([sh("a", "chk", "2026-07-31", "H1")], [{ acct: "chk", period: "2026-07", closing: "2026-07-31", inboxId: "a", name: "itself", sha: "H1" }], today);
+eq("its own filed row is not 'elsewhere'", r.byItem.a.blocks.length, 0);
+r = checkStatements([{ ...sh("a", "chk", "2026-07-31", null) }, { ...sh("b", "sav", "2026-07-31", null) }], [], today);
+eq("no fingerprint: no hold", [r.byItem.a.blocks.length, r.byItem.b.blocks.length], [0, 0]);
+
 // The question: a clean card asks "File it?", a held one says why and offers "File it anyway".
 const t = { label: "Wells Fargo ····4230", period: "2026-08", closing: "2026-09-08", balance: null, via: "file name" };
 eq("clean question", statementQuestion(t, { blocks: [], warns: [] }).options, ["Yes, file it", "Not quite"]);

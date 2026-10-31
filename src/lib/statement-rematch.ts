@@ -10,14 +10,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveAccount, whyNoMatch, accountLabel, conflictNote, statementName, type AccountRow } from "@/lib/statement-match";
 import { resolvePeriod, checkStatements, statementQuestion, type StItem, type StFiled, type StCheck } from "@/lib/statement-checks";
 
-type Item = { id: string; title: string | null; file_path: string | null; read_result: Record<string, unknown> | null; options: string[] | null; missing: string | null };
+type Item = { id: string; sha256?: string | null; title: string | null; file_path: string | null; read_result: Record<string, unknown> | null; options: string[] | null; missing: string | null };
 const baseName = (s: string | null) => (s ?? "").split("/").pop()?.trim() || "this file";
 const hintOf = (rr: Record<string, unknown>, it: Item) => (rr.file_name_hint as string | undefined) ?? it.file_path;
 
 export async function checkOpenStatements(sb: SupabaseClient): Promise<{ blocked: number; warned: number; gaps: Record<string, string[]> }> {
-  const { data: rows } = await sb.from("inbox_items").select("id,title,file_path,read_result,options,missing").eq("status", "open").eq("read_result->>kind", "statement").limit(200);
+  const { data: rows } = await sb.from("inbox_items").select("id,title,file_path,read_result,options,missing,sha256").eq("status", "open").eq("read_result->>kind", "statement").limit(200);
   const { data: filedRows } = await sb.from("account_statements").select("account_id,period,closing_date,inbox_id,name").limit(2000);
-  const filed: StFiled[] = ((filedRows ?? []) as { account_id: string; period: string; closing_date: string | null; inbox_id: string | null; name: string | null }[]).map((f) => ({ acct: f.account_id, period: f.period, closing: f.closing_date, inboxId: f.inbox_id, name: f.name ?? `${f.period} statement` }));
+  // A filed statement's file fingerprint lives on its Inbox item; its account's name comes from the accounts list.
+  const filedIds = ((filedRows ?? []) as { inbox_id: string | null }[]).map((f) => f.inbox_id).filter((x): x is string => !!x);
+  const { data: shaRows } = filedIds.length ? await sb.from("inbox_items").select("id,sha256").eq("status", "resolved").eq("read_result->>kind", "statement").limit(2000) : { data: [] as { id: string; sha256: string | null }[] };
+  const shaOf = new Map(((shaRows ?? []) as { id: string; sha256: string | null }[]).map((r) => [r.id, r.sha256]));
+  const { data: acctRows } = await sb.from("accounts").select("id,institution,last4");
+  const labelOf = new Map(((acctRows ?? []) as { id: string; institution: string; last4: string }[]).map((a) => [a.id, `${a.institution} ····${a.last4}`]));
+  const filed: StFiled[] = ((filedRows ?? []) as { account_id: string; period: string; closing_date: string | null; inbox_id: string | null; name: string | null }[]).map((f) => ({ acct: f.account_id, acctLabel: labelOf.get(f.account_id), period: f.period, closing: f.closing_date, inboxId: f.inbox_id, name: f.name ?? `${f.period} statement`, sha: f.inbox_id ? shaOf.get(f.inbox_id) ?? null : null }));
   const items: StItem[] = [];
   const src = new Map<string, { it: Item; rr: Record<string, unknown> }>();
   for (const it of (rows ?? []) as Item[]) {
@@ -25,7 +31,7 @@ export async function checkOpenStatements(sb: SupabaseClient): Promise<{ blocked
     const acct = rr.statement_account as { id: string; label: string } | null | undefined;
     if (!acct) continue;
     const pr = resolvePeriod(rr as { closing_date?: unknown; statement_period?: unknown; date?: unknown }, hintOf(rr, it));
-    items.push({ id: it.id, acct: acct.id, label: acct.label, period: pr.period, closing: pr.closing, fileDate: pr.fileDate, basis: pr.basis, conflict: (rr.statement_conflict as string | null | undefined) ?? null, name: baseName(it.title ?? it.file_path) });
+    items.push({ id: it.id, acct: acct.id, label: acct.label, period: pr.period, closing: pr.closing, fileDate: pr.fileDate, basis: pr.basis, conflict: (rr.statement_conflict as string | null | undefined) ?? null, name: baseName(it.title ?? it.file_path), sha: it.sha256 ?? null });
     src.set(it.id, { it, rr });
   }
   const { byItem, gaps } = checkStatements(items, filed, new Date().toISOString().slice(0, 10));

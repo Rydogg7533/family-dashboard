@@ -40,8 +40,8 @@ export function resolvePeriod(r: { closing_date?: unknown; statement_period?: un
 }
 
 // ---- the checks -------------------------------------------------------------------------------------------------------------------
-export type StItem = { id: string; acct: string | null; label: string; period: string | null; closing: string | null; fileDate: string | null; basis: PeriodRead["basis"]; conflict?: string | null; name: string };
-export type StFiled = { acct: string; period: string; closing: string | null; inboxId: string | null; name: string };
+export type StItem = { id: string; acct: string | null; label: string; period: string | null; closing: string | null; fileDate: string | null; basis: PeriodRead["basis"]; conflict?: string | null; name: string; sha?: string | null };
+export type StFiled = { acct: string; acctLabel?: string; period: string; closing: string | null; inboxId: string | null; name: string; sha?: string | null };
 export type StCheck = { blocks: string[]; warns: string[] };
 
 // Blocks stop the statement from filing by itself (and from "File all"); the person can still tap "File it anyway". Warns only inform.
@@ -58,6 +58,13 @@ export function checkStatements(items: StItem[], filed: StFiled[], today: string
     if (it.basis === "none") c.blocks.push("No closing date or month was found.");
     if (it.closing && it.fileDate && it.closing !== it.fileDate) c.blocks.push(`The page says it closes ${shortDate(it.closing)}, but the file name says ${shortDate(it.fileDate)}.`);
     if (it.closing && (it.closing < earliest || it.closing > latest)) c.blocks.push(`The closing date ${it.closing} does not look right.`);
+    // The very same file (identical contents) already sitting with a different account: a combined statement, or one upload filed twice.
+    if (it.sha) {
+      const otherWait = items.find((o) => o.id !== it.id && o.sha === it.sha && o.acct && o.acct !== it.acct);
+      const otherFiled = filed.find((f) => f.sha === it.sha && f.acct !== it.acct && f.inboxId !== it.id);
+      if (otherFiled) c.blocks.push(`This exact file is already filed for ${otherFiled.acctLabel ?? otherFiled.acct} (${otherFiled.name}). One combined statement for both accounts, or the same file uploaded twice?`);
+      else if (otherWait) c.blocks.push(`This exact file is also waiting for ${otherWait.label}. One combined statement for both accounts, or the same file uploaded twice?`);
+    }
     if (it.period) {
       const sameWait = items.filter((o) => o.id !== it.id && o.acct === it.acct && o.period === it.period);
       const sameFiled = filed.filter((f) => f.acct === it.acct && f.period === it.period && f.inboxId !== it.id);
