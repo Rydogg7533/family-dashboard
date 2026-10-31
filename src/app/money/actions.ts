@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { refreshOpenStatements } from "@/lib/statement-rematch";
+import { sharedLast4 } from "@/lib/statement-checks";
 
 // Per-item capture: the browser stores the file in the private captures bucket; this records the proof pointing at it.
 export async function attachProof(transactionId: string, kind: "photo" | "digital_receipt" | "statement_line", fileName: string | null, storedPath: string | null = null) {
@@ -85,12 +86,14 @@ export async function saveAccount(a: AccountInput) {
   const day = a.statement_arrival_day && a.statement_arrival_day >= 1 && a.statement_arrival_day <= 31 ? Math.round(a.statement_arrival_day) : null;
   const row = { kind: a.kind, institution, last4, owner: a.owner.trim() || "Joint", entity: a.entity.trim() || "Personal", statement_arrival_day: day, statement_delivery: a.statement_delivery, retired_at: null as string | null };
   const id = a.id || `${institution}-${last4}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const { data: others } = await sb.from("accounts").select("id,institution,last4,retired_at");
+  const shared = sharedLast4((others ?? []) as { id: string; institution: string; last4: string; retired_at: string | null }[], last4, a.id || id);   // allowed, but said out loud
   const { error } = a.id ? await sb.from("accounts").update(row).eq("id", a.id) : await sb.from("accounts").insert({ id, ...row, source: "manual" });
   const rematch = !error ? await refreshOpenStatements(sb).catch(() => null) : null;   // open Inbox statements pick the new or changed account up now
   if (rematch?.notice) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "statements_rematched", subject: rematch.notice.slice(0, 200), ref: id, undoable: false }).then(() => {}, () => {});
   if (!error) await sb.from("activity_log").insert({ actor: user.email ?? "member", action: "account_saved", subject: `${institution} ••${last4}`, ref: id, undoable: false }).then(() => {}, () => {});
   revalidatePath("/money"); revalidatePath("/money/accounts"); revalidatePath("/settings/money/accounts"); revalidatePath("/money/receipts");
-  return { ok: !error, error: error ? (error.code === "23505" ? "That account is already listed." : "Only an owner can change accounts.") : undefined, notice: rematch?.notice ?? null };
+  return { ok: !error, error: error ? (error.code === "23505" ? "That account is already listed." : "Only an owner can change accounts.") : undefined, notice: [shared, rematch?.notice].filter(Boolean).join(" ") || null };
 }
 export async function retireAccount(id: string) {
   if (!hasSupabaseEnv()) return { ok: true };

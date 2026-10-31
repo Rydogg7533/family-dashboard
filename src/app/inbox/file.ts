@@ -5,14 +5,16 @@
 import { revalidatePath } from "next/cache";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
-import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT, NOT_VEHICLE } from "@/lib/inbox-answers";
+import { FILE_CLAIM, FILE_NO, FILE_SAME, FILE_DIFFERENT, NOT_VEHICLE, FILE_ANYWAY } from "@/lib/inbox-answers";
 import { recordOutcome, recordFilingOutcome } from "@/lib/ai-outcomes";
 import { findSameReceipt, findOrderReceipt, extractOrderNumber, amountsMatch, blanksToFill, attachDocument, normalizeVendor } from "@/lib/receipt-match";
 import { defaultAssignment } from "@/lib/task-defaults";
 import { syncWarrantyTasks } from "@/lib/warranties";
 import { matchVehicle, vehicleFor, type VRow } from "@/lib/match-vehicle";
 import { vehicleLines, lineLabel, type Line } from "@/lib/receipt-lines";
-import { resolveAccount, whyNoMatch, accountFromAnswer, statementName, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, whyNoMatch, accountFromAnswer, accountLabel, statementName, type AccountRow } from "@/lib/statement-match";
+import { resolvePeriod } from "@/lib/statement-checks";
+import { checkOpenStatements } from "@/lib/statement-rematch";
 
 type Read = { kind?: string; vendor?: string | null; amount?: number | null; date?: string | null; item?: string | null; category?: string; lines?: Line[]; paid_with?: { value?: string; skipped?: boolean }; for_vehicle_hint?: string | null; vehicle_pick?: string | null; warranty_relevant?: boolean; warranty_note?: string | null; reimbursement_hint?: boolean; card_last4?: string | null; card_brand?: string | null; order_number?: string | null; statement_period?: string | null; closing_date?: string | null; statement_balance?: number | null; due_date?: string | null };
 export async function fileCapture(inboxId: string, answer: string): Promise<{ ok: boolean; summary: string; kept?: boolean }> {
@@ -55,9 +57,18 @@ export async function fileCapture(inboxId: string, answer: string): Promise<{ ok
       await sb.from("inbox_items").update({ missing: `${whyNoMatch(list, r.card_last4, (r as { file_name_hint?: string }).file_name_hint ?? row.file_path, null) ?? "Not matched on my own."} Which account is this statement for?`, options: [...list.map((a) => `${a.institution} ····${a.last4}`), "Something else"] }).eq("id", inboxId);
       return { ok: true, summary: "Not filed yet: I still need to know which account it is for.", kept: true };
     }
-    const period = (r.statement_period && /^\d{4}-\d{2}$/.test(r.statement_period) ? r.statement_period : null) ?? (r.closing_date ?? r.date ?? new Date().toISOString()).slice(0, 7);
+    const pr = resolvePeriod(r as { closing_date?: unknown; statement_period?: unknown; date?: unknown }, (r as { file_name_hint?: string }).file_name_hint ?? row.file_path);
+    const period = pr.period;
+    if (!period) return { ok: true, summary: "Not filed: no closing date or month was found for this statement.", kept: true };
+    // The same checks that decide "File all", run again right now. A person who picked the account by hand is recorded first so the checks see it.
+    if (accountFromAnswer(list, answer)) await sb.from("inbox_items").update({ read_result: { ...(row.read_result as Record<string, unknown>), statement_account: { id: acct.id, label: accountLabel(acct) }, statement_match: "you chose", statement_conflict: null, statement_period: period, closing_date: pr.closing, file_date: pr.fileDate, period_basis: pr.basis } }).eq("id", inboxId);
+    if (answer !== FILE_ANYWAY) {
+      await checkOpenStatements(sb).catch(() => null);
+      const { data: now } = await sb.from("inbox_items").select("options,missing").eq("id", inboxId).maybeSingle();
+      if ((now?.options as string[] | null)?.[0] === FILE_ANYWAY) return { ok: true, summary: String(now?.missing ?? "Not filed: a check failed.").split(" Statement for ")[0], kept: true };
+    }
     const sName = statementName(period, acct);
-    const { data: st, error } = await sb.from("account_statements").upsert({ account_id: acct.id, period, inbox_id: inboxId, file_path: row.file_path, name: sName, closing_date: r.closing_date ?? null, statement_balance: typeof r.statement_balance === "number" ? r.statement_balance : null, due_date: r.due_date ?? null, filed_by: who }, { onConflict: "inbox_id" }).select("id").maybeSingle();
+    const { data: st, error } = await sb.from("account_statements").upsert({ account_id: acct.id, period, inbox_id: inboxId, file_path: row.file_path, name: sName, closing_date: pr.closing, statement_balance: typeof r.statement_balance === "number" ? r.statement_balance : null, due_date: r.due_date ?? null, filed_by: who }, { onConflict: "inbox_id" }).select("id").maybeSingle();
     if (error) return { ok: false, summary: `Could not file the statement: ${error.message}` };
     filed.statement_id = st?.id ?? null; filed.account_id = acct.id; filed.period = period;
     await sb.from("inbox_items").update({ status: "resolved", resolution: answer, resolved_at: new Date().toISOString(), resolved_by: user.id, filed, title: sName }).eq("id", inboxId);

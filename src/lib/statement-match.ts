@@ -7,18 +7,14 @@ const last4Of = (v: unknown) => String(v ?? "").replace(/\D/g, "").slice(-4);
 export function matchAccount(accounts: AccountRow[], cardLast4: unknown): AccountRow | null {
   const l4 = last4Of(cardLast4);
   if (l4.length !== 4) return null;
-  const live = accounts.filter((a) => !a.retired_at);
-  return live.find((a) => a.last4 === l4) ?? null;
+  const hits = accounts.filter((a) => !a.retired_at && a.last4 === l4);
+  return hits.length === 1 ? hits[0] : null;   // two accounts ending the same way are never guessed between
 }
 // An answer that names an account ("Wells Fargo ····0848") picks that account.
 export function accountFromAnswer(accounts: AccountRow[], answer: string): AccountRow | null {
   return accounts.find((a) => accountLabel(a) === answer.trim()) ?? null;
 }
-// The statement month: the printed period, else the closing date's month, else the document date's month.
-export function statementPeriod(r: { statement_period?: unknown; closing_date?: unknown; date?: unknown }): string | null {
-  for (const v of [r.statement_period, r.closing_date, r.date]) { const s = String(v ?? ""); if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7); }
-  return null;
-}
+// The statement month is worked out in statement-checks.ts (resolvePeriod) from the closing date, never taken from the reader.
 export const statementName = (period: string, a: AccountRow) => `${period} ${accountLabel(a)} statement`;
 export const statementHome = (period: string, a: AccountRow) => `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/${a.id}/`;
 
@@ -33,17 +29,20 @@ export function accountFromFileName(accounts: AccountRow[], fileName: unknown): 
   return hits.size === 1 ? live.find((a) => hits.has(a.id)) ?? null : null;
 }
 // The printed last four first, then the file name. `via` says which, so the screen can show how it was matched.
-export function resolveAccount(accounts: AccountRow[], printedLast4: unknown, fileName: unknown): { acct: AccountRow; via: "printed" | "file name" } | null {
+// When the page and the file name each point at a different account, `conflict` names the file name's account; the checks hold the statement back.
+export function resolveAccount(accounts: AccountRow[], printedLast4: unknown, fileName: unknown): { acct: AccountRow; via: "printed" | "file name"; conflict?: AccountRow } | null {
   const a = matchAccount(accounts, printedLast4);
-  if (a) return { acct: a, via: "printed" };
   const b = accountFromFileName(accounts, fileName);
+  if (a) return b && b.id !== a.id ? { acct: a, via: "printed", conflict: b } : { acct: a, via: "printed" };
   return b ? { acct: b, via: "file name" } : null;
 }
+export const conflictNote = (printed: AccountRow, byName: AccountRow) => `The page shows ····${printed.last4}, but the file name points to ····${byName.last4}.`;
 
 // Why a statement could not be matched, in one plain sentence for the top of the question. Null when it can be matched.
 export function whyNoMatch(accounts: AccountRow[], printedLast4: unknown, fileName: unknown, confidence?: number | null): string | null {
   if (resolveAccount(accounts, printedLast4, fileName)) return typeof confidence === "number" && confidence < 0.6 ? "Not matched on my own: I was not sure enough of the read." : null;
   const l4 = last4Of(printedLast4);
+  if (l4.length === 4 && accounts.filter((a) => !a.retired_at && a.last4 === l4).length > 1) return `Not filed: more than one of your accounts ends in ····${l4}. Pick the right one.`;
   if (l4.length === 4) return `Not filed: the page shows ····${l4}, but none of your accounts ends in that. Add it in Settings, or pick one.`;
   const base = String(fileName ?? "").split("/").pop() ?? "";
   const groups = [...base.matchAll(/(?<![A-Za-z0-9])([0-9]{4})(?![A-Za-z0-9])/g)].map((m) => m[1]).filter((g) => !/^(19|20)[0-9]{2}$/.test(g));

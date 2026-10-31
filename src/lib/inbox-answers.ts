@@ -2,6 +2,8 @@
 export const FILE_YES = "Yes, file it";
 export const FILE_CLAIM = "File it and open a reimbursement claim";
 export const FILE_NO = "Not quite";
+// A statement the checks held back (duplicate month, page and file name disagree, ...): the person may still file it, knowing why it was held.
+export const FILE_ANYWAY = "File it anyway";
 // Near match (same vendor, date within a day, amount close): the person decides.
 export const FILE_SAME = "Same purchase, attach it";
 export const FILE_DIFFERENT = "Different purchase, file it";

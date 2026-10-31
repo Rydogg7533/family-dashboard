@@ -76,6 +76,19 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
   const matchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && i.options.length === 2 && i.options[0] === FILE_YES).length;
   const [filingAll, setFilingAll] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const statementsOpen = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement").length;
+  // The list shown before a batch is filed: by account, one month each, exactly the items "File all" will take.
+  const batchList = (() => {
+    const by = new Map<string, string[]>();
+    for (const i of open) {
+      const rr = i.read_result as { kind?: string; statement_account?: { label?: string } | null; statement_period?: string | null } | null;
+      if (rr?.kind !== "statement" || !(i.options.length === 2 && i.options[0] === FILE_YES)) continue;
+      const k = rr.statement_account?.label ?? "Account not set";
+      by.set(k, [...(by.get(k) ?? []), rr.statement_period ?? "month unknown"]);
+    }
+    return [...by.entries()].map(([k, v]) => [k, v.sort()] as [string, string[]]).sort((x, y) => x[0].localeCompare(y[0]));
+  })();
   const unmatchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && !(i.options.length === 2 && i.options[0] === FILE_YES)).length;
 
   return (
@@ -89,15 +102,28 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
           <span className="text-xs text-muted">{done} of {total} resolved this week</span>
         </div>
         <div className="h-1.5 rounded-full bg-soft overflow-hidden mb-3"><div className="h-full bg-green" style={{ width: `${total ? (done / total) * 100 : 100}%` }} /></div>
-        {unmatchedStatements > 0 && (
-          <button type="button" disabled={checking} onClick={() => { setChecking(true); void recheckStatements().then((r) => { setToast({ text: r.summary }); setChecking(false); router.refresh(); }); }} className="w-full min-h-11 mb-2 rounded-xl border border-line text-sm font-semibold disabled:opacity-50">
-            {checking ? "Checking…" : `Check ${unmatchedStatements} waiting statement${unmatchedStatements === 1 ? "" : "s"} against my accounts`}
+        {statementsOpen > 0 && (
+          <button type="button" disabled={checking} onClick={() => { setChecking(true); setPreview(false); void recheckStatements().then((r) => { setToast({ text: r.summary }); setChecking(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was checked." }); setChecking(false); }); }} className="w-full min-h-11 mb-2 rounded-xl border border-line text-sm font-semibold disabled:opacity-50">
+            {checking ? "Checking…" : unmatchedStatements > 0 ? `Check ${unmatchedStatements} waiting statement${unmatchedStatements === 1 ? "" : "s"} against my accounts` : `Re-check ${statementsOpen} waiting statement${statementsOpen === 1 ? "" : "s"}`}
           </button>
         )}
-        {matchedStatements > 1 && (
-          <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was confirmed. Check the Inbox before tapping again." }); setFilingAll(false); router.refresh(); }); }} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold disabled:opacity-50">
-            {filingAll ? "Filing…" : `File all matched statements (${matchedStatements})`}
+        {matchedStatements > 1 && !preview && (
+          <button type="button" onClick={() => setPreview(true)} className="w-full min-h-11 mb-3 rounded-xl border border-accent text-accent text-sm font-semibold">
+            {`File all matched statements (${matchedStatements})`}
           </button>
+        )}
+        {preview && (
+          <div className="mb-3 rounded-xl border border-accent p-3 text-sm">
+            <div className="font-semibold mb-2">{`Ready to file ${matchedStatements} statements`}</div>
+            {batchList.map(([acct, months]) => (
+              <div key={acct} className="mb-1.5"><div className="font-medium">{acct}</div><div className="text-muted text-xs">{months.join(", ")}</div></div>
+            ))}
+            <p className="text-xs text-muted mt-2 mb-2">Only statements that passed every check are here. Anything held back stays below with the reason.</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); setPreview(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was confirmed. Check the Inbox before tapping again." }); setFilingAll(false); setPreview(false); router.refresh(); }); }} className="flex-1 min-h-11 rounded-xl bg-accent text-white text-sm font-semibold disabled:opacity-50">{filingAll ? "Filing…" : `File these ${matchedStatements}`}</button>
+              <button type="button" disabled={filingAll} onClick={() => setPreview(false)} className="min-h-11 px-4 rounded-xl border border-line text-sm font-semibold">Cancel</button>
+            </div>
+          </div>
         )}
         <div className="flex gap-1.5 flex-wrap text-xs font-semibold mb-2" role="group" aria-label="Filter by status">
           {([["all", "All"], ["needs_answer", "Needs answer"], ["missing_info", "Missing info"], ["skipped", "Skipped"], ["handed", "Handed over"], ["decided", "Decided"]] as const).filter(([id]) => id === "all" || id === "decided" || id === st || stCount[id] > 0).map(([id, label]) => (

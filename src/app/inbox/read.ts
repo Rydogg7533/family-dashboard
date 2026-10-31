@@ -5,7 +5,9 @@ import { cleanLines, effectiveCategory, vehicleLines } from "@/lib/receipt-lines
 import { categoryPromptBlock } from "@/lib/categories";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { findSameReceipt, findNearReceipt, findOrderReceipt, extractOrderNumber, amountsMatch } from "@/lib/receipt-match";
-import { resolveAccount, whyNoMatch, accountLabel, statementPeriod, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
+import { resolveAccount, whyNoMatch, accountLabel, conflictNote, statementName, statementHome, type AccountRow } from "@/lib/statement-match";
+import { resolvePeriod, statementQuestion } from "@/lib/statement-checks";
+import { checkOpenStatements } from "@/lib/statement-rematch";
 import { FILE_YES, NOT_VEHICLE } from "@/lib/inbox-answers";
 import { FILE_NO, FILE_SAME, FILE_DIFFERENT } from "@/lib/inbox-answers";
 import { callModelVision, jsonObjectValid } from "@/lib/ai";
@@ -79,19 +81,27 @@ async function planFromRead(sb: Sb, claimId: string | null, parsed: Record<strin
     const list = ((accts ?? []) as AccountRow[]).filter((a) => !a.retired_at);
     const found = resolveAccount(list, parsed.card_last4, parsed.file_name_hint);
     const acct = found?.acct ?? null;
+    const pr = resolvePeriod(parsed as { closing_date?: unknown; statement_period?: unknown; date?: unknown }, parsed.file_name_hint);
+    const period = pr.period ?? "unknown month";
     parsed.statement_match = found ? found.via : null;
-    const period = statementPeriod(parsed as { statement_period?: unknown; closing_date?: unknown; date?: unknown }) ?? new Date().toISOString().slice(0, 7);
-    parsed.statement_period = period;
+    parsed.statement_conflict = found?.conflict ? conflictNote(found.acct, found.conflict) : null;
+    parsed.statement_period = pr.period;                // worked out from the closing date; the reader's own month is not used
+    parsed.closing_date = pr.closing; parsed.file_date = pr.fileDate; parsed.period_basis = pr.basis;
     parsed.statement_account = acct ? { id: acct.id, label: accountLabel(acct) } : null;
     const sName = acct ? statementName(period, acct) : (name ?? `${period} statement`);
     const sHome = acct ? statementHome(period, acct) : `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/`;
     parsed.statement_name = sName;
     parsed.plan = [{ t: "file", text: `Will be named ${sName}; a copy is placed in the account's statements folder (shown below)` }, { t: "link", text: acct ? `Money › ${accountLabel(acct)}: ${period} is ticked off` : "Not linked to an account until you say which" }];
     parsed.home = sHome;
-    const bal = typeof parsed.statement_balance === "number" ? `, balance $${(parsed.statement_balance as number).toFixed(2)}` : "";
     const update: Record<string, unknown> = { read_result: parsed, suggested_name: sName, read_at: new Date().toISOString() };
-    if (acct && conf >= 0.6) { update.missing = `Statement for ${accountLabel(acct)}, ${period}${bal}${found?.via === "file name" ? " (matched by the file name)" : ""}. File it?`; update.options = [FILE_YES, FILE_NO]; }
-    else { update.missing = `${whyNoMatch(list, parsed.card_last4, parsed.file_name_hint, conf) ?? "Not matched on my own."} Statement ${period}${bal}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"]; }
+    if (acct && conf >= 0.6) {
+      // Asked as if clean; checkOpenStatements (run right after this is stored) turns it into a "not filed automatically" question when a check fails.
+      const q = statementQuestion({ label: accountLabel(acct), period, closing: pr.closing, balance: typeof parsed.statement_balance === "number" ? (parsed.statement_balance as number) : null, via: found?.via ?? null }, { blocks: [], warns: [] });
+      update.missing = q.missing; update.options = q.options;
+    } else {
+      const bal = typeof parsed.statement_balance === "number" ? `, balance $${(parsed.statement_balance as number).toFixed(2)}` : "";
+      update.missing = `${whyNoMatch(list, parsed.card_last4, parsed.file_name_hint, conf) ?? "Not matched on my own."} Statement ${period}${bal}. Which account is it for?`; update.options = [...list.map(accountLabel), "Something else"];
+    }
     return { update, name: sName as string | null, conf, ruleLabel: "" };
   }
 
@@ -189,6 +199,7 @@ export async function readCapture(inboxId: string) {
   Object.assign(parsed, cleanDetails(parsed));   // covers / period / reference: kept short, never a long number, null when the paper is silent
   const { update, name, conf, ruleLabel } = await planFromRead(sb, (row.claim_id as string | null) ?? null, parsed);
   await sb.from("inbox_items").update(update).eq("id", inboxId);
+  if (parsed.kind === "statement") await checkOpenStatements(sb).catch(() => null);   // duplicates, date and account disagreements: stated on the card, never silent
 
   // Already answered, so don't ask again (Ryan, 2026-10-29: 84 receipts from nine vendors, every one asking).
   // A rule is the person having said where this vendor's receipts go, so when one matches and the only thing left
