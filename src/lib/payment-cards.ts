@@ -12,6 +12,7 @@ export type PaymentCard = {
 
 export const samplePaymentCards: PaymentCard[] = [
   { id: "card-1", account_id: "amex-1004", form: "physical", network: "Amex", last4: "1004", label: null, holder: "Ryan", twin_of: null, replaced_by: null, retired_at: null, created_at: "2026-01-01T00:00:00Z" },
+  { id: "card-3", account_id: "chase-5521", form: "physical", network: "Visa", last4: "4521", label: null, holder: "Ryan", twin_of: null, replaced_by: null, retired_at: null, created_at: "2026-01-01T00:00:00Z" },
   { id: "card-2", account_id: "amex-1004", form: "virtual", network: "Amex", last4: "7703", label: "Apple Wallet", holder: "Ryan", twin_of: "card-1", replaced_by: null, retired_at: null, created_at: "2026-01-01T00:00:00Z" },
 ];
 
