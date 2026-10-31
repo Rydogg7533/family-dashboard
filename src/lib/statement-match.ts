@@ -16,7 +16,9 @@ export function accountFromAnswer(accounts: AccountRow[], answer: string): Accou
 }
 // The statement month is worked out in statement-checks.ts (resolvePeriod) from the closing date, never taken from the reader.
 export const statementName = (period: string, a: AccountRow) => `${period} ${accountLabel(a)} statement`;
-export const statementHome = (period: string, a: AccountRow) => `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/${a.id}/`;
+// The folder is the account's own label ("Wells Fargo ····6918"), with any character a file system dislikes removed.
+export const statementFolder = (a: AccountRow) => accountLabel(a).replace(/[\\/:*?"<>|]/g, "").trim();
+export const statementHome = (period: string, a: AccountRow) => `Organized/Personal/Documents/Finance/${period.slice(0, 4)}/Statements/${statementFolder(a)}/`;
 
 // A second clue when the page gave no account number: a standalone 4-digit group (not part of a longer run of letters or digits, so a random id prefix cannot match) in the file name (for example
 // "…-5761 - 123456 WellsFargo.pdf") that equals exactly one live account's last four. Years (19xx, 20xx) are ignored,

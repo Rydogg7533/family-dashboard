@@ -9,6 +9,6 @@ assert.equal(matchAccount(A, null), null); assert.equal(matchAccount(A, "84"), n
 assert.equal(accountFromAnswer(A, "Wells Fargo ····0848").id, "everyday-checking-0848");
 assert.equal(accountFromAnswer(A, "Something else"), null);
 assert.equal(statementName("2026-09", A[0]), "2026-09 Wells Fargo ····0848 statement");
-assert.equal(statementHome("2026-09", A[0]), "Organized/Personal/Documents/Finance/2026/Statements/everyday-checking-0848/");
+assert.equal(statementHome("2026-09", A[0]), "Organized/Personal/Documents/Finance/2026/Statements/Wells Fargo ····0848/");
 assert.equal(accountLabel(A[0]), "Wells Fargo ····0848");
 console.log("statement-match-test: all checks passed");
