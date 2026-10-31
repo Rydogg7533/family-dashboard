@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { addWarranty, updateWarranty, type WarrantyInput } from "@/app/warranties/actions";
 import { readWarrantyInfo, type WarrantySuggestion } from "@/app/warranties/read";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
+import { aiUploadNote } from "@/lib/ai-provider";
 
 type Role = "receipt" | "warranty info";
 type Att = { path: string; name: string; role: Role };
@@ -98,7 +99,7 @@ export function AddWarranty({ initial }: { initial?: Initial }) {
           <div className="text-muted">“Use these” fills only the empty boxes. Nothing is saved until you tap Save warranty.</div>
         </div>
       )}
-      <p className="text-[11px] text-muted">Warranty info = the warranty card, certificate, terms page, or a photo of the label. Photos and PDFs, up to 8 files. Read by AI (sent to Anthropic) to fill in the dates and terms, so not private.</p>
+      <p className="text-[11px] text-muted">Warranty info = the warranty card, certificate, terms page, or a photo of the label. Photos and PDFs, up to 8 files. {aiUploadNote("It fills in the dates and terms.")}</p>
       <input ref={pick} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => void upload(e.target.files)} />
       {err && <div className="text-sm text-red font-semibold">{err}</div>}
       <div className="flex gap-2"><button type="submit" disabled={busy || !f.item.trim()} className="flex-1 min-h-11 rounded-xl bg-accent text-white font-semibold disabled:opacity-50">{busy ? "Working…" : "Save warranty"}</button><button type="button" onClick={() => { setOpen(false); setErr(null); }} className="min-h-11 px-4 rounded-xl border border-line font-semibold text-sm">Cancel</button></div>

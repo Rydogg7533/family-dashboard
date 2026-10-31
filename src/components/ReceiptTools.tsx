@@ -5,6 +5,7 @@ import type { Transaction, Receipt } from "@/lib/data-money";
 import { SUBJECT_KINDS, type Subject } from "@/lib/subjects";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 import { attachProof, explainCharge, answerReceiptQuestion, setReceiptCard, addReceiptSubject, removeReceiptSubject } from "@/app/money/actions";
+import { aiUploadNote } from "@/lib/ai-provider";
 
 const money = (n: number) => "$" + n.toFixed(2);
 
@@ -96,7 +97,7 @@ export function BulkDrop() {
       </div>
       <input ref={ref} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => setNames(Array.from(e.target.files ?? []).map((f) => f.name))} />
       {names.length > 0 && <div className="text-xs text-green font-semibold">{names.length} received. Each is read by AI, identified, matched to a charge and filed; anything unclear becomes one question above.</div>}
-      <p className="text-[11px] text-muted">Read by AI (sent to Anthropic), so not private. Bank and card statements go on Statements (private) instead.</p>
+      <p className="text-[11px] text-muted">{aiUploadNote("Bank and card statements go on Statements (private) instead.")}</p>
     </div>
   );
 }

@@ -5,6 +5,7 @@
 // every page works in preview. Cost is recorded and shown, never enforced (Ryan, 2026-10-18).
 
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { AI_PROVIDER } from "@/lib/ai-provider";
 
 export type Job = "classify" | "extract" | "file" | "chat" | "draft" | "summarize" | "flagged" | "complex";
 export type ModelId = "claude-haiku-5-5" | "claude-sonnet-5-5" | "claude-opus-5-5";
@@ -84,7 +85,7 @@ export async function callModel({ job, messages, system, maxTokens = 600, reason
     return r;
   }
   const t0 = Date.now();
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${AI_PROVIDER.endpoint}/v1/messages`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -128,7 +129,7 @@ export async function callModelTools({ job, messages, system, tools, maxTokens =
     return { ...r, calls: [], blocks: [] };
   }
   const t0 = Date.now();
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${AI_PROVIDER.endpoint}/v1/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
     // The system prompt and the ~80 tool definitions are identical on every round and every question, so they are cached:
@@ -220,7 +221,7 @@ export async function callModelVision({ job, system, prompt, files, maxTokens = 
     ? { type: "document", source: { type: "base64", media_type: mime, data: base64 } }
     : { type: "image", source: { type: "base64", media_type: mime, data: base64 } });
   const t0 = Date.now();
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${AI_PROVIDER.endpoint}/v1/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: [...blocks, { type: "text", text: prompt }] }] }),

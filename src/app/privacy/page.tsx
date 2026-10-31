@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AI_PROVIDER } from "@/lib/ai-provider";
 
 export const metadata: Metadata = {
   title: "Privacy Policy · StewardOS Household",
@@ -36,7 +37,7 @@ export default function Privacy() {
       <p className={p}>Extracted records are kept in the household&apos;s own database (a Supabase project the household owns) and on a Mac mini in the household&apos;s home. Google sign-in tokens are kept only on that Mac mini, in a local-only folder, and are never put in a cloud-synced folder or in the database.</p>
 
       <h2 className={h2}>AI processing</h2>
-      <p className={p}>To decide what a message is, and to write draft replies, short excerpts of a message (headers and the first part of the text) are sent to Anthropic&apos;s API using the household&apos;s own API key. Bulk and automated mail is filtered out by simple rules first and does not reach a model. Anthropic handles that text under its own terms and privacy policy. No person other than the household reads the mail through this app.</p>
+      <p className={p}>To decide what a message is, and to write draft replies, short excerpts of a message (headers and the first part of the text) are sent to {AI_PROVIDER.company}&apos;s API using the household&apos;s own API key. Bulk and automated mail is filtered out by simple rules first and does not reach a model. {AI_PROVIDER.company} handles that text under its own terms and privacy policy. No person other than the household reads the mail through this app.</p>
 
       <h2 className={h2}>Limited Use</h2>
       <p className={p}>The app&apos;s use and transfer of information received from Google APIs to any other app will adhere to the <a className="underline" href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>

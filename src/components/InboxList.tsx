@@ -12,6 +12,7 @@ import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, K
 import { readCapture, sweepRuleAnswered } from "@/app/inbox/read";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, fileMatchedStatements, recheckStatements, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
+import { aiUploadNote } from "@/lib/ai-provider";
 
 const KIND: Record<InboxItem["kind"], string> = { identify: "IDENTIFY", file: "FILE", decide: "DECIDE", ask_thread: "FROM ASK" };
 
@@ -288,7 +289,7 @@ function CapturePanel({ kind, claimId, onDone, compact = false }: { kind: string
       )}
       <input ref={inputRef} type="file" className="hidden" multiple accept={kind === "photo" ? "image/*" : "image/*,application/pdf"} capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void take(e.target.files); e.target.value = ""; }} />
       <input ref={pageRef} type="file" className="hidden" accept="image/*" capture={kind === "photo" ? "environment" : undefined} onChange={(e) => { void more(e.target.files); e.target.value = ""; }} />
-      <p className="text-[11px] text-muted">Read by AI (the file is sent to Anthropic), so it is not private. For bank or card statements, or anything with account numbers, use Money › Statements (private) instead.</p>
+      <p className="text-[11px] text-muted">{aiUploadNote("For bank or card statements, or anything with account numbers, use Money › Statements (private) instead.")}</p>
       {names.length > 0 && <div className="text-xs text-green font-semibold">{status || "Saving…"} ({names.join(", ")})</div>}
       {docId && <button onClick={() => pageRef.current?.click()} className="min-h-11 rounded-xl border border-line font-semibold text-sm">Add another page to this document{pageCount > 1 ? ` (${pageCount} so far)` : ""}</button>}
     </div>
