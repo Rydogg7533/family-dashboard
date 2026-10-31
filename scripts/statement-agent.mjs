@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { parseStatement, tieNote } from "../src/lib/statement-parse.ts";
 import { matchAccount, statementName, statementHome } from "../src/lib/statement-match.ts";
+import { resolvePeriod } from "../src/lib/statement-checks.ts";
 
 const HOME = homedir();
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -98,10 +99,15 @@ async function readNew(row, accounts) {
     const r = parseStatement(text);
     let acct = null;
     for (const c of r.last4Candidates) { acct = matchAccount(accounts, c); if (acct) break; }
-    const facts = { closing_date: r.closingDate, statement_balance: r.closing };
+    // The month is the one most of the cycle falls in (same rule as the Inbox), never just the month of the date the reader found.
+    // If the page's date and the date in the file name disagree, nothing is filed: an owner picks.
+    const pr = resolvePeriod({ closing_date: r.closingDate }, row.original_name);
+    const dateClash = !!(pr.closing && pr.fileDate && pr.closing !== pr.fileDate);
+    r.period = pr.period;
+    const facts = { closing_date: pr.closing, statement_balance: r.closing };
     await rest("PATCH", `statement_uploads?id=eq.${row.id}`, { read_at: new Date().toISOString(), read_source, page_count: pages.length, closing_date: r.closingDate, statement_balance: r.closing, tie_ok: r.tie ? r.tie.ok : null, tie_note: tieNote(r), missing: r.missing }, { Prefer: "return=minimal" });
-    if (acct && r.period) await finalize(row, acct, r.period, file, ext, facts);
-    else { await rest("PATCH", `statement_uploads?id=eq.${row.id}`, { status: "needs_account", account_id: acct?.id ?? null, period: r.period }, { Prefer: "return=minimal" }); log(row.id, "needs an account or month from an owner"); }
+    if (acct && r.period && !dateClash) await finalize(row, acct, r.period, file, ext, facts);
+    else { await rest("PATCH", `statement_uploads?id=eq.${row.id}`, { status: "needs_account", account_id: acct?.id ?? null, period: r.period }, { Prefer: "return=minimal" }); log(row.id, dateClash ? "page date and file-name date disagree: an owner picks" : "needs an account or month from an owner"); }
   } catch (e) { await fail(row, e.message ?? e); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 }
