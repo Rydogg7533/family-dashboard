@@ -102,3 +102,7 @@ export function sharedLast4(accounts: { id: string; institution: string; last4: 
   const other = accounts.find((a) => !a.retired_at && a.last4 === last4 && a.id !== selfId);
   return other ? `${other.institution} also ends in ····${last4}. A statement that shows only those four digits will ask which account it is for.` : null;
 }
+
+// What "File all" is about to file, as one string: every (account, month) pair, sorted. The list the person approves and the list the server
+// files must have the same signature, or nothing is filed and the new list is shown instead.
+export const batchSignature = (pairs: [string, string][]) => pairs.map(([a, m]) => `${a}|${m}`).sort().join(";");

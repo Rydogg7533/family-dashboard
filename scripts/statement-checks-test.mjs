@@ -1,5 +1,5 @@
 // The statement month rule and the checks that hold a statement back. Fixtures are synthetic: file-name patterns and dates only, no real balances or numbers.
-import { periodFromClosing, dateFromFileName, resolvePeriod, checkStatements, statementQuestion, sharedLast4 } from "../src/lib/statement-checks.ts";
+import { batchSignature, periodFromClosing, dateFromFileName, resolvePeriod, checkStatements, statementQuestion, sharedLast4 } from "../src/lib/statement-checks.ts";
 import { resolveAccount, matchAccount, whyNoMatch, conflictNote } from "../src/lib/statement-match.ts";
 let bad = 0;
 const eq = (n, a, b) => { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) { bad++; console.log(`FAIL ${n}: got ${x}, want ${y}`); } };
@@ -89,6 +89,11 @@ eq("page and file name agree", resolveAccount(accts, "4230", "4230 - 090826 x.pd
 eq("shared warning on add", sharedLast4(accts, "9999", "new")?.includes("Bank One"), true);
 eq("no warning for a unique last four", sharedLast4(accts, "1234", "new"), null);
 eq("editing itself is not a clash", sharedLast4(accts, "4230", "chk-4230"), null);
+
+// The approved list and the server's list compare as one string, whatever the order.
+eq("signature ignores order", batchSignature([["b", "2026-08"], ["a", "2026-07"]]), batchSignature([["a", "2026-07"], ["b", "2026-08"]]));
+eq("signature sees a moved month", batchSignature([["a", "2026-07"]]) === batchSignature([["a", "2026-08"]]), false);
+eq("signature sees a dropped item", batchSignature([["a", "2026-07"], ["a", "2026-08"]]) === batchSignature([["a", "2026-07"]]), false);
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log("statement checks: all passed");

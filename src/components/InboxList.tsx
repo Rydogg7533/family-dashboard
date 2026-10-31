@@ -10,6 +10,7 @@ import { NeededToContinue } from "@/components/c/NeededToContinue";
 import { ReadFields, type ReadShape } from "@/components/c/ReadFields";
 import { inboxStatus, isPaidWithSkipped, missingNote, docKind, decidedOutcome, KIND_ORDER, DECIDED_DAYS } from "@/lib/inbox-status";
 import { readCapture, sweepRuleAnswered } from "@/app/inbox/read";
+import { batchSignature } from "@/lib/statement-checks";
 import { resolveInboxItem, recordCapture, addPage, getFolderChoices, changeFiling, saveFilingRule, assignInboxItem, setInboxPaidWith, fileMatchedStatements, recheckStatements, type CapturedFile } from "@/app/inbox/actions";
 import { createClient as createBrowserSb } from "@/lib/supabase/client";
 import { aiUploadNote } from "@/lib/ai-provider";
@@ -89,6 +90,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
     }
     return [...by.entries()].map(([k, v]) => [k, v.sort()] as [string, string[]]).sort((x, y) => x[0].localeCompare(y[0]));
   })();
+  const batchSig = batchSignature(batchList.flatMap(([acct, months]) => months.map((m) => [acct, m] as [string, string])));
   const unmatchedStatements = open.filter((i) => (i.read_result as { kind?: string } | null)?.kind === "statement" && !(i.options.length === 2 && i.options[0] === FILE_YES)).length;
 
   return (
@@ -120,7 +122,7 @@ export function InboxList({ items, me = null, names = {}, pendingIds = [], captu
             ))}
             <p className="text-xs text-muted mt-2 mb-2">Only statements that passed every check are here. Anything held back stays below with the reason.</p>
             <div className="flex gap-2">
-              <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements().then((r) => { setToast({ text: r.summary }); setFilingAll(false); setPreview(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was confirmed. Check the Inbox before tapping again." }); setFilingAll(false); setPreview(false); router.refresh(); }); }} className="flex-1 min-h-11 rounded-xl bg-accent text-white text-sm font-semibold disabled:opacity-50">{filingAll ? "Filing…" : `File these ${matchedStatements}`}</button>
+              <button type="button" disabled={filingAll} onClick={() => { setFilingAll(true); void fileMatchedStatements(batchSig).then((r) => { setToast({ text: r.summary }); setFilingAll(false); setPreview(false); router.refresh(); }, () => { setToast({ text: "Could not reach the app, so nothing was confirmed. Check the Inbox before tapping again." }); setFilingAll(false); setPreview(false); router.refresh(); }); }} className="flex-1 min-h-11 rounded-xl bg-accent text-white text-sm font-semibold disabled:opacity-50">{filingAll ? "Filing…" : `File these ${matchedStatements}`}</button>
               <button type="button" disabled={filingAll} onClick={() => setPreview(false)} className="min-h-11 px-4 rounded-xl border border-line text-sm font-semibold">Cancel</button>
             </div>
           </div>

@@ -7,6 +7,7 @@ import { SKIP, CLEAR } from "@/lib/paid-with";
 import { filingFolders, vendorKey, toTemplate } from "@/lib/filing-folders";
 import { callModel, jsonObjectValid } from "@/lib/ai";
 import { refreshOpenStatements } from "@/lib/statement-rematch";
+import { batchSignature } from "@/lib/statement-checks";
 
 // "Paid with" chosen on the card before the Yes tap: stored on the read, applied when the receipt is filed. SKIP = not now.
 export async function setInboxPaidWith(id: string, value: string): Promise<{ ok: boolean }> {
@@ -66,14 +67,19 @@ export async function recheckStatements(): Promise<{ ok: boolean; summary: strin
 
 // "File all matched": files every open statement that is already matched to exactly one account (it asks only "File it?").
 // Same path as tapping Yes on each one, so each is filed, linked and logged exactly as a single tap would. Unmatched ones are left alone.
-export async function fileMatchedStatements(): Promise<{ ok: boolean; filed: number; left: number; summary: string }> {
+export async function fileMatchedStatements(approved: string): Promise<{ ok: boolean; filed: number; left: number; summary: string }> {
   if (!hasSupabaseEnv()) return { ok: true, filed: 0, left: 0, summary: "Sample mode." };
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, filed: 0, left: 0, summary: "Not signed in." };
+  // Check again right now, so the list is judged on today's rules and today's other statements, not on what was stored earlier.
+  await refreshOpenStatements(sb).catch(() => null);
   const { data: rows } = await sb.from("inbox_items").select("id,title,options,read_result").eq("status", "open").eq("read_result->>kind", "statement").limit(60);
-  const picked = ((rows ?? []) as { id: string; title: string; options: string[] | null; read_result: { statement_name?: string } | null }[]).filter((r) => r.options?.[0] === FILE_YES && r.options.length === 2);
+  const picked = ((rows ?? []) as { id: string; title: string; options: string[] | null; read_result: { statement_name?: string; statement_period?: string | null; statement_account?: { label?: string } | null } | null }[]).filter((r) => r.options?.[0] === FILE_YES && r.options.length === 2);
   if (!picked.length) return { ok: true, filed: 0, left: 0, summary: "Nothing to file: no statement is matched to an account yet." };
+  // The person approved a specific list. If the re-check changed it (a label moved, one was held back, one was added), file nothing and say so.
+  const now = batchSignature(picked.map((r) => [r.read_result?.statement_account?.label ?? "?", r.read_result?.statement_period ?? "?"] as [string, string]));
+  if (now !== approved) return { ok: false, filed: 0, left: picked.length, summary: `The list changed after a fresh check (now ${picked.length} statement${picked.length === 1 ? "" : "s"} are ready). Nothing was filed. Look at the new list and tap again.` };
   let filed = 0;
   const why: string[] = [];
   for (const it of picked) {
