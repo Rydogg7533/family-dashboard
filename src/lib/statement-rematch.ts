@@ -16,7 +16,7 @@ const hintOf = (rr: Record<string, unknown>, it: Item) => (rr.file_name_hint as 
 
 export async function checkOpenStatements(sb: SupabaseClient): Promise<{ blocked: number; warned: number; gaps: Record<string, string[]> }> {
   const { data: rows } = await sb.from("inbox_items").select("id,title,file_path,read_result,options,missing,sha256").eq("status", "open").eq("read_result->>kind", "statement").limit(200);
-  const { data: filedRows } = await sb.from("account_statements").select("account_id,period,closing_date,inbox_id,name").limit(2000);
+  const { data: filedRows } = await sb.from("account_statements").select("account_id,period,closing_date,inbox_id,name").is("replaced_at", null).limit(2000);   // a replaced (wrong-file) record no longer counts as filed
   // A filed statement's file fingerprint lives on its Inbox item; its account's name comes from the accounts list.
   const filedIds = ((filedRows ?? []) as { inbox_id: string | null }[]).map((f) => f.inbox_id).filter((x): x is string => !!x);
   const { data: shaRows } = filedIds.length ? await sb.from("inbox_items").select("id,sha256").eq("status", "resolved").eq("read_result->>kind", "statement").limit(2000) : { data: [] as { id: string; sha256: string | null }[] };

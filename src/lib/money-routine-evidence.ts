@@ -60,7 +60,7 @@ async function statement(sb: Sb, period: string, last4: string | null, accountId
   if (accountId) {
     const [y, m] = period.split("-").map(Number);
     const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
-    const { data } = await sb.from("account_statements").select("period, name").eq("account_id", accountId).in("period", [period, prev]).limit(1);
+    const { data } = await sb.from("account_statements").select("period, name").eq("account_id", accountId).in("period", [period, prev]).is("replaced_at", null).limit(1);
     if (data?.length) return { met: true, line: `filed: ${data[0].name}` };
   }
   if (!last4) return { met: false, line: "no last four on this account; mark it by hand" };
